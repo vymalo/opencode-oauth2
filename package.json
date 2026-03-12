@@ -10,5 +10,9 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "format": "pnpm -r format"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3"
   }
 }

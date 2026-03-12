@@ -9,9 +9,9 @@
     "dist"
   ],
   "scripts": {
-    "build": "echo 'TODO: build opencode-plugin'",
+    "build": "tsc -p tsconfig.json",
     "lint": "echo 'TODO: lint opencode-plugin'",
-    "typecheck": "echo 'TODO: typecheck opencode-plugin'",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "echo 'TODO: test opencode-plugin'",
     "format": "echo 'TODO: format opencode-plugin'"
   }
