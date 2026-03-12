@@ -12,6 +12,10 @@ interface ServerRuntime {
   scheduler?: SchedulerHandle;
 }
 
+interface StartOptions {
+  warmup?: boolean;
+}
+
 export interface PluginOptions {
   logger?: Logger;
   fetchImpl?: typeof fetch;
@@ -24,6 +28,8 @@ export class OAuth2ModelSyncPlugin {
   private readonly config;
   private readonly cacheStore: FileCacheStore;
   private readonly runtimeByServer = new Map<string, ServerRuntime>();
+  private initialized = false;
+  private started = false;
 
   constructor(
     private readonly configInput: OAuth2ModelSyncConfigInput,
@@ -37,6 +43,10 @@ export class OAuth2ModelSyncPlugin {
   }
 
   async initialize(): Promise<void> {
+    if (this.initialized) {
+      return;
+    }
+
     await this.cacheStore.ensureReady();
 
     for (const server of this.config.servers) {
@@ -55,19 +65,28 @@ export class OAuth2ModelSyncPlugin {
     this.logger.info("plugin_initialized", {
       serverCount: this.config.servers.length
     });
+
+    this.initialized = true;
   }
 
-  async start(): Promise<void> {
+  async start(options: StartOptions = {}): Promise<void> {
+    if (this.started) {
+      return;
+    }
+
     await this.initialize();
+    const warmup = options.warmup ?? true;
 
     for (const server of this.config.servers) {
-      try {
-        await this.syncServer(server.id);
-      } catch (error) {
-        this.logger.warn("sync_startup_failed", {
-          serverId: server.id,
-          error: error instanceof Error ? error.message : String(error)
-        });
+      if (warmup) {
+        try {
+          await this.syncServer(server.id);
+        } catch (error) {
+          this.logger.warn("sync_startup_failed", {
+            serverId: server.id,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
       }
 
       const handle = startScheduler({
@@ -84,12 +103,16 @@ export class OAuth2ModelSyncPlugin {
         runtime.scheduler = handle;
       }
     }
+
+    this.started = true;
   }
 
   stop(): void {
     for (const runtime of this.runtimeByServer.values()) {
       runtime.scheduler?.stop();
     }
+
+    this.started = false;
   }
 
   async syncAll(): Promise<ServerSnapshot[]> {
@@ -101,10 +124,7 @@ export class OAuth2ModelSyncPlugin {
   }
 
   async syncServer(serverId: string): Promise<ServerSnapshot> {
-    const server = this.config.servers.find((item) => item.id === serverId);
-    if (!server) {
-      throw new Error(`unknown server id: ${serverId}`);
-    }
+    const server = this.requireServerConfig(serverId);
 
     const runtime = this.runtimeByServer.get(serverId);
     if (!runtime) {
@@ -172,6 +192,34 @@ export class OAuth2ModelSyncPlugin {
     }
   }
 
+  async ensureAccessToken(serverId: string): Promise<TokenSet> {
+    const server = this.requireServerConfig(serverId);
+    const runtime = this.runtimeByServer.get(serverId);
+    if (!runtime) {
+      throw new Error(`runtime not initialized for server: ${serverId}`);
+    }
+
+    const oauth = new OAuthClient(server, {
+      fetchImpl: this.options.fetchImpl,
+      logger: this.logger,
+      timeoutMs: this.config.httpTimeoutMs,
+      onAuthorizationUrl: this.options.onAuthorizationUrl
+    });
+
+    const token = await oauth.ensureToken(runtime.state.token);
+    if (token.accessToken !== runtime.state.token?.accessToken) {
+      const nextState: CachedServerState = {
+        ...runtime.state,
+        updatedAt: Date.now(),
+        token
+      };
+      await this.cacheStore.saveServerState(nextState);
+      runtime.state = nextState;
+    }
+
+    return token;
+  }
+
   async ensureServerReady(serverId: string): Promise<ServerSnapshot> {
     const runtime = this.runtimeByServer.get(serverId);
     if (!runtime) {
@@ -205,5 +253,14 @@ export class OAuth2ModelSyncPlugin {
 
   getCachedToken(serverId: string): TokenSet | undefined {
     return this.runtimeByServer.get(serverId)?.state.token;
+  }
+
+  private requireServerConfig(serverId: string) {
+    const server = this.config.servers.find((item) => item.id === serverId);
+    if (!server) {
+      throw new Error(`unknown server id: ${serverId}`);
+    }
+
+    return server;
   }
 }

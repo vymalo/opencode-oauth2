@@ -14,5 +14,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "echo 'TODO: test opencode-plugin'",
     "format": "echo 'TODO: format opencode-plugin'"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.2.24"
   }
 }
