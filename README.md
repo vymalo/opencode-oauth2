@@ -36,6 +36,7 @@ The plugin can be configured in two ways:
 Detailed configuration examples are in:
 
 - `packages/opencode-plugin/README.md`
+- `GETTING_STARTED.md`
 
 ## Token Policy
 
