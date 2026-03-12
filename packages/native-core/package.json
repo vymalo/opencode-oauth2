@@ -1,0 +1,13 @@
+{
+  "name": "@lightbridge/native-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "echo 'TODO: build native-core (napi-rs)'",
+    "lint": "echo 'TODO: lint native-core'",
+    "typecheck": "echo 'TODO: typecheck native-core'",
+    "test": "echo 'TODO: test native-core'",
+    "format": "echo 'TODO: format native-core'"
+  }
+}

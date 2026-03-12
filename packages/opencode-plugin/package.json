@@ -1,0 +1,18 @@
+{
+  "name": "@lightbridge/opencode-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "echo 'TODO: build opencode-plugin'",
+    "lint": "echo 'TODO: lint opencode-plugin'",
+    "typecheck": "echo 'TODO: typecheck opencode-plugin'",
+    "test": "echo 'TODO: test opencode-plugin'",
+    "format": "echo 'TODO: format opencode-plugin'"
+  }
+}

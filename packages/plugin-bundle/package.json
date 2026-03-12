@@ -1,0 +1,13 @@
+{
+  "name": "@lightbridge/plugin-bundle",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node ./scripts/build.mjs",
+    "lint": "echo 'TODO: lint plugin-bundle'",
+    "typecheck": "echo 'TODO: typecheck plugin-bundle'",
+    "test": "echo 'TODO: test plugin-bundle'",
+    "format": "echo 'TODO: format plugin-bundle'"
+  }
+}
