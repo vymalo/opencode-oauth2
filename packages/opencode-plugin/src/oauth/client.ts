@@ -30,7 +30,13 @@ function isTokenValid(token?: TokenSet): boolean {
   return Date.now() + 30_000 < token.expiresAt;
 }
 
-function toTokenSet(payload: Record<string, unknown>): TokenSet {
+function toTokenSet(
+  payload: Record<string, unknown>,
+  options?: {
+    fallbackRefreshToken?: string;
+    requireRefreshToken?: boolean;
+  }
+): TokenSet {
   const accessToken = payload.access_token;
   if (typeof accessToken !== "string" || accessToken.length === 0) {
     throw new Error("OAuth token response is missing access_token");
@@ -45,12 +51,19 @@ function toTokenSet(payload: Record<string, unknown>): TokenSet {
     typeof payload.expires_in === "number" && Number.isFinite(payload.expires_in)
       ? payload.expires_in
       : undefined;
+  const refreshToken =
+    typeof payload.refresh_token === "string" && payload.refresh_token.length > 0
+      ? payload.refresh_token
+      : options?.fallbackRefreshToken;
+
+  if (options?.requireRefreshToken !== false && !refreshToken) {
+    throw new Error("OAuth token response is missing refresh_token");
+  }
 
   return {
     accessToken,
     tokenType,
-    refreshToken:
-      typeof payload.refresh_token === "string" ? payload.refresh_token : undefined,
+    refreshToken: refreshToken as string,
     scope: typeof payload.scope === "string" ? payload.scope : undefined,
     expiresAt: expiresIn ? Date.now() + expiresIn * 1000 : undefined
   };
@@ -135,11 +148,10 @@ export class OAuthClient {
     }
 
     const payload = (await response.json()) as Record<string, unknown>;
-    const nextToken = toTokenSet(payload);
-
-    if (!nextToken.refreshToken) {
-      nextToken.refreshToken = refreshToken;
-    }
+    const nextToken = toTokenSet(payload, {
+      fallbackRefreshToken: refreshToken,
+      requireRefreshToken: true
+    });
 
     return nextToken;
   }
@@ -197,11 +209,11 @@ export class OAuthClient {
       }
 
       const payload = (await tokenResponse.json()) as Record<string, unknown>;
-      const token = toTokenSet(payload);
+      const token = toTokenSet(payload, { requireRefreshToken: true });
 
       this.logger.info("oauth_login_success", {
         serverId: this.server.id,
-        hasRefreshToken: Boolean(token.refreshToken)
+        hasRefreshToken: true
       });
 
       return token;

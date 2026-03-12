@@ -21,7 +21,7 @@ export interface ModelDiff {
 export interface TokenSet {
   accessToken: string;
   tokenType: string;
-  refreshToken?: string;
+  refreshToken: string;
   scope?: string;
   expiresAt?: number;
 }

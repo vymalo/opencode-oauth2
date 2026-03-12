@@ -33,7 +33,12 @@ function normalizeToken(token: string): string {
   }
 
   if (/^\d+[a-z]$/i.test(token)) {
-    return `${token.slice(0, -1)}${token.at(-1)?.toUpperCase()}`;
+    const suffix = token.at(-1)?.toLowerCase() ?? "";
+    if (["b", "k", "m", "g", "t"].includes(suffix)) {
+      return `${token.slice(0, -1)}${suffix.toUpperCase()}`;
+    }
+
+    return `${token.slice(0, -1)}${suffix}`;
   }
 
   if (/^[a-z]+\d+[a-z0-9]*$/i.test(token)) {

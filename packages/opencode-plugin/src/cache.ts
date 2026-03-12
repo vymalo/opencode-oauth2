@@ -25,6 +25,22 @@ function statePath(baseDir: string, serverId: string): string {
   return join(baseDir, `${serverId}.json`);
 }
 
+function hasValidTokenShape(token: unknown): boolean {
+  if (!token || typeof token !== "object" || Array.isArray(token)) {
+    return false;
+  }
+
+  const candidate = token as Record<string, unknown>;
+  return (
+    typeof candidate.accessToken === "string" &&
+    candidate.accessToken.length > 0 &&
+    typeof candidate.tokenType === "string" &&
+    candidate.tokenType.length > 0 &&
+    typeof candidate.refreshToken === "string" &&
+    candidate.refreshToken.length > 0
+  );
+}
+
 export class FileCacheStore {
   constructor(private readonly baseDir: string) {}
 
@@ -45,6 +61,10 @@ export class FileCacheStore {
 
       if (!Array.isArray(parsed.models) || !Array.isArray(parsed.rawModels)) {
         return undefined;
+      }
+
+      if (parsed.token && !hasValidTokenShape(parsed.token)) {
+        parsed.token = undefined;
       }
 
       return parsed;

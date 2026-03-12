@@ -34,6 +34,13 @@ interface RuntimeState {
   managedProviderIds: Set<string>;
 }
 
+export interface OpenCodePluginFactoryOptions {
+  logger?: Logger;
+  fetchImpl?: typeof fetch;
+  onAuthorizationUrl?: (url: string) => Promise<void> | void;
+  cacheDir?: string;
+}
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return undefined;
@@ -221,6 +228,13 @@ function collectManagedProviders(config: OpenCodeConfig, logger: Logger): Manage
     }
 
     const providerName = asString(providerConfig.name) ?? providerId;
+    providerConfig.npm = OPENAI_COMPATIBLE_NPM;
+    providerConfig.name = providerName;
+    providerConfig.options = {
+      ...options,
+      baseURL
+    };
+
     byId.set(providerId, {
       id: providerId,
       name: providerName,
@@ -299,76 +313,85 @@ function createOpenCodeLogger(client: PluginInput["client"]): Logger {
   };
 }
 
-export const LightbridgeOAuth2ModelSyncPlugin: Plugin = async ({ client }) => {
-  const logger = createOpenCodeLogger(client);
+export function createLightbridgeOAuth2ModelSyncPlugin(
+  factoryOptions: OpenCodePluginFactoryOptions = {}
+): Plugin {
+  return async ({ client }) => {
+    const logger = factoryOptions.logger ?? createOpenCodeLogger(client);
 
-  const state: RuntimeState = {
-    runtime: undefined,
-    signature: undefined,
-    managedProviderIds: new Set<string>()
-  };
+    const state: RuntimeState = {
+      runtime: undefined,
+      signature: undefined,
+      managedProviderIds: new Set<string>()
+    };
 
-  return {
-    config: async (config) => {
-      const managed = collectManagedProviders(config, logger);
+    return {
+      config: async (config) => {
+        const managed = collectManagedProviders(config, logger);
 
-      if (managed.servers.length === 0) {
-        state.runtime?.stop();
-        state.runtime = undefined;
-        state.signature = undefined;
-        state.managedProviderIds = new Set<string>();
-        return;
-      }
-
-      const pluginConfig: OAuth2ModelSyncConfigInput = {
-        servers: managed.servers,
-        cacheNamespace: "opencode-oauth2-model-sync"
-      };
-
-      const signature = runtimeSignature(pluginConfig);
-      if (!state.runtime || state.signature !== signature) {
-        state.runtime?.stop();
-
-        state.runtime = new OAuth2ModelSyncPlugin(pluginConfig, {
-          logger
-        });
-
-        await state.runtime.initialize();
-        await state.runtime.start({ warmup: false });
-        state.signature = signature;
-      }
-
-      state.managedProviderIds = new Set<string>(managed.servers.map((server) => server.id));
-
-      const providers = (config.provider ??= {});
-      for (const providerId of state.managedProviderIds) {
-        const providerConfig = providers[providerId];
-        if (!providerConfig) {
-          continue;
+        if (managed.servers.length === 0) {
+          state.runtime?.stop();
+          state.runtime = undefined;
+          state.signature = undefined;
+          state.managedProviderIds = new Set<string>();
+          return;
         }
 
-        const models = state.runtime.getServerModels(providerId);
-        if (models.length === 0) {
-          continue;
+        const pluginConfig: OAuth2ModelSyncConfigInput = {
+          servers: managed.servers,
+          cacheNamespace: "opencode-oauth2-model-sync"
+        };
+
+        const signature = runtimeSignature(pluginConfig);
+        if (!state.runtime || state.signature !== signature) {
+          state.runtime?.stop();
+
+          state.runtime = new OAuth2ModelSyncPlugin(pluginConfig, {
+            logger,
+            fetchImpl: factoryOptions.fetchImpl,
+            onAuthorizationUrl: factoryOptions.onAuthorizationUrl,
+            cacheDir: factoryOptions.cacheDir
+          });
+
+          await state.runtime.initialize();
+          await state.runtime.start({ warmup: false });
+          state.signature = signature;
         }
 
-        mergeDiscoveredModels(providerConfig, models);
-      }
-    },
-    "chat.headers": async (input, output) => {
-      const providerId = input.provider.info.id;
-      if (!state.runtime || !state.managedProviderIds.has(providerId)) {
-        return;
-      }
+        state.managedProviderIds = new Set<string>(managed.servers.map((server) => server.id));
 
-      const token = await state.runtime.ensureAccessToken(providerId);
-      output.headers.Authorization = `${token.tokenType || "Bearer"} ${token.accessToken}`;
+        const providers = (config.provider ??= {});
+        for (const providerId of state.managedProviderIds) {
+          const providerConfig = providers[providerId];
+          if (!providerConfig) {
+            continue;
+          }
 
-      if (state.runtime.getServerModels(providerId).length === 0) {
-        void state.runtime.syncServer(providerId);
+          const models = state.runtime.getServerModels(providerId);
+          if (models.length === 0) {
+            continue;
+          }
+
+          mergeDiscoveredModels(providerConfig, models);
+        }
+      },
+      "chat.headers": async (input, output) => {
+        const providerId = input.provider.info.id;
+        if (!state.runtime || !state.managedProviderIds.has(providerId)) {
+          return;
+        }
+
+        const token = await state.runtime.ensureAccessToken(providerId);
+        output.headers.Authorization = `${token.tokenType || "Bearer"} ${token.accessToken}`;
+
+        if (state.runtime.getServerModels(providerId).length === 0) {
+          void state.runtime.syncServer(providerId);
+        }
       }
-    }
+    };
   };
-};
+}
+
+export const LightbridgeOAuth2ModelSyncPlugin = createLightbridgeOAuth2ModelSyncPlugin();
 
 export default LightbridgeOAuth2ModelSyncPlugin;
