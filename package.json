@@ -6,12 +6,14 @@
   "packageManager": "pnpm@10.26.0",
   "scripts": {
     "build": "pnpm -r build",
-    "lint": "pnpm -r lint",
+    "lint": "biome lint .",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
-    "format": "pnpm -r format"
+    "format": "biome format --write .",
+    "format:check": "biome format ."
   },
   "devDependencies": {
+    "@biomejs/biome": "2.4.15",
     "@types/node": "^24.10.1",
     "typescript": "^5.9.3"
   }

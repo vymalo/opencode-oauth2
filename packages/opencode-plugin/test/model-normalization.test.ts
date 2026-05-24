@@ -16,17 +16,10 @@ describe("normalizeModelId", () => {
 
 describe("normalizeModelList and diffModels", () => {
   it("generates deterministic model diffs", () => {
-    const previous = normalizeModelList([
-      { id: "glm-5" },
-      { id: "legacy-model" }
-    ]);
+    const previous = normalizeModelList([{ id: "glm-5" }, { id: "legacy-model" }]);
 
     const next = normalizeModelList(
-      [
-        { id: "glm-5" },
-        { id: "qwen2-72b-instruct" },
-        { id: "legacy-model" }
-      ],
+      [{ id: "glm-5" }, { id: "qwen2-72b-instruct" }, { id: "legacy-model" }],
       { "legacy-model": "Legacy Model (Renamed)" }
     );
 

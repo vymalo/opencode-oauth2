@@ -71,7 +71,9 @@ describe("OpenCode plugin hooks", () => {
 
     await hooks.config?.(config as never);
 
-    const providerConfig = (config.provider as Record<string, Record<string, unknown>>)["example-ai"];
+    const providerConfig = (config.provider as Record<string, Record<string, unknown>>)[
+      "example-ai"
+    ];
     expect(providerConfig.npm).toBe("@ai-sdk/openai-compatible");
 
     const models = providerConfig.models as Record<string, Record<string, unknown>>;

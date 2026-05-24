@@ -51,13 +51,12 @@ export class OAuth2ModelSyncPlugin {
 
     for (const server of this.config.servers) {
       const cached = await this.cacheStore.loadServerState(server.id);
-      const initialState: CachedServerState =
-        cached ?? {
-          serverId: server.id,
-          updatedAt: Date.now(),
-          models: [],
-          rawModels: []
-        };
+      const initialState: CachedServerState = cached ?? {
+        serverId: server.id,
+        updatedAt: Date.now(),
+        models: [],
+        rawModels: []
+      };
 
       this.runtimeByServer.set(server.id, { state: initialState });
     }

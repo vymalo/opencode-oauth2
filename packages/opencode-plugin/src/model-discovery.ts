@@ -21,9 +21,9 @@ export function buildModelsUrl(baseURL: string): string {
 }
 
 function parseModelsResponse(payload: unknown): RawModel[] {
-  const candidates: unknown[] =
-    Array.isArray(payload) ? payload :
-    payload && typeof payload === "object" && Array.isArray((payload as { data?: unknown }).data)
+  const candidates: unknown[] = Array.isArray(payload)
+    ? payload
+    : payload && typeof payload === "object" && Array.isArray((payload as { data?: unknown }).data)
       ? (payload as { data: unknown[] }).data
       : [];
 

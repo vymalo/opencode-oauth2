@@ -14,10 +14,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // opencode plugin host SDK, and the anticipated native addon package. Anything
 // else is bundled into the artifact.
 const nodeBuiltins = new Set([...builtinModules, ...builtins]);
-const externalPackages = new Set([
-  "@opencode-ai/plugin",
-  "@lightbridge/native-core"
-]);
+const externalPackages = new Set(["@opencode-ai/plugin", "@lightbridge/native-core"]);
 
 /**
  * @param {string} id

@@ -29,12 +29,7 @@ function asRedirectPort(value: unknown, source: string): number | undefined {
   if (value === undefined || value === null) {
     return undefined;
   }
-  if (
-    typeof value === "number" &&
-    Number.isInteger(value) &&
-    value > 0 &&
-    value < 65536
-  ) {
+  if (typeof value === "number" && Number.isInteger(value) && value > 0 && value < 65536) {
     return value;
   }
   throw new Error(
@@ -157,7 +152,10 @@ function parseOAuthExtension(provider: OpenCodeProviderConfig): OAuthProviderExt
   };
 }
 
-function parsePluginConfigServers(config: OpenCodeConfig, logger: Logger): OAuthServerConfigInput[] {
+function parsePluginConfigServers(
+  config: OpenCodeConfig,
+  logger: Logger
+): OAuthServerConfigInput[] {
   const root = asRecord(config);
   const pluginConfig = asRecord(root?.pluginConfig);
   const oauth2ModelSync = asRecord(pluginConfig?.oauth2ModelSync);
