@@ -97,14 +97,17 @@ export class OAuthClient {
     return Date.now() + this.tokenExpirySkewMs < token.expiresAt;
   }
 
-  async ensureToken(current?: TokenSet): Promise<TokenSet> {
+  async ensureToken(
+    current?: TokenSet,
+    options: { interactive?: boolean } = {}
+  ): Promise<TokenSet> {
     if (this.isTokenValid(current)) {
       return current as TokenSet;
     }
 
     // client_credentials issues no refresh token — just re-acquire from the
     // token endpoint each time the access token expires. No user interaction,
-    // no refresh-token branch.
+    // no refresh-token branch. Safe to run during non-interactive warmup.
     if (this.server.authFlow === "client_credentials") {
       return this.loginClientCredentials();
     }
@@ -120,6 +123,17 @@ export class OAuthClient {
           error: error instanceof Error ? error.message : String(error)
         });
       }
+    }
+
+    // When called non-interactively (e.g. plugin warmup at config-hook time),
+    // refuse to open a browser or block on device-code polling. Callers like
+    // syncServer catch this and preserve cached state; the provider's models
+    // stay empty in OpenCode until the user actually attempts a chat (which
+    // calls ensureToken with the default interactive=true).
+    if (options.interactive === false) {
+      throw new Error(
+        `interactive authentication required for server "${this.server.id}" (authFlow=${this.server.authFlow}) but called non-interactively`
+      );
     }
 
     if (this.server.authFlow === "device_code") {

@@ -204,6 +204,15 @@ export async function acquireTokenViaDeviceCode(
         body: pollBody,
         signal: pollController.signal
       });
+    } catch (error) {
+      // Network error or abort timeout — treat as transient and retry on the
+      // next interval rather than terminating the whole flow. The
+      // expires_in deadline check at the top of the loop bounds this.
+      logger.warn("oauth_device_code_poll_transient_error", {
+        serverId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      continue;
     } finally {
       clearTimeout(pollTimeout);
     }

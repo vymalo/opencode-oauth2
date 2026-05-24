@@ -79,7 +79,13 @@ export class OAuth2ModelSyncPlugin {
     for (const server of this.config.servers) {
       if (warmup) {
         try {
-          await this.syncServer(server.id);
+          // Warmup is non-interactive: it refreshes cached tokens and runs
+          // client_credentials, but never opens a browser or polls device-code.
+          // Uninitialized authorization_code/device_code providers stay empty
+          // in `/models` until the user actually attempts to chat — same as
+          // before warmup existed — which prevents headless/CI startups from
+          // hanging on a browser callback.
+          await this.syncServer(server.id, { interactive: false });
         } catch (error) {
           this.logger.warn("sync_startup_failed", {
             serverId: server.id,
@@ -122,7 +128,10 @@ export class OAuth2ModelSyncPlugin {
     return snapshots;
   }
 
-  async syncServer(serverId: string): Promise<ServerSnapshot> {
+  async syncServer(
+    serverId: string,
+    options: { interactive?: boolean } = {}
+  ): Promise<ServerSnapshot> {
     const server = this.requireServerConfig(serverId);
 
     const runtime = this.runtimeByServer.get(serverId);
@@ -130,7 +139,7 @@ export class OAuth2ModelSyncPlugin {
       throw new Error(`runtime not initialized for server: ${serverId}`);
     }
 
-    this.logger.info("sync_start", { serverId });
+    this.logger.info("sync_start", { serverId, interactive: options.interactive !== false });
     const oauth = new OAuthClient(server, {
       fetchImpl: this.options.fetchImpl,
       logger: this.logger,
@@ -142,7 +151,9 @@ export class OAuth2ModelSyncPlugin {
     const previousState = runtime.state;
 
     try {
-      const token = await oauth.ensureToken(previousState.token);
+      const token = await oauth.ensureToken(previousState.token, {
+        interactive: options.interactive
+      });
       const rawModels = await fetchModels(server.baseURL, token, {
         fetchImpl: this.options.fetchImpl,
         timeoutMs: this.config.httpTimeoutMs,

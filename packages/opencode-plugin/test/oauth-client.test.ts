@@ -282,6 +282,78 @@ describe("OAuthClient token lifecycle", () => {
     expect(serialized).not.toContain("VERY-SECRET-VALUE");
   });
 
+  it("refuses to start interactive flow when called with interactive=false (no cached token)", async () => {
+    const server = createServerConfig();
+
+    let fetchCalls = 0;
+    const client = new OAuthClient(server, {
+      logger: createSilentLogger(),
+      timeoutMs: 5000,
+      fetchImpl: async () => {
+        fetchCalls++;
+        throw new Error("fetch must not be called in non-interactive path with no cached token");
+      }
+    });
+
+    await expect(client.ensureToken(undefined, { interactive: false })).rejects.toThrow(
+      /interactive authentication required/
+    );
+    expect(fetchCalls).toBe(0);
+  });
+
+  it("refreshes when interactive=false and a refresh token is cached", async () => {
+    const server = createServerConfig();
+
+    const client = new OAuthClient(server, {
+      logger: createSilentLogger(),
+      timeoutMs: 5000,
+      fetchImpl: async (_input, init) => {
+        const body = parseFormBody(init);
+        expect(body.get("grant_type")).toBe("refresh_token");
+        return new Response(
+          JSON.stringify({
+            access_token: "refreshed",
+            token_type: "Bearer",
+            expires_in: 3600
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+    });
+
+    const token = await client.ensureToken(
+      {
+        accessToken: "old",
+        tokenType: "Bearer",
+        refreshToken: "rt",
+        expiresAt: Date.now() - 1000
+      },
+      { interactive: false }
+    );
+
+    expect(token.accessToken).toBe("refreshed");
+  });
+
+  it("client_credentials works under interactive=false (no user, no browser)", async () => {
+    const server = createServerConfig({
+      authFlow: "client_credentials",
+      clientSecret: "s"
+    });
+
+    const client = new OAuthClient(server, {
+      logger: createSilentLogger(),
+      timeoutMs: 5000,
+      fetchImpl: async () =>
+        new Response(JSON.stringify({ access_token: "a", token_type: "Bearer", expires_in: 60 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        })
+    });
+
+    const token = await client.ensureToken(undefined, { interactive: false });
+    expect(token.accessToken).toBe("a");
+  });
+
   it("device_code skips OIDC discovery when tokenEndpoint + deviceAuthorizationEndpoint are configured", async () => {
     const server = createServerConfig({
       authFlow: "device_code",

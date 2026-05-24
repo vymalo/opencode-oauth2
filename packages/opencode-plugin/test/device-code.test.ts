@@ -370,4 +370,77 @@ describe("acquireTokenViaDeviceCode", () => {
       })
     ).rejects.toThrow(/expired/i);
   });
+
+  it("retries on transient fetch errors during polling instead of failing the flow", async () => {
+    let callIndex = 0;
+    const fetchImpl: typeof fetch = (async () => {
+      callIndex++;
+      if (callIndex === 1) {
+        // device authorization request
+        return new Response(
+          JSON.stringify({
+            device_code: "dev-code",
+            user_code: "ABCD-EFGH",
+            verification_uri: "https://auth.example.com/device",
+            expires_in: 60,
+            interval: 1
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (callIndex === 2) {
+        // First poll — simulate a transient network error
+        throw new Error("ECONNRESET");
+      }
+      if (callIndex === 3) {
+        // Second poll — succeeds
+        return new Response(
+          JSON.stringify({
+            access_token: "a",
+            refresh_token: "r",
+            token_type: "Bearer",
+            expires_in: 3600
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      throw new Error(`unexpected fetch (call #${callIndex})`);
+    }) as typeof fetch;
+
+    type Entry = { level: string; event: string; fields?: Record<string, unknown> };
+    const entries: Entry[] = [];
+    const logger = {
+      debug(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "debug", event, fields });
+      },
+      info(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "info", event, fields });
+      },
+      warn(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "warn", event, fields });
+      },
+      error(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "error", event, fields });
+      }
+    };
+
+    const token = await acquireTokenViaDeviceCode({
+      deviceAuthorizationEndpoint: "https://auth.example.com/device",
+      tokenEndpoint: "https://auth.example.com/token",
+      clientId: "client",
+      scopes: ["openid"],
+      serverId: "example-ai",
+      logger,
+      fetchImpl,
+      timeoutMs: 1000,
+      sleep: async () => undefined,
+      now: () => 1_000_000
+    });
+
+    expect(token.accessToken).toBe("a");
+    expect(callIndex).toBe(3);
+    const transientWarn = entries.find((e) => e.event === "oauth_device_code_poll_transient_error");
+    expect(transientWarn).toBeDefined();
+    expect(transientWarn?.fields?.error).toMatch(/ECONNRESET/);
+  });
 });
