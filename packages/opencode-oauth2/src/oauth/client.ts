@@ -1,4 +1,4 @@
-import type { OAuthServerConfig } from "../config.js";
+import type { OAuthAuthFlow, OAuthServerConfig } from "../config.js";
 import { DEFAULT_TOKEN_EXPIRY_SKEW_MS } from "../config.js";
 import type { Logger } from "../logging.js";
 import type { TokenSet } from "../types.js";
@@ -8,6 +8,7 @@ import { discoverOidcMetadata } from "./discovery.js";
 import { readResponseBodyPreview, redactUrl, scrubSecrets } from "./http-utils.js";
 import { startLocalCallbackServer } from "./local-callback.js";
 import { generatePkcePair, generateStateToken } from "./pkce.js";
+import { resolveSubjectToken } from "./subject-token.js";
 
 interface OAuthClientOptions {
   fetchImpl?: typeof fetch;
@@ -91,12 +92,22 @@ export class OAuthClient {
     }
 
     if (!token.expiresAt) {
-      // For client_credentials, re-authentication is cheap (one machine-to-
-      // machine POST) and the spec allows but does not require `expires_in`.
-      // Without a declared lifetime we cannot tell if the server-side token
-      // has been revoked, so we re-acquire each time to avoid persistent 401s
-      // after the server's idea of the token has expired.
-      return this.server.authFlow !== "client_credentials";
+      // For machine-to-machine flows (client_credentials, jwt_bearer,
+      // token_exchange), re-authentication is cheap (one POST + maybe a
+      // subject-token fetch) and the spec allows but does not require
+      // `expires_in`. Without a declared lifetime we cannot tell if the
+      // server-side token has been revoked, so we re-acquire each time to
+      // avoid persistent 401s after the server's idea of the token has
+      // expired. User-interactive flows (authorization_code, device_code)
+      // keep the old behavior — assume non-expiring when expires_in is
+      // missing — because the cost of forcing an unnecessary browser dance
+      // is high.
+      const machineFlows: ReadonlyArray<OAuthAuthFlow> = [
+        "client_credentials",
+        "jwt_bearer",
+        "token_exchange"
+      ];
+      return !machineFlows.includes(this.server.authFlow);
     }
 
     return Date.now() + this.tokenExpirySkewMs < token.expiresAt;
@@ -134,11 +145,19 @@ export class OAuthClient {
       return current as TokenSet;
     }
 
-    // client_credentials issues no refresh token — just re-acquire from the
-    // token endpoint each time the access token expires. No user interaction,
-    // no refresh-token branch. Safe to run during non-interactive warmup.
+    // Machine-to-machine flows never need a refresh token (they re-acquire
+    // by re-presenting the platform identity / client secret) and are safe
+    // to run during non-interactive warmup. Dispatch before the refresh
+    // branch so we don't try to use a stale refresh token that the IdP may
+    // not even have issued.
     if (this.server.authFlow === "client_credentials") {
       return this.loginClientCredentials();
+    }
+    if (this.server.authFlow === "jwt_bearer") {
+      return this.loginJwtBearer();
+    }
+    if (this.server.authFlow === "token_exchange") {
+      return this.loginTokenExchange();
     }
 
     if (current?.refreshToken) {
@@ -224,6 +243,103 @@ export class OAuthClient {
     return token;
   }
 
+  private async loginJwtBearer(): Promise<TokenSet> {
+    if (!this.server.subjectTokenSource) {
+      throw new Error("jwt_bearer flow requires subjectTokenSource");
+    }
+    return this.postFederatedGrant({
+      grantType: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      extraFields: (assertion) => ({ assertion }),
+      eventPrefix: "oauth_jwt_bearer"
+    });
+  }
+
+  private async loginTokenExchange(): Promise<TokenSet> {
+    if (!this.server.subjectTokenSource) {
+      throw new Error("token_exchange flow requires subjectTokenSource");
+    }
+    return this.postFederatedGrant({
+      grantType: "urn:ietf:params:oauth:grant-type:token-exchange",
+      extraFields: (subjectToken) => {
+        const fields: Record<string, string> = {
+          subject_token: subjectToken,
+          subject_token_type: "urn:ietf:params:oauth:token-type:jwt"
+        };
+        if (this.server.tokenExchangeAudience) {
+          fields.audience = this.server.tokenExchangeAudience;
+        }
+        return fields;
+      },
+      eventPrefix: "oauth_token_exchange"
+    });
+  }
+
+  /**
+   * Shared driver for jwt_bearer and token_exchange. Both grants:
+   *   - resolve a platform-supplied JWT from `subjectTokenSource`
+   *   - POST it to the token endpoint with grant-specific form fields
+   *   - get back an access token (refresh token is NOT expected for either)
+   */
+  private async postFederatedGrant(spec: {
+    grantType: string;
+    extraFields: (jwt: string) => Record<string, string>;
+    eventPrefix: string;
+  }): Promise<TokenSet> {
+    const subjectTokenSource = this.server.subjectTokenSource;
+    if (!subjectTokenSource) {
+      // Caller already guards this; belt-and-braces for the type narrowing.
+      throw new Error("federated flow requires subjectTokenSource");
+    }
+
+    const subjectToken = await resolveSubjectToken(subjectTokenSource, {
+      fetchImpl: this.fetchImpl,
+      timeoutMs: this.timeoutMs
+    });
+
+    const endpoints = await this.resolveEndpoints();
+    const body = new URLSearchParams({
+      grant_type: spec.grantType,
+      client_id: this.server.clientId,
+      ...spec.extraFields(subjectToken)
+    });
+    if (this.server.scopes.length > 0) {
+      body.set("scope", this.server.scopes.join(" "));
+    }
+    if (this.server.clientSecret) {
+      // Confidential federated clients are permitted by Keycloak and many
+      // others; some IdPs require both the assertion AND the client secret.
+      body.set("client_secret", this.server.clientSecret);
+    }
+
+    this.logger.info(`${spec.eventPrefix}_started`, {
+      serverId: this.server.id,
+      tokenEndpoint: redactUrl(endpoints.tokenEndpoint),
+      subjectTokenSource: subjectTokenSource.type
+    });
+
+    const response = await this.postWithTimeout(endpoints.tokenEndpoint, body);
+
+    if (!response.ok) {
+      const preview = await readResponseBodyPreview(response, 500);
+      this.logger.error(`${spec.eventPrefix}_failed`, {
+        serverId: this.server.id,
+        status: response.status,
+        bodyPreview: preview ? scrubSecrets(preview) : undefined
+      });
+      throw new Error(`${spec.grantType} request failed (${response.status})`);
+    }
+
+    const payload = (await response.json()) as Record<string, unknown>;
+    const token = toTokenSet(payload, { requireRefreshToken: false });
+
+    this.logger.info(`${spec.eventPrefix}_success`, {
+      serverId: this.server.id,
+      hasExpiry: token.expiresAt !== undefined
+    });
+
+    return token;
+  }
+
   /**
    * Resolve endpoints for the configured flow. Skips OIDC discovery entirely
    * when the explicit endpoints needed for the flow are all present in config
@@ -272,6 +388,8 @@ export class OAuthClient {
     }
     switch (this.server.authFlow) {
       case "client_credentials":
+      case "jwt_bearer":
+      case "token_exchange":
         return true;
       case "device_code":
         return Boolean(this.server.deviceAuthorizationEndpoint);

@@ -5,11 +5,11 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { FileCacheStore } from "../src/cache.js";
-import { createLightbridgeOAuth2ModelSyncPlugin } from "../src/opencode.js";
+import { createOpencodeOauth2Plugin } from "../src/opencode.js";
 import { createSilentLogger } from "./helpers.js";
 
 async function createHooks(cacheDir: string) {
-  const plugin = createLightbridgeOAuth2ModelSyncPlugin({
+  const plugin = createOpencodeOauth2Plugin({
     cacheDir,
     logger: createSilentLogger(),
     fetchImpl: async () => {

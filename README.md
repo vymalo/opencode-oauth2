@@ -23,13 +23,22 @@ This plugin closes that gap. It handles the **Authorization Code + PKCE** dance,
 
 ## Features
 
-- **OAuth2 / OIDC** login via Authorization Code + PKCE
+- **Five auth flows**, pick what matches your runtime:
+  - `authorization_code` — interactive PKCE login (default)
+  - `device_code` — RFC 8628 device authorization, for browserless user auth
+  - `client_credentials` — machine-to-machine with a `clientSecret`
+  - `jwt_bearer` — RFC 7523 federated identity (GitHub Actions OIDC, Kubernetes SA tokens) — **no long-lived secret in CI**
+  - `token_exchange` — RFC 8693 federated identity with explicit audience targeting
 - **Dynamic model discovery** from `/v1/models` (no hand-maintained model lists)
 - **Display-name normalization** so `glm-5` shows up as `GLM 5`
 - **Persistent token cache** with automatic refresh
 - **`chat.headers` hook** injects bearer tokens per request
-- **Strict refresh-token policy** — access-only tokens are rejected by design
+- **Strict refresh-token policy** where it makes sense — access-only tokens are rejected by design on user-interactive flows
 - **Two configuration styles**: per-provider options or a top-level plugin block
+
+### Running in CI / Kubernetes (no long-lived secrets)
+
+For GitHub Actions and Kubernetes workloads, use the federated identity flows. See the **[Federated identity](packages/opencode-oauth2/README.md#federated-identity-no-long-lived-secrets-in-ci)** section in the package README for end-to-end examples with both `permissions: id-token: write` (GHA) and projected `serviceAccountToken` volumes (K8s).
 
 ## Install
 

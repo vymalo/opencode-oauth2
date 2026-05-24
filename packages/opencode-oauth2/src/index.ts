@@ -19,9 +19,9 @@ export { OAuth2ModelSyncPlugin, type PluginOptions } from "./plugin.js";
 export { resolveCacheDir, FileCacheStore } from "./cache.js";
 
 export {
-  createLightbridgeOAuth2ModelSyncPlugin,
-  LightbridgeOAuth2ModelSyncPlugin,
-  LightbridgeOAuth2ModelSyncPlugin as default
+  createOpencodeOauth2Plugin,
+  OpencodeOauth2Plugin,
+  OpencodeOauth2Plugin as default
 } from "./opencode.js";
 export type { OpenCodePluginFactoryOptions } from "./opencode.js";
 

@@ -301,4 +301,105 @@ describe("validateConfig", () => {
       })
     ).toThrow(/scopes/i);
   });
+
+  it("accepts jwt_bearer authFlow with a github_actions subjectTokenSource", () => {
+    const result = validateConfig({
+      servers: [
+        {
+          id: "gha-server",
+          issuer: "https://auth.example.com",
+          baseURL: "https://api.example.com/v1",
+          clientId: "client-id",
+          scopes: ["openid"],
+          authFlow: "jwt_bearer",
+          subjectTokenSource: {
+            type: "github_actions",
+            audience: "https://auth.example.com/realms/test"
+          }
+        }
+      ]
+    });
+
+    expect(result.servers[0]?.authFlow).toBe("jwt_bearer");
+    expect(result.servers[0]?.subjectTokenSource).toEqual({
+      type: "github_actions",
+      audience: "https://auth.example.com/realms/test"
+    });
+  });
+
+  it("accepts token_exchange authFlow with optional audience", () => {
+    const result = validateConfig({
+      servers: [
+        {
+          id: "te-server",
+          issuer: "https://auth.example.com",
+          baseURL: "https://api.example.com/v1",
+          clientId: "client-id",
+          scopes: ["openid"],
+          authFlow: "token_exchange",
+          subjectTokenSource: { type: "kubernetes_sa" },
+          tokenExchangeAudience: "https://api.example.com"
+        }
+      ]
+    });
+
+    expect(result.servers[0]?.authFlow).toBe("token_exchange");
+    expect(result.servers[0]?.subjectTokenSource).toEqual({ type: "kubernetes_sa" });
+    expect(result.servers[0]?.tokenExchangeAudience).toBe("https://api.example.com");
+  });
+
+  it("rejects jwt_bearer without subjectTokenSource", () => {
+    expect(() =>
+      validateConfig({
+        servers: [
+          {
+            id: "missing-source",
+            issuer: "https://auth.example.com",
+            baseURL: "https://api.example.com/v1",
+            clientId: "client-id",
+            scopes: ["openid"],
+            authFlow: "jwt_bearer"
+          }
+        ]
+      })
+    ).toThrow(/subjectTokenSource is required/);
+  });
+
+  it("rejects github_actions subjectTokenSource without audience", () => {
+    expect(() =>
+      validateConfig({
+        servers: [
+          {
+            id: "missing-audience",
+            issuer: "https://auth.example.com",
+            baseURL: "https://api.example.com/v1",
+            clientId: "client-id",
+            scopes: ["openid"],
+            authFlow: "jwt_bearer",
+            // biome-ignore lint/suspicious/noExplicitAny: testing invalid input
+            subjectTokenSource: { type: "github_actions" } as any
+          }
+        ]
+      })
+    ).toThrow(/audience/);
+  });
+
+  it("rejects an unknown subjectTokenSource type", () => {
+    expect(() =>
+      validateConfig({
+        servers: [
+          {
+            id: "bad-type",
+            issuer: "https://auth.example.com",
+            baseURL: "https://api.example.com/v1",
+            clientId: "client-id",
+            scopes: ["openid"],
+            authFlow: "jwt_bearer",
+            // biome-ignore lint/suspicious/noExplicitAny: testing invalid input
+            subjectTokenSource: { type: "aws_metadata" } as any
+          }
+        ]
+      })
+    ).toThrow(/subjectTokenSource\.type/);
+  });
 });
