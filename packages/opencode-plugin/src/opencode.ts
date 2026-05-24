@@ -376,7 +376,7 @@ export function createLightbridgeOAuth2ModelSyncPlugin(
           });
 
           await state.runtime.initialize();
-          await state.runtime.start({ warmup: false });
+          await state.runtime.start({ warmup: true });
           state.signature = signature;
         }
 
@@ -398,8 +398,8 @@ export function createLightbridgeOAuth2ModelSyncPlugin(
         }
       },
       "chat.headers": async (input, output) => {
-        const providerId = input.provider.info.id;
-        if (!state.runtime || !state.managedProviderIds.has(providerId)) {
+        const providerId = input.model?.providerID ?? input.provider?.info?.id;
+        if (!providerId || !state.runtime || !state.managedProviderIds.has(providerId)) {
           return;
         }
 
