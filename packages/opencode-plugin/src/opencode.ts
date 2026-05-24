@@ -22,6 +22,19 @@ interface OAuthProviderExtension {
   authorizationEndpoint?: string;
   tokenEndpoint?: string;
   jwksUri?: string;
+  redirectPort?: number;
+}
+
+function asRedirectPort(value: unknown): number | undefined {
+  if (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value > 0 &&
+    value < 65536
+  ) {
+    return value;
+  }
+  return undefined;
 }
 
 interface ManagedProviders {
@@ -134,7 +147,8 @@ function parseOAuthExtension(provider: OpenCodeProviderConfig): OAuthProviderExt
     nameOverrides: asStringMap(raw.nameOverrides),
     authorizationEndpoint: asString(raw.authorizationEndpoint),
     tokenEndpoint: asString(raw.tokenEndpoint),
-    jwksUri: asString(raw.jwksUri)
+    jwksUri: asString(raw.jwksUri),
+    redirectPort: asRedirectPort(raw.redirectPort)
   };
 }
 
@@ -186,7 +200,8 @@ function parsePluginConfigServers(config: OpenCodeConfig, logger: Logger): OAuth
       nameOverrides: asStringMap(entry.nameOverrides),
       authorizationEndpoint: asString(entry.authorizationEndpoint),
       tokenEndpoint: asString(entry.tokenEndpoint),
-      jwksUri: asString(entry.jwksUri)
+      jwksUri: asString(entry.jwksUri),
+      redirectPort: asRedirectPort(entry.redirectPort)
     });
   }
 
@@ -246,7 +261,8 @@ function collectManagedProviders(config: OpenCodeConfig, logger: Logger): Manage
       nameOverrides: extension.nameOverrides,
       authorizationEndpoint: extension.authorizationEndpoint,
       tokenEndpoint: extension.tokenEndpoint,
-      jwksUri: extension.jwksUri
+      jwksUri: extension.jwksUri,
+      redirectPort: extension.redirectPort
     });
   }
 

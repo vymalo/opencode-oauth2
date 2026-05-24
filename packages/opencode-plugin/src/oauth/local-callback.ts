@@ -34,7 +34,8 @@ function parseCallback(request: IncomingMessage): OAuthCallbackResult | undefine
 }
 
 export async function startLocalCallbackServer(
-  callbackPath = "/oauth2/callback"
+  callbackPath = "/oauth2/callback",
+  port?: number
 ): Promise<LocalCallbackServer> {
   let resolver: ((value: OAuthCallbackResult) => void) | undefined;
   let rejecter: ((reason?: unknown) => void) | undefined;
@@ -64,9 +65,10 @@ export async function startLocalCallbackServer(
     resolver?.(payload);
   });
 
+  const listenPort = typeof port === "number" && port >= 0 ? port : 0;
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => resolve());
+    server.listen(listenPort, "127.0.0.1", () => resolve());
   });
 
   const address = server.address();

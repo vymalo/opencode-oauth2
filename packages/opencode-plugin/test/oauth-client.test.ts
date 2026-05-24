@@ -115,6 +115,65 @@ describe("OAuthClient token lifecycle", () => {
     expect(token.refreshToken).toBe("interactive-refresh");
   });
 
+  it("treats a soon-to-expire token as invalid when skew exceeds remaining lifetime", async () => {
+    const server = createServerConfig();
+
+    let fetchCalls = 0;
+    const client = new OAuthClient(server, {
+      logger: createSilentLogger(),
+      timeoutMs: 5000,
+      tokenExpirySkewMs: 30_000,
+      fetchImpl: async () => {
+        fetchCalls += 1;
+        return new Response(
+          JSON.stringify({
+            access_token: "refreshed-access",
+            token_type: "Bearer",
+            expires_in: 3600
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          }
+        );
+      }
+    });
+
+    const token = await client.ensureToken({
+      accessToken: "current",
+      tokenType: "Bearer",
+      refreshToken: "refresh",
+      expiresAt: Date.now() + 10_000
+    });
+
+    expect(fetchCalls).toBe(1);
+    expect(token.accessToken).toBe("refreshed-access");
+  });
+
+  it("treats a soon-to-expire token as valid when skew is below remaining lifetime", async () => {
+    const server = createServerConfig();
+
+    const client = new OAuthClient(server, {
+      logger: createSilentLogger(),
+      timeoutMs: 5000,
+      tokenExpirySkewMs: 5_000,
+      fetchImpl: async () => {
+        throw new Error("fetch should not be called for valid token");
+      }
+    });
+
+    const expiresAt = Date.now() + 10_000;
+    const token = await client.ensureToken({
+      accessToken: "current",
+      tokenType: "Bearer",
+      refreshToken: "refresh",
+      expiresAt
+    });
+
+    expect(token.accessToken).toBe("current");
+    expect(token.expiresAt).toBe(expiresAt);
+  });
+
   it("fails interactive login when provider does not return a refresh token", async () => {
     const server = createServerConfig();
 
