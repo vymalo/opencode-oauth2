@@ -1,13 +1,40 @@
 {
   "name": "@lightbridge/opencode-plugin",
   "version": "0.1.0",
-  "private": true,
+  "description": "OpenCode plugin for OAuth2/OIDC-secured, OpenAI-compatible model providers with periodic model sync.",
+  "license": "MIT",
+  "author": "adorsys-gis contributors",
+  "homepage": "https://github.com/ADORSYS-GIS/lightbridge-opencode#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ADORSYS-GIS/lightbridge-opencode.git",
+    "directory": "packages/opencode-plugin"
+  },
+  "bugs": {
+    "url": "https://github.com/ADORSYS-GIS/lightbridge-opencode/issues"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "oauth2",
+    "oidc",
+    "openai-compatible",
+    "ai-sdk",
+    "model-sync"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "sideEffects": false,
   "files": [
     "dist"
   ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "echo 'TODO: lint opencode-plugin'",
@@ -16,7 +43,7 @@
     "format": "echo 'TODO: format opencode-plugin'"
   },
   "dependencies": {
-    "@opencode-ai/plugin": "^1.2.24"
+    "@opencode-ai/plugin": "1.2.24"
   },
   "devDependencies": {
     "vitest": "^2.1.9"

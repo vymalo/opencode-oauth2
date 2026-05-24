@@ -20,7 +20,7 @@ importers:
   packages/opencode-plugin:
     dependencies:
       '@opencode-ai/plugin':
-        specifier: ^1.2.24
+        specifier: 1.2.24
         version: 1.2.24
     devDependencies:
       vitest:
