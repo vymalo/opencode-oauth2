@@ -5,9 +5,15 @@
   "type": "module",
   "scripts": {
     "build": "node ./scripts/build.mjs",
+    "clean": "rm -rf dist",
     "lint": "echo 'TODO: lint plugin-bundle'",
     "typecheck": "echo 'TODO: typecheck plugin-bundle'",
     "test": "echo 'TODO: test plugin-bundle'",
     "format": "echo 'TODO: format plugin-bundle'"
+  },
+  "devDependencies": {
+    "@lightbridge/opencode-plugin": "workspace:*",
+    "builtin-modules": "^5.0.0",
+    "rolldown": "^1.0.2"
   }
 }
