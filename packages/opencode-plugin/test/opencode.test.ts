@@ -98,6 +98,59 @@ describe("OpenCode plugin hooks", () => {
     expect(output.headers.Authorization).toBe("Bearer cached-access");
   });
 
+  it("uses model.providerID when provider context is not populated by the host", async () => {
+    const cacheDir = await mkdtemp(join(tmpdir(), "opencode-hook-providerid-"));
+    const cache = new FileCacheStore(cacheDir);
+    await cache.ensureReady();
+
+    await cache.saveServerState({
+      serverId: "example-ai",
+      updatedAt: Date.now(),
+      lastSyncAt: Date.now(),
+      token: {
+        accessToken: "cached-access",
+        tokenType: "Bearer",
+        refreshToken: "cached-refresh",
+        expiresAt: Date.now() + 60_000
+      },
+      rawModels: [{ id: "glm-5" }],
+      models: [{ id: "glm-5", displayName: "GLM 5" }]
+    });
+
+    const hooks = await createHooks(cacheDir);
+
+    const config: Record<string, unknown> = {
+      provider: {
+        "example-ai": {
+          name: "Example AI",
+          options: {
+            baseURL: "https://api.example.com/v1",
+            lightbridgeOAuth2: {
+              issuer: "https://auth.example.com",
+              clientId: "opencode-client",
+              scopes: ["openid", "offline_access"]
+            }
+          }
+        }
+      }
+    };
+
+    await hooks.config?.(config as never);
+
+    const output = { headers: {} as Record<string, string> };
+    await hooks["chat.headers"]?.(
+      {
+        sessionID: "session-1",
+        agent: "general",
+        model: { id: "glm-5", providerID: "example-ai" },
+        message: { id: "message-1" }
+      } as never,
+      output
+    );
+
+    expect(output.headers.Authorization).toBe("Bearer cached-access");
+  });
+
   it("rejects invalid redirectPort in provider.options.lightbridgeOAuth2", async () => {
     const cacheDir = await mkdtemp(join(tmpdir(), "opencode-hook-badport-"));
     const hooks = await createHooks(cacheDir);

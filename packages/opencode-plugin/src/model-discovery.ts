@@ -68,7 +68,15 @@ export async function fetchModels(
     });
 
     if (!response.ok) {
-      throw new Error(`model discovery failed (${response.status})`);
+      let body = "";
+      try {
+        body = (await response.text()).slice(0, 500);
+      } catch {
+        // body unreadable — fall through with status only
+      }
+      throw new Error(
+        `model discovery failed (${response.status}) at ${modelsUrl}${body ? `: ${body}` : ""}`
+      );
     }
 
     const payload = (await response.json()) as unknown;
