@@ -115,6 +115,58 @@ describe("OAuthClient token lifecycle", () => {
     expect(token.refreshToken).toBe("interactive-refresh");
   });
 
+  it("does not log the authorize URL (or state nonce) into structured logs during interactive login", async () => {
+    const server = createServerConfig();
+
+    type Entry = { level: string; event: string; fields?: Record<string, unknown> };
+    const entries: Entry[] = [];
+    const recordingLogger = {
+      debug(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "debug", event, fields });
+      },
+      info(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "info", event, fields });
+      },
+      warn(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "warn", event, fields });
+      },
+      error(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "error", event, fields });
+      }
+    };
+
+    let observedState: string | undefined;
+
+    const client = new OAuthClient(server, {
+      logger: recordingLogger,
+      timeoutMs: 5000,
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify({
+            access_token: "a",
+            refresh_token: "r",
+            token_type: "Bearer",
+            expires_in: 3600
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        ),
+      onAuthorizationUrl: async (authorizationUrl) => {
+        const parsed = new URL(authorizationUrl);
+        observedState = parsed.searchParams.get("state") ?? undefined;
+        const redirectUri = parsed.searchParams.get("redirect_uri");
+        await fetch(`${redirectUri}?code=c&state=${observedState}`);
+      }
+    });
+
+    await client.ensureToken();
+
+    expect(observedState).toBeTruthy();
+    const serialized = JSON.stringify(entries);
+    expect(serialized).not.toContain(observedState as string);
+    expect(serialized).not.toMatch(/code_challenge=/);
+    expect(serialized).not.toMatch(/redirect_uri=/);
+  });
+
   it("treats a soon-to-expire token as invalid when skew exceeds remaining lifetime", async () => {
     const server = createServerConfig();
 

@@ -187,16 +187,8 @@ export class OAuthClient {
 
       this.logger.info("oauth_login_started", {
         serverId: this.server.id,
-        issuer: this.server.issuer
-      });
-
-      // Always log the authorization URL so headless users (or those where
-      // the browser fails to launch) can copy-paste it manually. The URL
-      // contains only the PKCE challenge, state, client_id, and scopes — no
-      // secrets.
-      this.logger.info("oauth_authorization_url", {
-        serverId: this.server.id,
-        url: authorizeUrl.toString()
+        issuer: this.server.issuer,
+        authorizationEndpoint: `${authorizeUrl.origin}${authorizeUrl.pathname}`
       });
 
       if (this.onAuthorizationUrl) {
@@ -209,6 +201,13 @@ export class OAuthClient {
             serverId: this.server.id,
             error: error instanceof Error ? error.message : String(error)
           });
+          // Write the URL to stderr directly so the terminal user can copy-paste
+          // it. Bypasses the structured logger to avoid leaking the `state`
+          // nonce (and other query params) into centralized log aggregation,
+          // which would enable login-CSRF via a forged localhost callback.
+          process.stderr.write(
+            `\n[lightbridge-opencode] open this URL to authenticate (${this.server.id}):\n${authorizeUrl.toString()}\n\n`
+          );
         }
       }
 
