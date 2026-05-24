@@ -1,6 +1,10 @@
 import type { Hooks, Plugin, PluginInput } from "@opencode-ai/plugin";
 
-import type { OAuth2ModelSyncConfigInput, OAuthServerConfigInput } from "./config.js";
+import type {
+  OAuth2ModelSyncConfigInput,
+  OAuthAuthFlow,
+  OAuthServerConfigInput
+} from "./config.js";
 import { createJsonConsoleLogger, type LogFields, type Logger } from "./logging.js";
 import { OAuth2ModelSyncPlugin } from "./plugin.js";
 
@@ -16,13 +20,38 @@ type OpenCodeModelConfig = NonNullable<OpenCodeProviderConfig["models"]>[string]
 interface OAuthProviderExtension {
   issuer: string;
   clientId: string;
+  clientSecret?: string;
   scopes: string[];
   syncIntervalMinutes?: number;
   nameOverrides?: Record<string, string>;
   authorizationEndpoint?: string;
   tokenEndpoint?: string;
+  deviceAuthorizationEndpoint?: string;
   jwksUri?: string;
   redirectPort?: number;
+  authFlow?: OAuthAuthFlow;
+}
+
+function asAuthFlow(value: unknown, source: string): OAuthAuthFlow | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (value === "authorization_code" || value === "device_code") {
+    return value;
+  }
+  throw new Error(
+    `${source}.authFlow must be "authorization_code" or "device_code" (received ${JSON.stringify(value)})`
+  );
+}
+
+function asClientSecret(value: unknown, source: string): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`${source}.clientSecret must be a non-empty string when provided`);
+  }
+  return value;
 }
 
 function asRedirectPort(value: unknown, source: string): number | undefined {
@@ -142,13 +171,16 @@ function parseOAuthExtension(provider: OpenCodeProviderConfig): OAuthProviderExt
   return {
     issuer,
     clientId,
+    clientSecret: asClientSecret(raw.clientSecret, "provider.options.lightbridgeOAuth2"),
     scopes,
     syncIntervalMinutes,
     nameOverrides: asStringMap(raw.nameOverrides),
     authorizationEndpoint: asString(raw.authorizationEndpoint),
     tokenEndpoint: asString(raw.tokenEndpoint),
+    deviceAuthorizationEndpoint: asString(raw.deviceAuthorizationEndpoint),
     jwksUri: asString(raw.jwksUri),
-    redirectPort: asRedirectPort(raw.redirectPort, "provider.options.lightbridgeOAuth2")
+    redirectPort: asRedirectPort(raw.redirectPort, "provider.options.lightbridgeOAuth2"),
+    authFlow: asAuthFlow(raw.authFlow, "provider.options.lightbridgeOAuth2")
   };
 }
 
@@ -192,22 +224,24 @@ function parsePluginConfigServers(
         ? entry.syncIntervalMinutes
         : undefined;
 
+    const sourceLabel = `pluginConfig.oauth2ModelSync.servers[${index}] (id=${id})`;
+
     parsed.push({
       id,
       name: name ?? id,
       issuer,
       baseURL,
       clientId,
+      clientSecret: asClientSecret(entry.clientSecret, sourceLabel),
       scopes,
       syncIntervalMinutes,
       nameOverrides: asStringMap(entry.nameOverrides),
       authorizationEndpoint: asString(entry.authorizationEndpoint),
       tokenEndpoint: asString(entry.tokenEndpoint),
+      deviceAuthorizationEndpoint: asString(entry.deviceAuthorizationEndpoint),
       jwksUri: asString(entry.jwksUri),
-      redirectPort: asRedirectPort(
-        entry.redirectPort,
-        `pluginConfig.oauth2ModelSync.servers[${index}] (id=${id})`
-      )
+      redirectPort: asRedirectPort(entry.redirectPort, sourceLabel),
+      authFlow: asAuthFlow(entry.authFlow, sourceLabel)
     });
   }
 
@@ -262,13 +296,16 @@ function collectManagedProviders(config: OpenCodeConfig, logger: Logger): Manage
       issuer: extension.issuer,
       baseURL,
       clientId: extension.clientId,
+      clientSecret: extension.clientSecret,
       scopes: extension.scopes,
       syncIntervalMinutes: extension.syncIntervalMinutes,
       nameOverrides: extension.nameOverrides,
       authorizationEndpoint: extension.authorizationEndpoint,
       tokenEndpoint: extension.tokenEndpoint,
+      deviceAuthorizationEndpoint: extension.deviceAuthorizationEndpoint,
       jwksUri: extension.jwksUri,
-      redirectPort: extension.redirectPort
+      redirectPort: extension.redirectPort,
+      authFlow: extension.authFlow
     });
   }
 

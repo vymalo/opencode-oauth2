@@ -23,6 +23,7 @@ export function createServerConfig(overrides: Partial<OAuthServerConfig> = {}): 
     authorizationEndpoint: "https://auth.example.com/oauth/authorize",
     tokenEndpoint: "https://auth.example.com/oauth/token",
     jwksUri: "https://auth.example.com/.well-known/jwks.json",
+    authFlow: "authorization_code",
     ...overrides
   };
 }

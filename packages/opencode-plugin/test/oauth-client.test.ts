@@ -226,6 +226,145 @@ describe("OAuthClient token lifecycle", () => {
     expect(token.expiresAt).toBe(expiresAt);
   });
 
+  it("includes client_secret in authorization-code token exchange and refresh requests", async () => {
+    const server = createServerConfig({ clientSecret: "super-secret-shh" });
+
+    // First call: refresh
+    let lastBody: URLSearchParams | undefined;
+    const refreshClient = new OAuthClient(server, {
+      logger: createSilentLogger(),
+      timeoutMs: 5000,
+      fetchImpl: async (_input, init) => {
+        lastBody = parseFormBody(init);
+        return new Response(
+          JSON.stringify({
+            access_token: "new-access",
+            token_type: "Bearer",
+            expires_in: 3600
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+    });
+
+    await refreshClient.ensureToken({
+      accessToken: "old",
+      tokenType: "Bearer",
+      refreshToken: "old-refresh",
+      expiresAt: Date.now() - 1000
+    });
+
+    expect(lastBody?.get("grant_type")).toBe("refresh_token");
+    expect(lastBody?.get("client_secret")).toBe("super-secret-shh");
+
+    // Second call: authorization_code exchange
+    lastBody = undefined;
+    const exchangeClient = new OAuthClient(server, {
+      logger: createSilentLogger(),
+      timeoutMs: 5000,
+      fetchImpl: async (_input, init) => {
+        lastBody = parseFormBody(init);
+        return new Response(
+          JSON.stringify({
+            access_token: "a",
+            refresh_token: "r",
+            token_type: "Bearer",
+            expires_in: 3600
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      },
+      onAuthorizationUrl: async (authorizationUrl) => {
+        const parsed = new URL(authorizationUrl);
+        const redirectUri = parsed.searchParams.get("redirect_uri");
+        const state = parsed.searchParams.get("state");
+        await fetch(`${redirectUri}?code=auth-code-123&state=${state}`);
+      }
+    });
+
+    await exchangeClient.ensureToken();
+    expect(lastBody?.get("grant_type")).toBe("authorization_code");
+    expect(lastBody?.get("client_secret")).toBe("super-secret-shh");
+    expect(lastBody?.get("code_verifier")).toBeTruthy();
+  });
+
+  it("does not leak clientSecret into structured logs on success or failure", async () => {
+    const server = createServerConfig({ clientSecret: "leaky-secret-9000" });
+
+    type Entry = { level: string; event: string; fields?: Record<string, unknown> };
+    const entries: Entry[] = [];
+    const recordingLogger = {
+      debug(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "debug", event, fields });
+      },
+      info(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "info", event, fields });
+      },
+      warn(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "warn", event, fields });
+      },
+      error(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "error", event, fields });
+      }
+    };
+
+    // Success path: authorization_code exchange.
+    const successClient = new OAuthClient(server, {
+      logger: recordingLogger,
+      timeoutMs: 5000,
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify({
+            access_token: "a",
+            refresh_token: "r",
+            token_type: "Bearer",
+            expires_in: 3600
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        ),
+      onAuthorizationUrl: async (authorizationUrl) => {
+        const parsed = new URL(authorizationUrl);
+        const redirectUri = parsed.searchParams.get("redirect_uri");
+        const state = parsed.searchParams.get("state");
+        await fetch(`${redirectUri}?code=c&state=${state}`);
+      }
+    });
+
+    await successClient.ensureToken();
+
+    // Failure path: refresh fails with a 400, then the auth-code exchange
+    // also fails. The server might echo the secret-bearing body in some
+    // configurations; we must not include the secret in our own error logs
+    // regardless.
+    const failClient = new OAuthClient(server, {
+      logger: recordingLogger,
+      timeoutMs: 5000,
+      fetchImpl: async () =>
+        new Response("bad request", {
+          status: 400,
+          headers: { "Content-Type": "text/plain" }
+        }),
+      onAuthorizationUrl: async (authorizationUrl) => {
+        const parsed = new URL(authorizationUrl);
+        const redirectUri = parsed.searchParams.get("redirect_uri");
+        const state = parsed.searchParams.get("state");
+        await fetch(`${redirectUri}?code=c&state=${state}`);
+      }
+    });
+
+    await expect(
+      failClient.ensureToken({
+        accessToken: "x",
+        tokenType: "Bearer",
+        refreshToken: "expired",
+        expiresAt: Date.now() - 1000
+      })
+    ).rejects.toThrow();
+
+    const serialized = JSON.stringify(entries);
+    expect(serialized).not.toContain("leaky-secret-9000");
+  });
+
   it("fails interactive login when provider does not return a refresh token", async () => {
     const server = createServerConfig();
 

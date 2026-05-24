@@ -8,7 +8,7 @@ This guide shows how to run the plugin locally with OpenCode.
 - `pnpm`
 - OpenCode CLI installed
 - An OAuth2/OIDC provider that:
-- supports Authorization Code + PKCE
+- supports Authorization Code + PKCE (or the RFC 8628 device authorization grant for headless setups)
 - returns a `refresh_token`
 - exposes an OpenAI-compatible models endpoint at `{baseURL}/v1/models`
 
@@ -61,6 +61,12 @@ In your project `opencode.json`, add provider configuration:
   }
 }
 ```
+
+### Optional fields
+
+- `clientSecret` — for confidential clients; sent with every token POST. Never logged. PKCE still applies.
+- `authFlow` — `"authorization_code"` (default) or `"device_code"` for browserless setups (e.g., SSH/CI).
+- `deviceAuthorizationEndpoint` — override; otherwise discovered from the OIDC metadata.
 
 ## 4. Start OpenCode
 
