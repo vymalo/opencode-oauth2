@@ -1,51 +1,120 @@
 # lightbridge-opencode
 
-OpenCode plugin workspace for OAuth2-secured, OpenAI-compatible provider syncing.
+> Bring your own OAuth-protected LLM gateway to [OpenCode](https://opencode.ai).
 
-This project implements an OpenCode plugin that:
+An [OpenCode](https://opencode.ai) plugin that lets you wire up **OpenAI-compatible model providers sitting behind OAuth2 / OIDC** — without baking long-lived API keys into your config. Discover models dynamically, refresh tokens automatically, and let OpenCode talk to your gateway as if it were any other provider.
 
-- authenticates with OAuth2/OIDC (Authorization Code + PKCE)
-- discovers models from `/v1/models`
-- normalizes model names for display
-- keeps model metadata cached and synced
-- injects bearer tokens via OpenCode `chat.headers` hook
+![status: early](https://img.shields.io/badge/status-early-orange)
+![node: >=20](https://img.shields.io/badge/node-%3E%3D20-339933)
+![license: MIT](https://img.shields.io/badge/license-MIT-blue)
+![pnpm workspace](https://img.shields.io/badge/pnpm-workspace-F69220)
 
-## Workspace
+---
 
-- `packages/opencode-plugin`: runtime plugin implementation
-- `packages/plugin-bundle`: bundling/package assembly scaffold
-- `packages/native-core`: optional Rust native scaffold
-- `plans/prd.md`: product requirements and implementation phases
+## Why
 
-## Quick Start (Development)
+Most OpenCode providers assume a static bearer key. That works for hosted SaaS, but breaks down the moment you put your models behind:
+
+- a corporate Identity Provider (Keycloak, Auth0, Okta, Azure AD, …)
+- a self-hosted gateway with short-lived tokens
+- a multi-tenant setup where each user authenticates as themselves
+
+This plugin closes that gap. It handles the **Authorization Code + PKCE** dance, caches tokens, refreshes them silently, and feeds OpenCode a normal-looking provider with a fresh `Authorization` header on every request.
+
+## Features
+
+- **OAuth2 / OIDC** login via Authorization Code + PKCE
+- **Dynamic model discovery** from `/v1/models` (no hand-maintained model lists)
+- **Display-name normalization** so `glm-5` shows up as `GLM 5`
+- **Persistent token cache** with automatic refresh
+- **`chat.headers` hook** injects bearer tokens per request
+- **Strict refresh-token policy** — access-only tokens are rejected by design
+- **Two configuration styles**: per-provider options or a top-level plugin block
+
+## Install
+
+In your OpenCode config:
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["@lightbridge/opencode-plugin"]
+}
+```
+
+Then declare a provider:
+
+```jsonc
+{
+  "plugin": ["@lightbridge/opencode-plugin"],
+  "provider": {
+    "example-ai": {
+      "name": "Example AI",
+      "options": {
+        "baseURL": "https://api.example.com/v1",
+        "lightbridgeOAuth2": {
+          "issuer": "https://auth.example.com",
+          "clientId": "opencode-client",
+          "scopes": ["openid", "profile", "offline_access"],
+          "syncIntervalMinutes": 60
+        }
+      }
+    }
+  }
+}
+```
+
+See [packages/opencode-plugin/README.md](packages/opencode-plugin/README.md) for the full configuration reference (including the alternative `pluginConfig.oauth2ModelSync.servers` layout).
+
+## Token Policy
+
+Refresh tokens are **mandatory** — not a nicety.
+
+- Access tokens returned without a `refresh_token` are rejected at exchange time.
+- Cached tokens missing `refreshToken` are evicted on load.
+- Refresh responses that omit a new `refresh_token` re-use the existing one.
+
+The intent: a session is either fully renewable or it doesn't get cached. No silent fallbacks to short-lived tokens that fail mid-conversation.
+
+## Workspace Layout
+
+This is a [pnpm](https://pnpm.io) monorepo.
+
+| Package | Purpose |
+| --- | --- |
+| [`packages/opencode-plugin`](packages/opencode-plugin) | The runtime plugin — published as `@lightbridge/opencode-plugin` |
+| [`packages/plugin-bundle`](packages/plugin-bundle) | Rolldown-based bundling for distribution |
+| [`packages/native-core`](packages/native-core) | Optional Rust native scaffold (experimental) |
+| [`plans/prd.md`](plans/prd.md) | Product requirements and phased roadmap |
+
+## Development
 
 ```bash
 pnpm install
 pnpm build
 pnpm typecheck
-pnpm --filter @lightbridge/opencode-plugin test
+pnpm test
 ```
 
-## OpenCode Usage
+Plugin-only iteration:
 
-The plugin can be configured in two ways:
+```bash
+pnpm --filter @lightbridge/opencode-plugin test
+pnpm --filter @lightbridge/opencode-plugin build
+```
 
-1. Provider-embedded options (`provider.<id>.options.lightbridgeOAuth2`)
-2. PRD-style plugin section (`pluginConfig.oauth2ModelSync.servers`)
-
-Detailed configuration examples are in:
-
-- `packages/opencode-plugin/README.md`
-- `GETTING_STARTED.md`
-
-## Token Policy
-
-This plugin enforces refresh-token-based OAuth sessions.
-
-- Access tokens without a refresh token are rejected.
-- Cached tokens missing `refreshToken` are ignored.
-- Refresh responses that omit `refresh_token` reuse the existing refresh token.
+For end-to-end usage against a local OpenCode install, see [GETTING_STARTED.md](GETTING_STARTED.md).
 
 ## Status
 
-Current implementation includes the Phase 1 scaffold and initial Phase 2 runtime core.
+Early but functional. The Phase 1 scaffold and Phase 2 runtime core are in; bundling (Phase 3) has landed. Public API may still shift before `1.0`.
+
+Roadmap and phase breakdown live in [plans/prd.md](plans/prd.md).
+
+## Contributing
+
+Issues and PRs are welcome. Please open an issue first for substantial changes so we can align on scope before code review.
+
+## License
+
+[MIT](LICENSE) © adorsys-gis contributors
