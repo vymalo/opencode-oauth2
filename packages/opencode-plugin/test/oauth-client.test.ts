@@ -115,6 +115,117 @@ describe("OAuthClient token lifecycle", () => {
     expect(token.refreshToken).toBe("interactive-refresh");
   });
 
+  it("does not log the authorize URL (or state nonce) into structured logs during interactive login", async () => {
+    const server = createServerConfig();
+
+    type Entry = { level: string; event: string; fields?: Record<string, unknown> };
+    const entries: Entry[] = [];
+    const recordingLogger = {
+      debug(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "debug", event, fields });
+      },
+      info(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "info", event, fields });
+      },
+      warn(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "warn", event, fields });
+      },
+      error(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "error", event, fields });
+      }
+    };
+
+    let observedState: string | undefined;
+
+    const client = new OAuthClient(server, {
+      logger: recordingLogger,
+      timeoutMs: 5000,
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify({
+            access_token: "a",
+            refresh_token: "r",
+            token_type: "Bearer",
+            expires_in: 3600
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        ),
+      onAuthorizationUrl: async (authorizationUrl) => {
+        const parsed = new URL(authorizationUrl);
+        observedState = parsed.searchParams.get("state") ?? undefined;
+        const redirectUri = parsed.searchParams.get("redirect_uri");
+        await fetch(`${redirectUri}?code=c&state=${observedState}`);
+      }
+    });
+
+    await client.ensureToken();
+
+    expect(observedState).toBeTruthy();
+    const serialized = JSON.stringify(entries);
+    expect(serialized).not.toContain(observedState as string);
+    expect(serialized).not.toMatch(/code_challenge=/);
+    expect(serialized).not.toMatch(/redirect_uri=/);
+  });
+
+  it("treats a soon-to-expire token as invalid when skew exceeds remaining lifetime", async () => {
+    const server = createServerConfig();
+
+    let fetchCalls = 0;
+    const client = new OAuthClient(server, {
+      logger: createSilentLogger(),
+      timeoutMs: 5000,
+      tokenExpirySkewMs: 30_000,
+      fetchImpl: async () => {
+        fetchCalls += 1;
+        return new Response(
+          JSON.stringify({
+            access_token: "refreshed-access",
+            token_type: "Bearer",
+            expires_in: 3600
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          }
+        );
+      }
+    });
+
+    const token = await client.ensureToken({
+      accessToken: "current",
+      tokenType: "Bearer",
+      refreshToken: "refresh",
+      expiresAt: Date.now() + 10_000
+    });
+
+    expect(fetchCalls).toBe(1);
+    expect(token.accessToken).toBe("refreshed-access");
+  });
+
+  it("treats a soon-to-expire token as valid when skew is below remaining lifetime", async () => {
+    const server = createServerConfig();
+
+    const client = new OAuthClient(server, {
+      logger: createSilentLogger(),
+      timeoutMs: 5000,
+      tokenExpirySkewMs: 5_000,
+      fetchImpl: async () => {
+        throw new Error("fetch should not be called for valid token");
+      }
+    });
+
+    const expiresAt = Date.now() + 10_000;
+    const token = await client.ensureToken({
+      accessToken: "current",
+      tokenType: "Bearer",
+      refreshToken: "refresh",
+      expiresAt
+    });
+
+    expect(token.accessToken).toBe("current");
+    expect(token.expiresAt).toBe(expiresAt);
+  });
+
   it("fails interactive login when provider does not return a refresh token", async () => {
     const server = createServerConfig();
 

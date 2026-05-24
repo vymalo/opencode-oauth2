@@ -1,5 +1,6 @@
 export const DEFAULT_SYNC_INTERVAL_MINUTES = 60;
 export const DEFAULT_HTTP_TIMEOUT_MS = 15_000;
+export const DEFAULT_TOKEN_EXPIRY_SKEW_MS = 30_000;
 
 export interface OAuthServerConfigInput {
   id: string;
@@ -13,12 +14,14 @@ export interface OAuthServerConfigInput {
   authorizationEndpoint?: string;
   tokenEndpoint?: string;
   jwksUri?: string;
+  redirectPort?: number;
 }
 
 export interface OAuth2ModelSyncConfigInput {
   servers: OAuthServerConfigInput[];
   cacheNamespace?: string;
   httpTimeoutMs?: number;
+  tokenExpirySkewMs?: number;
 }
 
 export interface OAuthServerConfig {
@@ -33,12 +36,14 @@ export interface OAuthServerConfig {
   authorizationEndpoint?: string;
   tokenEndpoint?: string;
   jwksUri?: string;
+  redirectPort?: number;
 }
 
 export interface OAuth2ModelSyncConfig {
   servers: OAuthServerConfig[];
   cacheNamespace: string;
   httpTimeoutMs: number;
+  tokenExpirySkewMs: number;
 }
 
 function ensureString(value: unknown, path: string): string {
@@ -54,6 +59,23 @@ function ensureStringArray(value: unknown, path: string): string[] {
   }
 
   return value.map((item, index) => ensureString(item, `${path}[${index}]`));
+}
+
+function validateRedirectPort(value: unknown, path: string): number | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value <= 0 ||
+    value >= 65536
+  ) {
+    throw new Error(`${path} must be a positive integer less than 65536`);
+  }
+
+  return value;
 }
 
 function normalizeServerConfig(
@@ -76,6 +98,8 @@ function normalizeServerConfig(
       ? input.syncIntervalMinutes
       : DEFAULT_SYNC_INTERVAL_MINUTES;
 
+  const redirectPort = validateRedirectPort(input.redirectPort, `${path}.redirectPort`);
+
   return {
     id,
     name,
@@ -87,7 +111,8 @@ function normalizeServerConfig(
     nameOverrides: input.nameOverrides ?? {},
     authorizationEndpoint: input.authorizationEndpoint,
     tokenEndpoint: input.tokenEndpoint,
-    jwksUri: input.jwksUri
+    jwksUri: input.jwksUri,
+    redirectPort
   };
 }
 
@@ -112,6 +137,18 @@ export function validateConfig(
     ids.add(server.id);
   }
 
+  let tokenExpirySkewMs = DEFAULT_TOKEN_EXPIRY_SKEW_MS;
+  if (input.tokenExpirySkewMs !== undefined && input.tokenExpirySkewMs !== null) {
+    if (
+      typeof input.tokenExpirySkewMs !== "number" ||
+      !Number.isFinite(input.tokenExpirySkewMs) ||
+      input.tokenExpirySkewMs <= 0
+    ) {
+      throw new Error("tokenExpirySkewMs must be a positive number");
+    }
+    tokenExpirySkewMs = input.tokenExpirySkewMs;
+  }
+
   return {
     servers: normalizedServers,
     cacheNamespace:
@@ -123,6 +160,7 @@ export function validateConfig(
       Number.isFinite(input.httpTimeoutMs) &&
       input.httpTimeoutMs > 0
         ? input.httpTimeoutMs
-        : DEFAULT_HTTP_TIMEOUT_MS
+        : DEFAULT_HTTP_TIMEOUT_MS,
+    tokenExpirySkewMs
   };
 }

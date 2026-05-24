@@ -1,4 +1,5 @@
 import type { OAuthServerConfig } from "../config.js";
+import { DEFAULT_TOKEN_EXPIRY_SKEW_MS } from "../config.js";
 import type { Logger } from "../logging.js";
 import type { TokenSet } from "../types.js";
 import { discoverOidcMetadata } from "./discovery.js";
@@ -11,23 +12,12 @@ interface OAuthClientOptions {
   logger: Logger;
   timeoutMs: number;
   onAuthorizationUrl?: (url: string) => Promise<void> | void;
+  tokenExpirySkewMs?: number;
 }
 
 interface ResolvedEndpoints {
   authorizationEndpoint: string;
   tokenEndpoint: string;
-}
-
-function isTokenValid(token?: TokenSet): boolean {
-  if (!token?.accessToken) {
-    return false;
-  }
-
-  if (!token.expiresAt) {
-    return true;
-  }
-
-  return Date.now() + 30_000 < token.expiresAt;
 }
 
 function toTokenSet(
@@ -74,6 +64,7 @@ export class OAuthClient {
   private readonly logger: Logger;
   private readonly timeoutMs: number;
   private readonly onAuthorizationUrl?: (url: string) => Promise<void> | void;
+  private readonly tokenExpirySkewMs: number;
 
   constructor(
     private readonly server: OAuthServerConfig,
@@ -83,10 +74,28 @@ export class OAuthClient {
     this.logger = options.logger;
     this.timeoutMs = options.timeoutMs;
     this.onAuthorizationUrl = options.onAuthorizationUrl;
+    this.tokenExpirySkewMs =
+      typeof options.tokenExpirySkewMs === "number" &&
+      Number.isFinite(options.tokenExpirySkewMs) &&
+      options.tokenExpirySkewMs > 0
+        ? options.tokenExpirySkewMs
+        : DEFAULT_TOKEN_EXPIRY_SKEW_MS;
+  }
+
+  private isTokenValid(token?: TokenSet): boolean {
+    if (!token?.accessToken) {
+      return false;
+    }
+
+    if (!token.expiresAt) {
+      return true;
+    }
+
+    return Date.now() + this.tokenExpirySkewMs < token.expiresAt;
   }
 
   async ensureToken(current?: TokenSet): Promise<TokenSet> {
-    if (isTokenValid(current)) {
+    if (this.isTokenValid(current)) {
       return current as TokenSet;
     }
 
@@ -158,7 +167,10 @@ export class OAuthClient {
 
   private async loginInteractive(): Promise<TokenSet> {
     const endpoints = await this.resolveEndpoints();
-    const callbackServer = await startLocalCallbackServer();
+    const callbackServer = await startLocalCallbackServer(
+      "/oauth2/callback",
+      this.server.redirectPort
+    );
 
     try {
       const { verifier, challenge } = generatePkcePair();
@@ -175,13 +187,28 @@ export class OAuthClient {
 
       this.logger.info("oauth_login_started", {
         serverId: this.server.id,
-        issuer: this.server.issuer
+        issuer: this.server.issuer,
+        authorizationEndpoint: `${authorizeUrl.origin}${authorizeUrl.pathname}`
       });
 
       if (this.onAuthorizationUrl) {
         await this.onAuthorizationUrl(authorizeUrl.toString());
       } else {
-        await openExternalUrl(authorizeUrl.toString());
+        try {
+          await openExternalUrl(authorizeUrl.toString());
+        } catch (error) {
+          this.logger.warn("oauth_open_browser_failed", {
+            serverId: this.server.id,
+            error: error instanceof Error ? error.message : String(error)
+          });
+          // Write the URL to stderr directly so the terminal user can copy-paste
+          // it. Bypasses the structured logger to avoid leaking the `state`
+          // nonce (and other query params) into centralized log aggregation,
+          // which would enable login-CSRF via a forged localhost callback.
+          process.stderr.write(
+            `\n[lightbridge-opencode] open this URL to authenticate (${this.server.id}):\n${authorizeUrl.toString()}\n\n`
+          );
+        }
       }
 
       const callback = await callbackServer.waitForCode();

@@ -22,6 +22,24 @@ interface OAuthProviderExtension {
   authorizationEndpoint?: string;
   tokenEndpoint?: string;
   jwksUri?: string;
+  redirectPort?: number;
+}
+
+function asRedirectPort(value: unknown, source: string): number | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value > 0 &&
+    value < 65536
+  ) {
+    return value;
+  }
+  throw new Error(
+    `${source}.redirectPort must be an integer in [1, 65535] (received ${JSON.stringify(value)})`
+  );
 }
 
 interface ManagedProviders {
@@ -134,7 +152,8 @@ function parseOAuthExtension(provider: OpenCodeProviderConfig): OAuthProviderExt
     nameOverrides: asStringMap(raw.nameOverrides),
     authorizationEndpoint: asString(raw.authorizationEndpoint),
     tokenEndpoint: asString(raw.tokenEndpoint),
-    jwksUri: asString(raw.jwksUri)
+    jwksUri: asString(raw.jwksUri),
+    redirectPort: asRedirectPort(raw.redirectPort, "provider.options.lightbridgeOAuth2")
   };
 }
 
@@ -186,7 +205,11 @@ function parsePluginConfigServers(config: OpenCodeConfig, logger: Logger): OAuth
       nameOverrides: asStringMap(entry.nameOverrides),
       authorizationEndpoint: asString(entry.authorizationEndpoint),
       tokenEndpoint: asString(entry.tokenEndpoint),
-      jwksUri: asString(entry.jwksUri)
+      jwksUri: asString(entry.jwksUri),
+      redirectPort: asRedirectPort(
+        entry.redirectPort,
+        `pluginConfig.oauth2ModelSync.servers[${index}] (id=${id})`
+      )
     });
   }
 
@@ -246,7 +269,8 @@ function collectManagedProviders(config: OpenCodeConfig, logger: Logger): Manage
       nameOverrides: extension.nameOverrides,
       authorizationEndpoint: extension.authorizationEndpoint,
       tokenEndpoint: extension.tokenEndpoint,
-      jwksUri: extension.jwksUri
+      jwksUri: extension.jwksUri,
+      redirectPort: extension.redirectPort
     });
   }
 

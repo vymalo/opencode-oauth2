@@ -96,6 +96,53 @@ describe("OpenCode plugin hooks", () => {
     expect(output.headers.Authorization).toBe("Bearer cached-access");
   });
 
+  it("rejects invalid redirectPort in provider.options.lightbridgeOAuth2", async () => {
+    const cacheDir = await mkdtemp(join(tmpdir(), "opencode-hook-badport-"));
+    const hooks = await createHooks(cacheDir);
+
+    const config: Record<string, unknown> = {
+      provider: {
+        "example-ai": {
+          options: {
+            baseURL: "https://api.example.com/v1",
+            lightbridgeOAuth2: {
+              issuer: "https://auth.example.com",
+              clientId: "opencode-client",
+              scopes: ["openid", "offline_access"],
+              redirectPort: 70000
+            }
+          }
+        }
+      }
+    };
+
+    await expect(hooks.config?.(config as never)).rejects.toThrow(/redirectPort/);
+  });
+
+  it("rejects invalid redirectPort in pluginConfig.oauth2ModelSync.servers", async () => {
+    const cacheDir = await mkdtemp(join(tmpdir(), "opencode-hook-badport-plugincfg-"));
+    const hooks = await createHooks(cacheDir);
+
+    const config: Record<string, unknown> = {
+      pluginConfig: {
+        oauth2ModelSync: {
+          servers: [
+            {
+              id: "bad-port-server",
+              issuer: "https://auth.example.com",
+              baseURL: "https://api.example.com/v1",
+              clientId: "opencode-client",
+              scopes: ["openid"],
+              redirectPort: "not-a-number"
+            }
+          ]
+        }
+      }
+    };
+
+    await expect(hooks.config?.(config as never)).rejects.toThrow(/redirectPort/);
+  });
+
   it("supports pluginConfig.oauth2ModelSync.servers and materializes provider entries", async () => {
     const cacheDir = await mkdtemp(join(tmpdir(), "opencode-hook-pluginconfig-"));
     const hooks = await createHooks(cacheDir);

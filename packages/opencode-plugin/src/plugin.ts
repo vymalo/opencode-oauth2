@@ -136,7 +136,8 @@ export class OAuth2ModelSyncPlugin {
       fetchImpl: this.options.fetchImpl,
       logger: this.logger,
       timeoutMs: this.config.httpTimeoutMs,
-      onAuthorizationUrl: this.options.onAuthorizationUrl
+      onAuthorizationUrl: this.options.onAuthorizationUrl,
+      tokenExpirySkewMs: this.config.tokenExpirySkewMs
     });
 
     const previousState = runtime.state;
@@ -203,7 +204,8 @@ export class OAuth2ModelSyncPlugin {
       fetchImpl: this.options.fetchImpl,
       logger: this.logger,
       timeoutMs: this.config.httpTimeoutMs,
-      onAuthorizationUrl: this.options.onAuthorizationUrl
+      onAuthorizationUrl: this.options.onAuthorizationUrl,
+      tokenExpirySkewMs: this.config.tokenExpirySkewMs
     });
 
     const token = await oauth.ensureToken(runtime.state.token);
