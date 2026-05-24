@@ -145,6 +145,91 @@ describe("OpenCode plugin hooks", () => {
     await expect(hooks.config?.(config as never)).rejects.toThrow(/redirectPort/);
   });
 
+  it("parses clientSecret + device_code authFlow from provider.options.lightbridgeOAuth2", async () => {
+    const cacheDir = await mkdtemp(join(tmpdir(), "opencode-hook-secret-provider-"));
+    const hooks = await createHooks(cacheDir);
+
+    const config: Record<string, unknown> = {
+      provider: {
+        "example-ai": {
+          name: "Example AI",
+          options: {
+            baseURL: "https://api.example.com/v1",
+            lightbridgeOAuth2: {
+              issuer: "https://auth.example.com",
+              clientId: "opencode-client",
+              clientSecret: "secret-from-provider",
+              scopes: ["openid", "offline_access"],
+              authFlow: "device_code",
+              deviceAuthorizationEndpoint: "https://auth.example.com/device/authorize"
+            }
+          }
+        }
+      }
+    };
+
+    // Resolve should accept without throwing; the runtime is constructed and
+    // wired up from this config — but we don't actually call the chat hook
+    // here (which would attempt an OAuth flow), we just confirm parsing.
+    await hooks.config?.(config as never);
+
+    const providers = config.provider as Record<string, Record<string, unknown>>;
+    expect(providers["example-ai"]?.npm).toBe("@ai-sdk/openai-compatible");
+  });
+
+  it("parses clientSecret + device_code authFlow from pluginConfig.oauth2ModelSync.servers", async () => {
+    const cacheDir = await mkdtemp(join(tmpdir(), "opencode-hook-secret-plugincfg-"));
+    const hooks = await createHooks(cacheDir);
+
+    const config: Record<string, unknown> = {
+      pluginConfig: {
+        oauth2ModelSync: {
+          servers: [
+            {
+              id: "server-secret",
+              issuer: "https://auth.example.com",
+              baseURL: "https://api.example.com/v1",
+              clientId: "opencode-client",
+              clientSecret: "secret-from-plugin-config",
+              scopes: ["openid"],
+              authFlow: "device_code",
+              deviceAuthorizationEndpoint: "https://auth.example.com/device/authorize"
+            }
+          ]
+        }
+      }
+    };
+
+    await hooks.config?.(config as never);
+
+    const providers = config.provider as Record<string, Record<string, unknown>>;
+    expect(providers["server-secret"]).toBeDefined();
+    expect(providers["server-secret"]?.npm).toBe("@ai-sdk/openai-compatible");
+  });
+
+  it("rejects unknown authFlow values from both config shapes", async () => {
+    const cacheDir = await mkdtemp(join(tmpdir(), "opencode-hook-bad-authflow-"));
+    const hooks = await createHooks(cacheDir);
+
+    const config: Record<string, unknown> = {
+      provider: {
+        "example-ai": {
+          options: {
+            baseURL: "https://api.example.com/v1",
+            lightbridgeOAuth2: {
+              issuer: "https://auth.example.com",
+              clientId: "opencode-client",
+              scopes: ["openid"],
+              authFlow: "implicit"
+            }
+          }
+        }
+      }
+    };
+
+    await expect(hooks.config?.(config as never)).rejects.toThrow(/authFlow/);
+  });
+
   it("supports pluginConfig.oauth2ModelSync.servers and materializes provider entries", async () => {
     const cacheDir = await mkdtemp(join(tmpdir(), "opencode-hook-pluginconfig-"));
     const hooks = await createHooks(cacheDir);

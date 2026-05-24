@@ -166,6 +166,126 @@ describe("validateConfig", () => {
     ).toThrow(/tokenExpirySkewMs/);
   });
 
+  it("accepts an optional clientSecret on a server", () => {
+    const result = validateConfig({
+      servers: [
+        {
+          id: "server-1",
+          issuer: "https://auth.example.com",
+          baseURL: "https://api.example.com/v1",
+          clientId: "client-id",
+          clientSecret: "shh-it-is-a-secret",
+          scopes: ["openid"]
+        }
+      ]
+    });
+
+    expect(result.servers[0]?.clientSecret).toBe("shh-it-is-a-secret");
+  });
+
+  it("treats an omitted clientSecret as undefined", () => {
+    const result = validateConfig({
+      servers: [
+        {
+          id: "server-1",
+          issuer: "https://auth.example.com",
+          baseURL: "https://api.example.com/v1",
+          clientId: "client-id",
+          scopes: ["openid"]
+        }
+      ]
+    });
+
+    expect(result.servers[0]?.clientSecret).toBeUndefined();
+  });
+
+  it("rejects an empty-string clientSecret", () => {
+    expect(() =>
+      validateConfig({
+        servers: [
+          {
+            id: "server-1",
+            issuer: "https://auth.example.com",
+            baseURL: "https://api.example.com/v1",
+            clientId: "client-id",
+            clientSecret: "",
+            scopes: ["openid"]
+          }
+        ]
+      })
+    ).toThrow(/clientSecret/);
+  });
+
+  it("defaults authFlow to authorization_code", () => {
+    const result = validateConfig({
+      servers: [
+        {
+          id: "server-1",
+          issuer: "https://auth.example.com",
+          baseURL: "https://api.example.com/v1",
+          clientId: "client-id",
+          scopes: ["openid"]
+        }
+      ]
+    });
+
+    expect(result.servers[0]?.authFlow).toBe("authorization_code");
+  });
+
+  it("accepts authFlow: device_code", () => {
+    const result = validateConfig({
+      servers: [
+        {
+          id: "server-1",
+          issuer: "https://auth.example.com",
+          baseURL: "https://api.example.com/v1",
+          clientId: "client-id",
+          scopes: ["openid"],
+          authFlow: "device_code"
+        }
+      ]
+    });
+
+    expect(result.servers[0]?.authFlow).toBe("device_code");
+  });
+
+  it("rejects an unknown authFlow value", () => {
+    expect(() =>
+      validateConfig({
+        servers: [
+          {
+            id: "server-1",
+            issuer: "https://auth.example.com",
+            baseURL: "https://api.example.com/v1",
+            clientId: "client-id",
+            scopes: ["openid"],
+            // biome-ignore lint/suspicious/noExplicitAny: testing invalid input
+            authFlow: "client_credentials" as any
+          }
+        ]
+      })
+    ).toThrow(/authFlow/);
+  });
+
+  it("accepts an optional deviceAuthorizationEndpoint override", () => {
+    const result = validateConfig({
+      servers: [
+        {
+          id: "server-1",
+          issuer: "https://auth.example.com",
+          baseURL: "https://api.example.com/v1",
+          clientId: "client-id",
+          scopes: ["openid"],
+          deviceAuthorizationEndpoint: "https://auth.example.com/device/authorize"
+        }
+      ]
+    });
+
+    expect(result.servers[0]?.deviceAuthorizationEndpoint).toBe(
+      "https://auth.example.com/device/authorize"
+    );
+  });
+
   it("rejects invalid scopes", () => {
     expect(() =>
       validateConfig({

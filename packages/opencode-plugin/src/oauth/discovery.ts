@@ -2,6 +2,7 @@ export interface OidcMetadata {
   issuer: string;
   authorization_endpoint: string;
   token_endpoint: string;
+  device_authorization_endpoint?: string;
   jwks_uri?: string;
 }
 
@@ -40,6 +41,7 @@ export async function discoverOidcMetadata(
       issuer: metadata.issuer ?? issuer,
       authorization_endpoint: metadata.authorization_endpoint,
       token_endpoint: metadata.token_endpoint,
+      device_authorization_endpoint: metadata.device_authorization_endpoint,
       jwks_uri: metadata.jwks_uri
     };
   } finally {

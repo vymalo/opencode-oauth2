@@ -2,8 +2,9 @@ import type { OAuthServerConfig } from "../config.js";
 import { DEFAULT_TOKEN_EXPIRY_SKEW_MS } from "../config.js";
 import type { Logger } from "../logging.js";
 import type { TokenSet } from "../types.js";
-import { discoverOidcMetadata } from "./discovery.js";
 import { openExternalUrl } from "./browser.js";
+import { acquireTokenViaDeviceCode } from "./device-code.js";
+import { discoverOidcMetadata } from "./discovery.js";
 import { startLocalCallbackServer } from "./local-callback.js";
 import { generatePkcePair, generateStateToken } from "./pkce.js";
 
@@ -18,9 +19,10 @@ interface OAuthClientOptions {
 interface ResolvedEndpoints {
   authorizationEndpoint: string;
   tokenEndpoint: string;
+  deviceAuthorizationEndpoint?: string;
 }
 
-function toTokenSet(
+export function toTokenSet(
   payload: Record<string, unknown>,
   options?: {
     fallbackRefreshToken?: string;
@@ -112,22 +114,41 @@ export class OAuthClient {
       }
     }
 
+    if (this.server.authFlow === "device_code") {
+      return this.loginDeviceCode();
+    }
+
     return this.loginInteractive();
   }
 
   private async resolveEndpoints(): Promise<ResolvedEndpoints> {
-    if (this.server.authorizationEndpoint && this.server.tokenEndpoint) {
+    if (
+      this.server.authorizationEndpoint &&
+      this.server.tokenEndpoint &&
+      (this.server.authFlow !== "device_code" || this.server.deviceAuthorizationEndpoint)
+    ) {
       return {
         authorizationEndpoint: this.server.authorizationEndpoint,
-        tokenEndpoint: this.server.tokenEndpoint
+        tokenEndpoint: this.server.tokenEndpoint,
+        deviceAuthorizationEndpoint: this.server.deviceAuthorizationEndpoint
       };
     }
 
     const metadata = await discoverOidcMetadata(this.server.issuer, this.fetchImpl, this.timeoutMs);
 
+    const deviceAuthorizationEndpoint =
+      this.server.deviceAuthorizationEndpoint ?? metadata.device_authorization_endpoint;
+
+    if (this.server.authFlow === "device_code" && !deviceAuthorizationEndpoint) {
+      throw new Error(
+        "device_code flow requires a device_authorization_endpoint (either configured or discovered)"
+      );
+    }
+
     return {
       authorizationEndpoint: this.server.authorizationEndpoint ?? metadata.authorization_endpoint,
-      tokenEndpoint: this.server.tokenEndpoint ?? metadata.token_endpoint
+      tokenEndpoint: this.server.tokenEndpoint ?? metadata.token_endpoint,
+      deviceAuthorizationEndpoint
     };
   }
 
@@ -138,6 +159,10 @@ export class OAuthClient {
       refresh_token: refreshToken,
       client_id: this.server.clientId
     });
+
+    if (this.server.clientSecret) {
+      body.set("client_secret", this.server.clientSecret);
+    }
 
     const response = await this.fetchImpl(endpoints.tokenEndpoint, {
       method: "POST",
@@ -159,6 +184,27 @@ export class OAuthClient {
     });
 
     return nextToken;
+  }
+
+  private async loginDeviceCode(): Promise<TokenSet> {
+    const endpoints = await this.resolveEndpoints();
+    if (!endpoints.deviceAuthorizationEndpoint) {
+      throw new Error(
+        "device_code flow requires a device_authorization_endpoint (either configured or discovered)"
+      );
+    }
+
+    return acquireTokenViaDeviceCode({
+      deviceAuthorizationEndpoint: endpoints.deviceAuthorizationEndpoint,
+      tokenEndpoint: endpoints.tokenEndpoint,
+      clientId: this.server.clientId,
+      clientSecret: this.server.clientSecret,
+      scopes: this.server.scopes,
+      serverId: this.server.id,
+      logger: this.logger,
+      fetchImpl: this.fetchImpl,
+      timeoutMs: this.timeoutMs
+    });
   }
 
   private async loginInteractive(): Promise<TokenSet> {
@@ -212,19 +258,25 @@ export class OAuthClient {
         throw new Error("OAuth callback state mismatch");
       }
 
+      const tokenBody = new URLSearchParams({
+        grant_type: "authorization_code",
+        code: callback.code,
+        client_id: this.server.clientId,
+        redirect_uri: callbackServer.redirectUri,
+        code_verifier: verifier
+      });
+
+      if (this.server.clientSecret) {
+        tokenBody.set("client_secret", this.server.clientSecret);
+      }
+
       const tokenResponse = await this.fetchImpl(endpoints.tokenEndpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
           Accept: "application/json"
         },
-        body: new URLSearchParams({
-          grant_type: "authorization_code",
-          code: callback.code,
-          client_id: this.server.clientId,
-          redirect_uri: callbackServer.redirectUri,
-          code_verifier: verifier
-        })
+        body: tokenBody
       });
 
       if (!tokenResponse.ok) {

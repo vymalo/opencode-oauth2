@@ -5,7 +5,8 @@ OAuth2/OIDC model sync plugin for OpenCode.
 ## What It Does
 
 - Registers OpenAI-compatible providers into OpenCode config
-- Performs OAuth2/OIDC auth code flow with PKCE
+- Performs OAuth2/OIDC auth code flow with PKCE (or RFC 8628 device authorization grant)
+- Supports confidential clients via `clientSecret`
 - Stores and refreshes provider access tokens
 - Fetches and normalizes provider model catalogs
 - Injects `Authorization` headers at chat request time
@@ -75,6 +76,19 @@ Add plugin package to OpenCode:
   }
 }
 ```
+
+### Optional fields
+
+These apply to both config shapes above.
+
+| Field | Default | Notes |
+| --- | --- | --- |
+| `clientSecret` | _(unset)_ | For confidential clients. Sent as `client_secret` on every token-endpoint POST (auth-code exchange, refresh, device-code poll). Never logged. PKCE is still required for `authorization_code`. |
+| `authFlow` | `"authorization_code"` | Set to `"device_code"` for browserless RFC 8628 device authorization grant. The user_code + verification URI are written to the structured logger and to stderr. |
+| `deviceAuthorizationEndpoint` | discovered | Override for the device authorization endpoint. Otherwise discovered from `device_authorization_endpoint` in the OIDC metadata. Only used when `authFlow === "device_code"`. |
+| `authorizationEndpoint` | discovered | Override for the authorization endpoint. |
+| `tokenEndpoint` | discovered | Override for the token endpoint. |
+| `redirectPort` | random | Fixed port for the local callback server (authorization-code only). |
 
 ## OAuth Token Requirements
 

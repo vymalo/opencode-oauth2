@@ -2,19 +2,26 @@ export const DEFAULT_SYNC_INTERVAL_MINUTES = 60;
 export const DEFAULT_HTTP_TIMEOUT_MS = 15_000;
 export const DEFAULT_TOKEN_EXPIRY_SKEW_MS = 30_000;
 
+export type OAuthAuthFlow = "authorization_code" | "device_code";
+
+export const DEFAULT_AUTH_FLOW: OAuthAuthFlow = "authorization_code";
+
 export interface OAuthServerConfigInput {
   id: string;
   name?: string;
   issuer: string;
   baseURL: string;
   clientId: string;
+  clientSecret?: string;
   scopes: string[];
   syncIntervalMinutes?: number;
   nameOverrides?: Record<string, string>;
   authorizationEndpoint?: string;
   tokenEndpoint?: string;
+  deviceAuthorizationEndpoint?: string;
   jwksUri?: string;
   redirectPort?: number;
+  authFlow?: OAuthAuthFlow;
 }
 
 export interface OAuth2ModelSyncConfigInput {
@@ -30,13 +37,16 @@ export interface OAuthServerConfig {
   issuer: string;
   baseURL: string;
   clientId: string;
+  clientSecret?: string;
   scopes: string[];
   syncIntervalMinutes: number;
   nameOverrides: Record<string, string>;
   authorizationEndpoint?: string;
   tokenEndpoint?: string;
+  deviceAuthorizationEndpoint?: string;
   jwksUri?: string;
   redirectPort?: number;
+  authFlow: OAuthAuthFlow;
 }
 
 export interface OAuth2ModelSyncConfig {
@@ -73,6 +83,20 @@ function validateRedirectPort(value: unknown, path: string): number | undefined 
   return value;
 }
 
+function validateAuthFlow(value: unknown, path: string): OAuthAuthFlow {
+  if (value === undefined || value === null) {
+    return DEFAULT_AUTH_FLOW;
+  }
+
+  if (value === "authorization_code" || value === "device_code") {
+    return value;
+  }
+
+  throw new Error(
+    `${path} must be either "authorization_code" or "device_code" (received ${JSON.stringify(value)})`
+  );
+}
+
 function normalizeServerConfig(input: OAuthServerConfigInput, index: number): OAuthServerConfig {
   const path = `servers[${index}]`;
 
@@ -91,6 +115,15 @@ function normalizeServerConfig(input: OAuthServerConfigInput, index: number): OA
       : DEFAULT_SYNC_INTERVAL_MINUTES;
 
   const redirectPort = validateRedirectPort(input.redirectPort, `${path}.redirectPort`);
+  const authFlow = validateAuthFlow(input.authFlow, `${path}.authFlow`);
+
+  let clientSecret: string | undefined;
+  if (input.clientSecret !== undefined && input.clientSecret !== null) {
+    if (typeof input.clientSecret !== "string" || input.clientSecret.length === 0) {
+      throw new Error(`${path}.clientSecret must be a non-empty string when provided`);
+    }
+    clientSecret = input.clientSecret;
+  }
 
   return {
     id,
@@ -98,13 +131,16 @@ function normalizeServerConfig(input: OAuthServerConfigInput, index: number): OA
     issuer,
     baseURL,
     clientId,
+    clientSecret,
     scopes,
     syncIntervalMinutes,
     nameOverrides: input.nameOverrides ?? {},
     authorizationEndpoint: input.authorizationEndpoint,
     tokenEndpoint: input.tokenEndpoint,
+    deviceAuthorizationEndpoint: input.deviceAuthorizationEndpoint,
     jwksUri: input.jwksUri,
-    redirectPort
+    redirectPort,
+    authFlow
   };
 }
 
