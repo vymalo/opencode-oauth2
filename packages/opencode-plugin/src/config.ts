@@ -2,7 +2,7 @@ export const DEFAULT_SYNC_INTERVAL_MINUTES = 60;
 export const DEFAULT_HTTP_TIMEOUT_MS = 15_000;
 export const DEFAULT_TOKEN_EXPIRY_SKEW_MS = 30_000;
 
-export type OAuthAuthFlow = "authorization_code" | "device_code";
+export type OAuthAuthFlow = "authorization_code" | "device_code" | "client_credentials";
 
 export const DEFAULT_AUTH_FLOW: OAuthAuthFlow = "authorization_code";
 
@@ -88,12 +88,12 @@ function validateAuthFlow(value: unknown, path: string): OAuthAuthFlow {
     return DEFAULT_AUTH_FLOW;
   }
 
-  if (value === "authorization_code" || value === "device_code") {
+  if (value === "authorization_code" || value === "device_code" || value === "client_credentials") {
     return value;
   }
 
   throw new Error(
-    `${path} must be either "authorization_code" or "device_code" (received ${JSON.stringify(value)})`
+    `${path} must be one of "authorization_code" | "device_code" | "client_credentials" (received ${JSON.stringify(value)})`
   );
 }
 
@@ -123,6 +123,10 @@ function normalizeServerConfig(input: OAuthServerConfigInput, index: number): OA
       throw new Error(`${path}.clientSecret must be a non-empty string when provided`);
     }
     clientSecret = input.clientSecret;
+  }
+
+  if (authFlow === "client_credentials" && !clientSecret) {
+    throw new Error(`${path}.clientSecret is required when authFlow is "client_credentials"`);
   }
 
   return {

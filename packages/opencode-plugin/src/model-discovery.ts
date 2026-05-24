@@ -1,4 +1,5 @@
 import type { Logger } from "./logging.js";
+import { readResponseBodyPreview, redactUrl } from "./oauth/http-utils.js";
 import type { RawModel, TokenSet } from "./types.js";
 
 export interface ModelDiscoveryOptions {
@@ -68,22 +69,27 @@ export async function fetchModels(
     });
 
     if (!response.ok) {
-      let body = "";
-      try {
-        body = (await response.text()).slice(0, 500);
-      } catch {
-        // body unreadable — fall through with status only
+      const safeUrl = redactUrl(modelsUrl);
+      // Log the body separately at warn-level so the structured logger's
+      // redaction filter has a chance to scrub matching keys, and so the body
+      // never lands inside a thrown error.message (which callers like
+      // syncServer log verbatim).
+      const preview = await readResponseBodyPreview(response, 500);
+      if (preview) {
+        options.logger?.warn("model_discovery_error_body", {
+          modelsUrl: safeUrl,
+          status: response.status,
+          bodyPreview: preview
+        });
       }
-      throw new Error(
-        `model discovery failed (${response.status}) at ${modelsUrl}${body ? `: ${body}` : ""}`
-      );
+      throw new Error(`model discovery failed (${response.status}) at ${safeUrl}`);
     }
 
     const payload = (await response.json()) as unknown;
     const models = parseModelsResponse(payload);
 
     if (models.length === 0) {
-      options.logger?.warn("model_discovery_empty", { modelsUrl });
+      options.logger?.warn("model_discovery_empty", { modelsUrl: redactUrl(modelsUrl) });
     }
 
     return models;

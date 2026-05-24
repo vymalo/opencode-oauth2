@@ -31,14 +31,21 @@ function hasValidTokenShape(token: unknown): boolean {
   }
 
   const candidate = token as Record<string, unknown>;
-  return (
-    typeof candidate.accessToken === "string" &&
-    candidate.accessToken.length > 0 &&
-    typeof candidate.tokenType === "string" &&
-    candidate.tokenType.length > 0 &&
-    typeof candidate.refreshToken === "string" &&
-    candidate.refreshToken.length > 0
-  );
+  if (
+    typeof candidate.accessToken !== "string" ||
+    candidate.accessToken.length === 0 ||
+    typeof candidate.tokenType !== "string" ||
+    candidate.tokenType.length === 0
+  ) {
+    return false;
+  }
+
+  // refreshToken is optional: client_credentials grant never returns one.
+  // When present, it must be a non-empty string.
+  if (candidate.refreshToken !== undefined) {
+    return typeof candidate.refreshToken === "string" && candidate.refreshToken.length > 0;
+  }
+  return true;
 }
 
 export class FileCacheStore {

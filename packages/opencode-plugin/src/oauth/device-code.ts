@@ -1,6 +1,7 @@
 import type { Logger } from "../logging.js";
 import type { TokenSet } from "../types.js";
 import { toTokenSet } from "./client.js";
+import { readResponseBodyPreview as readResponsePreviewShared } from "./http-utils.js";
 
 const DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
 const DEFAULT_POLL_INTERVAL_SECONDS = 5;
@@ -48,12 +49,7 @@ function defaultSleep(ms: number): Promise<void> {
 }
 
 async function readResponseBodyPreview(response: Response): Promise<string> {
-  try {
-    const text = await response.text();
-    return text.slice(0, ERROR_BODY_PREVIEW_CHARS);
-  } catch {
-    return "";
-  }
+  return readResponsePreviewShared(response, ERROR_BODY_PREVIEW_CHARS);
 }
 
 function parseDeviceAuthorizationResponse(payload: unknown): DeviceAuthorizationResponse {
@@ -88,7 +84,7 @@ function parseDeviceAuthorizationResponse(payload: unknown): DeviceAuthorization
 
   const interval =
     typeof record.interval === "number" && Number.isFinite(record.interval) && record.interval > 0
-      ? Math.floor(record.interval)
+      ? Math.ceil(record.interval)
       : undefined;
 
   return {
@@ -139,9 +135,16 @@ export async function acquireTokenViaDeviceCode(
 
   if (!deviceAuthResponse.ok) {
     const preview = await readResponseBodyPreview(deviceAuthResponse);
-    throw new Error(
-      `device authorization request failed (${deviceAuthResponse.status})${preview ? `: ${preview}` : ""}`
-    );
+    // Log the body separately at error-level so the logger's redaction filter
+    // can scrub matching keys (e.g. a verbose provider echoing `client_secret`
+    // back in the response). Never embed the body in error.message — callers
+    // log error.message verbatim, bypassing the redaction filter.
+    logger.error("oauth_device_authorization_failed", {
+      serverId,
+      status: deviceAuthResponse.status,
+      bodyPreview: preview || undefined
+    });
+    throw new Error(`device authorization request failed (${deviceAuthResponse.status})`);
   }
 
   const deviceAuthPayload = (await deviceAuthResponse.json()) as unknown;
@@ -247,15 +250,26 @@ export async function acquireTokenViaDeviceCode(
         throw new Error("device code authorization denied by user");
       }
 
+      logger.error("oauth_device_code_poll_failed", {
+        serverId,
+        status: pollResponse.status,
+        errorCode: errorCode || undefined,
+        // Body preview goes here, not into the thrown error.message — callers
+        // log error.message verbatim and would bypass the logger's redaction.
+        bodyPreview: text || undefined
+      });
       throw new Error(
-        `device code token poll failed (${pollResponse.status}): ${text || errorCode || "unknown error"}`
+        `device code token poll failed (${pollResponse.status})${errorCode ? `: ${errorCode}` : ""}`
       );
     }
 
     // 5xx — surface to caller; do not retry indefinitely on server errors.
     const preview = await readResponseBodyPreview(pollResponse);
-    throw new Error(
-      `device code token poll failed (${pollResponse.status})${preview ? `: ${preview}` : ""}`
-    );
+    logger.error("oauth_device_code_poll_failed", {
+      serverId,
+      status: pollResponse.status,
+      bodyPreview: preview || undefined
+    });
+    throw new Error(`device code token poll failed (${pollResponse.status})`);
   }
 }
