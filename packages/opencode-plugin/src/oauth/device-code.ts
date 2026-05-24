@@ -1,12 +1,20 @@
 import type { Logger } from "../logging.js";
 import type { TokenSet } from "../types.js";
 import { toTokenSet } from "./client.js";
-import { readResponseBodyPreview as readResponsePreviewShared } from "./http-utils.js";
+import {
+  readResponseBodyPreview as readResponsePreviewShared,
+  scrubSecrets
+} from "./http-utils.js";
 
 const DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
 const DEFAULT_POLL_INTERVAL_SECONDS = 5;
 const SLOW_DOWN_INCREMENT_SECONDS = 5;
 const ERROR_BODY_PREVIEW_CHARS = 500;
+// Cap on consecutive transient fetch failures during polling. Beyond this we
+// stop hiding what is almost certainly a permanent misconfiguration (wrong
+// token endpoint, TLS failure, etc.) and surface the most recent error so the
+// user gets actionable feedback well before `expires_in` runs out.
+const MAX_CONSECUTIVE_TRANSIENT_FAILURES = 3;
 
 export interface AcquireTokenViaDeviceCodeOptions {
   deviceAuthorizationEndpoint: string;
@@ -142,7 +150,7 @@ export async function acquireTokenViaDeviceCode(
     logger.error("oauth_device_authorization_failed", {
       serverId,
       status: deviceAuthResponse.status,
-      bodyPreview: preview || undefined
+      bodyPreview: preview ? scrubSecrets(preview) : undefined
     });
     throw new Error(`device authorization request failed (${deviceAuthResponse.status})`);
   }
@@ -171,6 +179,7 @@ export async function acquireTokenViaDeviceCode(
   // Step 2: poll the token endpoint.
   let intervalSeconds = deviceAuth.interval ?? DEFAULT_POLL_INTERVAL_SECONDS;
   const deadlineMs = now() + deviceAuth.expires_in * 1000;
+  let consecutiveTransientFailures = 0;
 
   while (true) {
     const remainingMs = deadlineMs - now();
@@ -204,14 +213,30 @@ export async function acquireTokenViaDeviceCode(
         body: pollBody,
         signal: pollController.signal
       });
+      // Reset the failure counter on any HTTP response — even a non-2xx one
+      // is a sign the network round-trip is working; only thrown exceptions
+      // (network errors, timeouts) count as transient failures.
+      consecutiveTransientFailures = 0;
     } catch (error) {
-      // Network error or abort timeout — treat as transient and retry on the
-      // next interval rather than terminating the whole flow. The
-      // expires_in deadline check at the top of the loop bounds this.
+      consecutiveTransientFailures++;
+      // Back off polling after a transient failure per RFC 8628 §3.5 (clients
+      // SHOULD slow down on connection errors). Capped to keep the loop
+      // responsive when the failures eventually resolve.
+      intervalSeconds += SLOW_DOWN_INCREMENT_SECONDS;
       logger.warn("oauth_device_code_poll_transient_error", {
         serverId,
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
+        consecutiveFailures: consecutiveTransientFailures,
+        nextIntervalSeconds: intervalSeconds
       });
+      if (consecutiveTransientFailures >= MAX_CONSECUTIVE_TRANSIENT_FAILURES) {
+        // Almost certainly a permanent misconfiguration (wrong endpoint,
+        // TLS failure, etc.). Fail fast with actionable feedback rather than
+        // burning the rest of the expires_in window on hopeless polling.
+        throw new Error(
+          `device code poll failed ${consecutiveTransientFailures} times in a row (last error: ${error instanceof Error ? error.message : String(error)})`
+        );
+      }
       continue;
     } finally {
       clearTimeout(pollTimeout);
@@ -265,7 +290,9 @@ export async function acquireTokenViaDeviceCode(
         errorCode: errorCode || undefined,
         // Body preview goes here, not into the thrown error.message — callers
         // log error.message verbatim and would bypass the logger's redaction.
-        bodyPreview: text || undefined
+        // scrubSecrets masks token-shaped substrings the field-name-based
+        // logger redaction would otherwise miss.
+        bodyPreview: text ? scrubSecrets(text) : undefined
       });
       throw new Error(
         `device code token poll failed (${pollResponse.status})${errorCode ? `: ${errorCode}` : ""}`
@@ -277,7 +304,7 @@ export async function acquireTokenViaDeviceCode(
     logger.error("oauth_device_code_poll_failed", {
       serverId,
       status: pollResponse.status,
-      bodyPreview: preview || undefined
+      bodyPreview: preview ? scrubSecrets(preview) : undefined
     });
     throw new Error(`device code token poll failed (${pollResponse.status})`);
   }

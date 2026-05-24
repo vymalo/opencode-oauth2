@@ -1,5 +1,5 @@
 import type { Logger } from "./logging.js";
-import { readResponseBodyPreview, redactUrl } from "./oauth/http-utils.js";
+import { readResponseBodyPreview, redactUrl, scrubSecrets } from "./oauth/http-utils.js";
 import type { RawModel, TokenSet } from "./types.js";
 
 export interface ModelDiscoveryOptions {
@@ -79,7 +79,7 @@ export async function fetchModels(
         options.logger?.warn("model_discovery_error_body", {
           modelsUrl: safeUrl,
           status: response.status,
-          bodyPreview: preview
+          bodyPreview: scrubSecrets(preview)
         });
       }
       throw new Error(`model discovery failed (${response.status}) at ${safeUrl}`);

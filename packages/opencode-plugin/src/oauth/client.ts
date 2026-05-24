@@ -5,7 +5,7 @@ import type { TokenSet } from "../types.js";
 import { openExternalUrl } from "./browser.js";
 import { acquireTokenViaDeviceCode } from "./device-code.js";
 import { discoverOidcMetadata } from "./discovery.js";
-import { readResponseBodyPreview } from "./http-utils.js";
+import { readResponseBodyPreview, scrubSecrets } from "./http-utils.js";
 import { startLocalCallbackServer } from "./local-callback.js";
 import { generatePkcePair, generateStateToken } from "./pkce.js";
 
@@ -91,10 +91,39 @@ export class OAuthClient {
     }
 
     if (!token.expiresAt) {
-      return true;
+      // For client_credentials, re-authentication is cheap (one machine-to-
+      // machine POST) and the spec allows but does not require `expires_in`.
+      // Without a declared lifetime we cannot tell if the server-side token
+      // has been revoked, so we re-acquire each time to avoid persistent 401s
+      // after the server's idea of the token has expired.
+      return this.server.authFlow !== "client_credentials";
     }
 
     return Date.now() + this.tokenExpirySkewMs < token.expiresAt;
+  }
+
+  /**
+   * POST to a token endpoint with an AbortController-backed timeout. Without
+   * this, a stalled IdP would block the warmup path indefinitely (the plugin
+   * runs token requests at config-hook time for cached/client_credentials
+   * paths).
+   */
+  private async postWithTimeout(url: string, body: URLSearchParams): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      return await this.fetchImpl(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json"
+        },
+        body,
+        signal: controller.signal
+      });
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async ensureToken(
@@ -164,24 +193,19 @@ export class OAuthClient {
       tokenEndpoint: endpoints.tokenEndpoint
     });
 
-    const response = await this.fetchImpl(endpoints.tokenEndpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Accept: "application/json"
-      },
-      body
-    });
+    const response = await this.postWithTimeout(endpoints.tokenEndpoint, body);
 
     if (!response.ok) {
       const bodyPreview = await readResponseBodyPreview(response, 500);
       // Log the body separately so the logger's redaction can scrub matching
-      // keys (e.g. `client_secret` echoed by a verbose provider) and so the
-      // body never lands in a thrown error.message that callers log verbatim.
+      // keys, and run it through scrubSecrets to also mask token-shaped
+      // substrings that IdPs sometimes echo back inside arbitrary error text
+      // (where field-name-based redaction wouldn't help). Never embed the
+      // body in throw new Error(...) — callers log error.message verbatim.
       this.logger.error("oauth_client_credentials_failed", {
         serverId: this.server.id,
         status: response.status,
-        bodyPreview: bodyPreview || undefined
+        bodyPreview: bodyPreview ? scrubSecrets(bodyPreview) : undefined
       });
       throw new Error(`client_credentials token request failed (${response.status})`);
     }
@@ -265,14 +289,7 @@ export class OAuthClient {
       body.set("client_secret", this.server.clientSecret);
     }
 
-    const response = await this.fetchImpl(endpoints.tokenEndpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Accept: "application/json"
-      },
-      body
-    });
+    const response = await this.postWithTimeout(endpoints.tokenEndpoint, body);
 
     if (!response.ok) {
       throw new Error(`refresh token exchange failed (${response.status})`);
@@ -378,14 +395,7 @@ export class OAuthClient {
         tokenBody.set("client_secret", this.server.clientSecret);
       }
 
-      const tokenResponse = await this.fetchImpl(endpoints.tokenEndpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Accept: "application/json"
-        },
-        body: tokenBody
-      });
+      const tokenResponse = await this.postWithTimeout(endpoints.tokenEndpoint, tokenBody);
 
       if (!tokenResponse.ok) {
         throw new Error(`authorization code exchange failed (${tokenResponse.status})`);

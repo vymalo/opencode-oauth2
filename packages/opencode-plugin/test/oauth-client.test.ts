@@ -203,6 +203,57 @@ describe("OAuthClient token lifecycle", () => {
     expect(captured?.body.get("scope")).toBe(server.scopes.join(" "));
   });
 
+  it("re-acquires client_credentials when the cached token has no expiry (never trust a tokenless lifetime)", async () => {
+    const server = createServerConfig({
+      authFlow: "client_credentials",
+      clientSecret: "machine-secret"
+    });
+
+    let calls = 0;
+    const client = new OAuthClient(server, {
+      logger: createSilentLogger(),
+      timeoutMs: 5000,
+      fetchImpl: async () => {
+        calls++;
+        // Server omits expires_in — spec-allowed but operationally dangerous.
+        return new Response(JSON.stringify({ access_token: `t-${calls}`, token_type: "Bearer" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+    });
+
+    // First call acquires fresh.
+    const t1 = await client.ensureToken();
+    expect(t1.accessToken).toBe("t-1");
+    expect(t1.expiresAt).toBeUndefined();
+
+    // Passing the no-expiry cached token must still trigger re-acquisition.
+    const t2 = await client.ensureToken(t1);
+    expect(t2.accessToken).toBe("t-2");
+    expect(calls).toBe(2);
+  });
+
+  it("aborts the client_credentials POST when it exceeds timeoutMs", async () => {
+    const server = createServerConfig({
+      authFlow: "client_credentials",
+      clientSecret: "s"
+    });
+
+    const client = new OAuthClient(server, {
+      logger: createSilentLogger(),
+      timeoutMs: 50,
+      fetchImpl: ((_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("aborted", "AbortError"));
+          });
+        })) as typeof fetch
+    });
+
+    await expect(client.ensureToken()).rejects.toThrow();
+  });
+
   it("re-acquires via client_credentials when the cached token expires (no refresh attempted)", async () => {
     const server = createServerConfig({
       authFlow: "client_credentials",

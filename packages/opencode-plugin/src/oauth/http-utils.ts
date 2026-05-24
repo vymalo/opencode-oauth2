@@ -72,3 +72,64 @@ export async function readResponseBodyPreview(response: Response, maxChars = 500
 
   return collected;
 }
+
+// Names of token/credential fields commonly echoed back by misbehaving IdPs in
+// error responses. Used both for JSON-style ("name":"value") and form-style
+// (name=value&...) substitution.
+const SECRET_FIELD_NAMES = [
+  "access_token",
+  "refresh_token",
+  "id_token",
+  "client_secret",
+  "client_assertion",
+  "code",
+  "device_code",
+  "password",
+  "assertion",
+  "subject_token",
+  "actor_token"
+];
+
+const REDACTED = "[redacted]";
+
+// Pre-built patterns so we don't re-compile on every call.
+const SECRET_JSON_PATTERN = new RegExp(
+  // "name"  :  "value"      (also handles escaped quotes inside value)
+  `("(?:${SECRET_FIELD_NAMES.join("|")})"\\s*:\\s*)"(?:\\\\.|[^"\\\\])*"`,
+  "gi"
+);
+const SECRET_FORM_PATTERN = new RegExp(
+  // name=value (terminated by & or end-of-string)
+  `(\\b(?:${SECRET_FIELD_NAMES.join("|")}))=([^&\\s]+)`,
+  "gi"
+);
+// Bearer / Basic prefixes in headers/messages, plus bare JWT-shaped strings.
+const BEARER_PATTERN = /\b(Bearer|Basic)\s+([A-Za-z0-9._\-+/=]+)/g;
+const JWT_PATTERN = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g;
+
+/**
+ * Mask token/credential substrings inside an arbitrary text body before it
+ * lands in a structured log entry. Field-name-based redaction in upstream
+ * loggers only matches whole field NAMES — it does not scrub secrets embedded
+ * in arbitrary string VALUES (like an IdP error body that echoes back the
+ * client_secret it received).
+ *
+ * Catches:
+ *   - JSON: `"access_token": "..."` and the other SECRET_FIELD_NAMES
+ *   - form bodies: `client_secret=...`
+ *   - Bearer/Basic auth headers
+ *   - bare JWT-shaped strings
+ *
+ * Anything not matching stays intact, so error messages keep their diagnostic
+ * value (status code, error kind, descriptions, etc.).
+ */
+export function scrubSecrets(text: string): string {
+  if (!text) {
+    return text;
+  }
+  return text
+    .replace(SECRET_JSON_PATTERN, `$1"${REDACTED}"`)
+    .replace(SECRET_FORM_PATTERN, `$1=${REDACTED}`)
+    .replace(BEARER_PATTERN, `$1 ${REDACTED}`)
+    .replace(JWT_PATTERN, REDACTED);
+}

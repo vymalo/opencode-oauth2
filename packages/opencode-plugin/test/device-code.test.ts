@@ -443,4 +443,93 @@ describe("acquireTokenViaDeviceCode", () => {
     expect(transientWarn).toBeDefined();
     expect(transientWarn?.fields?.error).toMatch(/ECONNRESET/);
   });
+
+  it("bumps polling interval after a transient fetch failure (RFC 8628 §3.5)", async () => {
+    const sleeps: number[] = [];
+    let pollCount = 0;
+    const fetchImpl: typeof fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/device")) {
+        return new Response(
+          JSON.stringify({
+            device_code: "dc",
+            user_code: "UC",
+            verification_uri: "https://auth.example.com/device",
+            expires_in: 60,
+            interval: 2
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      pollCount++;
+      if (pollCount === 1) {
+        throw new Error("transient");
+      }
+      return new Response(
+        JSON.stringify({
+          access_token: "a",
+          refresh_token: "r",
+          token_type: "Bearer",
+          expires_in: 3600
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    await acquireTokenViaDeviceCode({
+      deviceAuthorizationEndpoint: "https://auth.example.com/device",
+      tokenEndpoint: "https://auth.example.com/token",
+      clientId: "client",
+      scopes: ["openid"],
+      serverId: "example-ai",
+      logger: createSilentLogger(),
+      fetchImpl,
+      timeoutMs: 1000,
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+      now: () => 1_000_000
+    });
+
+    // First sleep: server interval 2s
+    expect(sleeps[0]).toBe(2000);
+    // After transient failure: bumped by SLOW_DOWN_INCREMENT_SECONDS (5s) → 7s
+    expect(sleeps[1]).toBe(7000);
+  });
+
+  it("gives up after N consecutive transient failures rather than burning the expires_in window", async () => {
+    const fetchImpl: typeof fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/device")) {
+        return new Response(
+          JSON.stringify({
+            device_code: "dc",
+            user_code: "UC",
+            verification_uri: "https://auth.example.com/device",
+            expires_in: 600,
+            interval: 1
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      // Every poll throws — simulates a permanent misconfiguration the
+      // retry loop should NOT keep papering over.
+      throw new Error("permanent");
+    }) as typeof fetch;
+
+    await expect(
+      acquireTokenViaDeviceCode({
+        deviceAuthorizationEndpoint: "https://auth.example.com/device",
+        tokenEndpoint: "https://auth.example.com/token",
+        clientId: "client",
+        scopes: ["openid"],
+        serverId: "example-ai",
+        logger: createSilentLogger(),
+        fetchImpl,
+        timeoutMs: 1000,
+        sleep: async () => undefined,
+        now: () => 1_000_000
+      })
+    ).rejects.toThrow(/poll failed .* in a row/);
+  });
 });
