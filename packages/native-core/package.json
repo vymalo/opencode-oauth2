@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "build": "echo 'TODO: build native-core (napi-rs)'",
-    "lint": "echo 'TODO: lint native-core'",
+    "lint": "echo 'native-core: lint via cargo (todo)'",
     "typecheck": "echo 'TODO: typecheck native-core'",
     "test": "echo 'TODO: test native-core'",
-    "format": "echo 'TODO: format native-core'"
+    "format": "echo 'native-core: format via cargo (todo)'"
   }
 }

@@ -6,10 +6,11 @@
   "scripts": {
     "build": "node ./scripts/build.mjs",
     "clean": "rm -rf dist",
-    "lint": "echo 'TODO: lint plugin-bundle'",
+    "lint": "biome lint .",
     "typecheck": "echo 'TODO: typecheck plugin-bundle'",
     "test": "echo 'TODO: test plugin-bundle'",
-    "format": "echo 'TODO: format plugin-bundle'"
+    "format": "biome format --write .",
+    "format:check": "biome format ."
   },
   "devDependencies": {
     "@lightbridge/opencode-plugin": "workspace:*",

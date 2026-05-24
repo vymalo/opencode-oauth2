@@ -37,10 +37,11 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "lint": "echo 'TODO: lint opencode-plugin'",
+    "lint": "biome lint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "format": "echo 'TODO: format opencode-plugin'"
+    "format": "biome format --write .",
+    "format:check": "biome format ."
   },
   "dependencies": {
     "@opencode-ai/plugin": "1.2.24"
