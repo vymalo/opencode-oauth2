@@ -14,6 +14,14 @@ interface ServerRuntime {
 
 interface StartOptions {
   warmup?: boolean;
+  /**
+   * Whether warmup is allowed to open a browser / start the device-code poll
+   * for first-time auth on uncached `authorization_code` / `device_code`
+   * providers. Defaults to "TTY detected" — interactive in real terminals,
+   * non-interactive in CI/headless contexts so startup never hangs on a
+   * callback that will never arrive.
+   */
+  interactive?: boolean;
 }
 
 export interface PluginOptions {
@@ -75,11 +83,19 @@ export class OAuth2ModelSyncPlugin {
 
     await this.initialize();
     const warmup = options.warmup ?? true;
+    // Warmup interactivity tracks the host process: an attached TTY (a real
+    // terminal) means a user can complete an interactive flow, so warmup
+    // allows browser/device-code paths if needed for first-time provider
+    // setup. Without a TTY (CI, daemonized run, piped stdin) we stay
+    // non-interactive so startup never hangs on a callback that will never
+    // arrive. Callers can override explicitly via `interactive`.
+    const interactiveWarmup =
+      options.interactive ?? Boolean(process.stdin?.isTTY && process.stdout?.isTTY);
 
     for (const server of this.config.servers) {
       if (warmup) {
         try {
-          await this.syncServer(server.id);
+          await this.syncServer(server.id, { interactive: interactiveWarmup });
         } catch (error) {
           this.logger.warn("sync_startup_failed", {
             serverId: server.id,
@@ -122,7 +138,10 @@ export class OAuth2ModelSyncPlugin {
     return snapshots;
   }
 
-  async syncServer(serverId: string): Promise<ServerSnapshot> {
+  async syncServer(
+    serverId: string,
+    options: { interactive?: boolean } = {}
+  ): Promise<ServerSnapshot> {
     const server = this.requireServerConfig(serverId);
 
     const runtime = this.runtimeByServer.get(serverId);
@@ -130,7 +149,7 @@ export class OAuth2ModelSyncPlugin {
       throw new Error(`runtime not initialized for server: ${serverId}`);
     }
 
-    this.logger.info("sync_start", { serverId });
+    this.logger.info("sync_start", { serverId, interactive: options.interactive !== false });
     const oauth = new OAuthClient(server, {
       fetchImpl: this.options.fetchImpl,
       logger: this.logger,
@@ -142,7 +161,9 @@ export class OAuth2ModelSyncPlugin {
     const previousState = runtime.state;
 
     try {
-      const token = await oauth.ensureToken(previousState.token);
+      const token = await oauth.ensureToken(previousState.token, {
+        interactive: options.interactive
+      });
       const rawModels = await fetchModels(server.baseURL, token, {
         fetchImpl: this.options.fetchImpl,
         timeoutMs: this.config.httpTimeoutMs,

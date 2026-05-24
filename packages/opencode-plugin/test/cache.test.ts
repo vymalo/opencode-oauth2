@@ -32,7 +32,28 @@ describe("FileCacheStore", () => {
     expect(rawContent).toContain("refresh-token");
   });
 
-  it("drops cached tokens that do not contain refreshToken", async () => {
+  it("keeps cached tokens without refreshToken (client_credentials grant)", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "opencode-cache-no-refresh-"));
+    const store = new FileCacheStore(baseDir);
+    await store.ensureReady();
+
+    await store.saveServerState({
+      serverId: "example-ai",
+      updatedAt: Date.now(),
+      rawModels: [{ id: "glm-5" }],
+      models: [{ id: "glm-5", displayName: "GLM 5" }],
+      token: {
+        accessToken: "access-token",
+        tokenType: "Bearer"
+      }
+    });
+
+    const loaded = await store.loadServerState("example-ai");
+    expect(loaded?.token?.accessToken).toBe("access-token");
+    expect(loaded?.token?.refreshToken).toBeUndefined();
+  });
+
+  it("drops cached tokens with malformed required fields", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "opencode-cache-invalid-"));
     const store = new FileCacheStore(baseDir);
     await store.ensureReady();
@@ -51,7 +72,7 @@ describe("FileCacheStore", () => {
 
     const filePath = join(baseDir, "example-ai.json");
     const persisted = JSON.parse(await readFile(filePath, "utf8")) as Record<string, unknown>;
-    delete (persisted.token as Record<string, unknown>).refreshToken;
+    delete (persisted.token as Record<string, unknown>).accessToken;
 
     await writeFile(filePath, `${JSON.stringify(persisted, null, 2)}\n`, "utf8");
 

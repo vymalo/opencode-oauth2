@@ -260,7 +260,7 @@ describe("validateConfig", () => {
             clientId: "client-id",
             scopes: ["openid"],
             // biome-ignore lint/suspicious/noExplicitAny: testing invalid input
-            authFlow: "client_credentials" as any
+            authFlow: "implicit_grant" as any
           }
         ]
       })

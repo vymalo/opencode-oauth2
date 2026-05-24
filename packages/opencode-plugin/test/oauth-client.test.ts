@@ -167,6 +167,297 @@ describe("OAuthClient token lifecycle", () => {
     expect(serialized).not.toMatch(/redirect_uri=/);
   });
 
+  it("acquires a token via the client_credentials grant", async () => {
+    const server = createServerConfig({
+      authFlow: "client_credentials",
+      clientSecret: "machine-secret"
+    });
+
+    let captured: { url: string; body: URLSearchParams } | undefined;
+    const client = new OAuthClient(server, {
+      logger: createSilentLogger(),
+      timeoutMs: 5000,
+      fetchImpl: async (input, init) => {
+        captured = { url: String(input), body: parseFormBody(init) };
+        return new Response(
+          JSON.stringify({
+            access_token: "machine-access",
+            token_type: "Bearer",
+            expires_in: 3600
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+    });
+
+    const token = await client.ensureToken();
+
+    expect(token.accessToken).toBe("machine-access");
+    expect(token.refreshToken).toBeUndefined();
+    expect(token.expiresAt).toBeTypeOf("number");
+
+    expect(captured?.url).toBe(server.tokenEndpoint);
+    expect(captured?.body.get("grant_type")).toBe("client_credentials");
+    expect(captured?.body.get("client_id")).toBe(server.clientId);
+    expect(captured?.body.get("client_secret")).toBe("machine-secret");
+    expect(captured?.body.get("scope")).toBe(server.scopes.join(" "));
+  });
+
+  it("re-acquires client_credentials when the cached token has no expiry (never trust a tokenless lifetime)", async () => {
+    const server = createServerConfig({
+      authFlow: "client_credentials",
+      clientSecret: "machine-secret"
+    });
+
+    let calls = 0;
+    const client = new OAuthClient(server, {
+      logger: createSilentLogger(),
+      timeoutMs: 5000,
+      fetchImpl: async () => {
+        calls++;
+        // Server omits expires_in — spec-allowed but operationally dangerous.
+        return new Response(JSON.stringify({ access_token: `t-${calls}`, token_type: "Bearer" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+    });
+
+    // First call acquires fresh.
+    const t1 = await client.ensureToken();
+    expect(t1.accessToken).toBe("t-1");
+    expect(t1.expiresAt).toBeUndefined();
+
+    // Passing the no-expiry cached token must still trigger re-acquisition.
+    const t2 = await client.ensureToken(t1);
+    expect(t2.accessToken).toBe("t-2");
+    expect(calls).toBe(2);
+  });
+
+  it("aborts the client_credentials POST when it exceeds timeoutMs", async () => {
+    const server = createServerConfig({
+      authFlow: "client_credentials",
+      clientSecret: "s"
+    });
+
+    const client = new OAuthClient(server, {
+      logger: createSilentLogger(),
+      timeoutMs: 50,
+      fetchImpl: ((_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("aborted", "AbortError"));
+          });
+        })) as typeof fetch
+    });
+
+    await expect(client.ensureToken()).rejects.toThrow();
+  });
+
+  it("re-acquires via client_credentials when the cached token expires (no refresh attempted)", async () => {
+    const server = createServerConfig({
+      authFlow: "client_credentials",
+      clientSecret: "machine-secret"
+    });
+
+    const calls: URLSearchParams[] = [];
+    const client = new OAuthClient(server, {
+      logger: createSilentLogger(),
+      timeoutMs: 5000,
+      fetchImpl: async (_input, init) => {
+        calls.push(parseFormBody(init));
+        return new Response(
+          JSON.stringify({
+            access_token: "fresh-machine",
+            token_type: "Bearer",
+            expires_in: 3600
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+    });
+
+    const token = await client.ensureToken({
+      accessToken: "stale",
+      tokenType: "Bearer",
+      expiresAt: Date.now() - 1000
+    });
+
+    expect(token.accessToken).toBe("fresh-machine");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.get("grant_type")).toBe("client_credentials");
+  });
+
+  it("does not log clientSecret on success or failure of client_credentials", async () => {
+    const server = createServerConfig({
+      authFlow: "client_credentials",
+      clientSecret: "VERY-SECRET-VALUE"
+    });
+
+    type Entry = { level: string; event: string; fields?: Record<string, unknown> };
+    const entries: Entry[] = [];
+    const recordingLogger = {
+      debug(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "debug", event, fields });
+      },
+      info(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "info", event, fields });
+      },
+      warn(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "warn", event, fields });
+      },
+      error(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "error", event, fields });
+      }
+    };
+
+    const okClient = new OAuthClient(server, {
+      logger: recordingLogger,
+      timeoutMs: 5000,
+      fetchImpl: async () =>
+        new Response(JSON.stringify({ access_token: "a", token_type: "Bearer", expires_in: 60 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        })
+    });
+    await okClient.ensureToken();
+
+    const failClient = new OAuthClient(server, {
+      logger: recordingLogger,
+      timeoutMs: 5000,
+      fetchImpl: async () => new Response("invalid_client", { status: 401 })
+    });
+    await expect(failClient.ensureToken()).rejects.toThrow();
+
+    const serialized = JSON.stringify(entries);
+    expect(serialized).not.toContain("VERY-SECRET-VALUE");
+  });
+
+  it("refuses to start interactive flow when called with interactive=false (no cached token)", async () => {
+    const server = createServerConfig();
+
+    let fetchCalls = 0;
+    const client = new OAuthClient(server, {
+      logger: createSilentLogger(),
+      timeoutMs: 5000,
+      fetchImpl: async () => {
+        fetchCalls++;
+        throw new Error("fetch must not be called in non-interactive path with no cached token");
+      }
+    });
+
+    await expect(client.ensureToken(undefined, { interactive: false })).rejects.toThrow(
+      /interactive authentication required/
+    );
+    expect(fetchCalls).toBe(0);
+  });
+
+  it("refreshes when interactive=false and a refresh token is cached", async () => {
+    const server = createServerConfig();
+
+    const client = new OAuthClient(server, {
+      logger: createSilentLogger(),
+      timeoutMs: 5000,
+      fetchImpl: async (_input, init) => {
+        const body = parseFormBody(init);
+        expect(body.get("grant_type")).toBe("refresh_token");
+        return new Response(
+          JSON.stringify({
+            access_token: "refreshed",
+            token_type: "Bearer",
+            expires_in: 3600
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+    });
+
+    const token = await client.ensureToken(
+      {
+        accessToken: "old",
+        tokenType: "Bearer",
+        refreshToken: "rt",
+        expiresAt: Date.now() - 1000
+      },
+      { interactive: false }
+    );
+
+    expect(token.accessToken).toBe("refreshed");
+  });
+
+  it("client_credentials works under interactive=false (no user, no browser)", async () => {
+    const server = createServerConfig({
+      authFlow: "client_credentials",
+      clientSecret: "s"
+    });
+
+    const client = new OAuthClient(server, {
+      logger: createSilentLogger(),
+      timeoutMs: 5000,
+      fetchImpl: async () =>
+        new Response(JSON.stringify({ access_token: "a", token_type: "Bearer", expires_in: 60 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        })
+    });
+
+    const token = await client.ensureToken(undefined, { interactive: false });
+    expect(token.accessToken).toBe("a");
+  });
+
+  it("device_code skips OIDC discovery when tokenEndpoint + deviceAuthorizationEndpoint are configured", async () => {
+    const server = createServerConfig({
+      authFlow: "device_code",
+      deviceAuthorizationEndpoint: "https://auth.example.com/device",
+      // Intentionally omit authorizationEndpoint — the device flow doesn't need it.
+      authorizationEndpoint: undefined as never
+    });
+
+    const calls: string[] = [];
+    const client = new OAuthClient(server, {
+      logger: createSilentLogger(),
+      timeoutMs: 1000,
+      sleep: async () => undefined,
+      now: () => 1_000_000,
+      fetchImpl: async (input) => {
+        const url = String(input);
+        calls.push(url);
+        // Hard-fail discovery so we prove it was never called.
+        if (url.includes("openid-configuration")) {
+          throw new Error("discovery must not be called when device endpoints are explicit");
+        }
+        if (url === server.deviceAuthorizationEndpoint) {
+          return new Response(
+            JSON.stringify({
+              device_code: "DC",
+              user_code: "UC",
+              verification_uri: "https://auth.example.com/device",
+              expires_in: 60,
+              interval: 1
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        if (url === server.tokenEndpoint) {
+          return new Response(
+            JSON.stringify({
+              access_token: "a",
+              refresh_token: "r",
+              token_type: "Bearer",
+              expires_in: 3600
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        throw new Error(`unexpected URL: ${url}`);
+      }
+    } as never);
+
+    const token = await client.ensureToken();
+    expect(token.accessToken).toBe("a");
+    expect(calls.some((u) => u.includes("openid-configuration"))).toBe(false);
+  });
+
   it("treats a soon-to-expire token as invalid when skew exceeds remaining lifetime", async () => {
     const server = createServerConfig();
 

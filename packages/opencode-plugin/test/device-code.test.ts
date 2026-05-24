@@ -370,4 +370,272 @@ describe("acquireTokenViaDeviceCode", () => {
       })
     ).rejects.toThrow(/expired/i);
   });
+
+  it("retries on transient fetch errors during polling instead of failing the flow", async () => {
+    let callIndex = 0;
+    const fetchImpl: typeof fetch = (async () => {
+      callIndex++;
+      if (callIndex === 1) {
+        // device authorization request
+        return new Response(
+          JSON.stringify({
+            device_code: "dev-code",
+            user_code: "ABCD-EFGH",
+            verification_uri: "https://auth.example.com/device",
+            expires_in: 60,
+            interval: 1
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (callIndex === 2) {
+        // First poll — simulate a transient network error
+        throw new Error("ECONNRESET");
+      }
+      if (callIndex === 3) {
+        // Second poll — succeeds
+        return new Response(
+          JSON.stringify({
+            access_token: "a",
+            refresh_token: "r",
+            token_type: "Bearer",
+            expires_in: 3600
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      throw new Error(`unexpected fetch (call #${callIndex})`);
+    }) as typeof fetch;
+
+    type Entry = { level: string; event: string; fields?: Record<string, unknown> };
+    const entries: Entry[] = [];
+    const logger = {
+      debug(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "debug", event, fields });
+      },
+      info(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "info", event, fields });
+      },
+      warn(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "warn", event, fields });
+      },
+      error(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "error", event, fields });
+      }
+    };
+
+    const token = await acquireTokenViaDeviceCode({
+      deviceAuthorizationEndpoint: "https://auth.example.com/device",
+      tokenEndpoint: "https://auth.example.com/token",
+      clientId: "client",
+      scopes: ["openid"],
+      serverId: "example-ai",
+      logger,
+      fetchImpl,
+      timeoutMs: 1000,
+      sleep: async () => undefined,
+      now: () => 1_000_000
+    });
+
+    expect(token.accessToken).toBe("a");
+    expect(callIndex).toBe(3);
+    const transientWarn = entries.find((e) => e.event === "oauth_device_code_poll_transient_error");
+    expect(transientWarn).toBeDefined();
+    expect(transientWarn?.fields?.error).toMatch(/ECONNRESET/);
+  });
+
+  it("bumps polling interval after a transient fetch failure (RFC 8628 §3.5)", async () => {
+    const sleeps: number[] = [];
+    let pollCount = 0;
+    const fetchImpl: typeof fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/device")) {
+        return new Response(
+          JSON.stringify({
+            device_code: "dc",
+            user_code: "UC",
+            verification_uri: "https://auth.example.com/device",
+            expires_in: 60,
+            interval: 2
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      pollCount++;
+      if (pollCount === 1) {
+        throw new Error("transient");
+      }
+      return new Response(
+        JSON.stringify({
+          access_token: "a",
+          refresh_token: "r",
+          token_type: "Bearer",
+          expires_in: 3600
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    await acquireTokenViaDeviceCode({
+      deviceAuthorizationEndpoint: "https://auth.example.com/device",
+      tokenEndpoint: "https://auth.example.com/token",
+      clientId: "client",
+      scopes: ["openid"],
+      serverId: "example-ai",
+      logger: createSilentLogger(),
+      fetchImpl,
+      timeoutMs: 1000,
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+      now: () => 1_000_000
+    });
+
+    // First sleep: server interval 2s
+    expect(sleeps[0]).toBe(2000);
+    // After transient failure: bumped by SLOW_DOWN_INCREMENT_SECONDS (5s) → 7s
+    expect(sleeps[1]).toBe(7000);
+  });
+
+  it("keeps polling through many transient transport failures until expires_in (no hard retry cap)", async () => {
+    // Simulates a VPN flap / DNS flakiness mid-flow: 10 consecutive fetch
+    // throws, then a successful poll. Round-3 hard-cap-3 would have failed
+    // here; the round-4 behavior is to keep polling, backing off, until
+    // either expires_in elapses or a real terminal OAuth error arrives.
+    let pollCount = 0;
+    const fetchImpl: typeof fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/device")) {
+        return new Response(
+          JSON.stringify({
+            device_code: "dc",
+            user_code: "UC",
+            verification_uri: "https://auth.example.com/device",
+            expires_in: 600,
+            interval: 1
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      pollCount++;
+      if (pollCount <= 10) {
+        throw new Error("ECONNRESET");
+      }
+      return new Response(
+        JSON.stringify({
+          access_token: "a",
+          refresh_token: "r",
+          token_type: "Bearer",
+          expires_in: 3600
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const token = await acquireTokenViaDeviceCode({
+      deviceAuthorizationEndpoint: "https://auth.example.com/device",
+      tokenEndpoint: "https://auth.example.com/token",
+      clientId: "client",
+      scopes: ["openid"],
+      serverId: "example-ai",
+      logger: createSilentLogger(),
+      fetchImpl,
+      timeoutMs: 1000,
+      sleep: async () => undefined,
+      now: () => 1_000_000
+    });
+
+    expect(token.accessToken).toBe("a");
+    expect(pollCount).toBe(11);
+  });
+
+  it("aborts immediately on TypeError (programming/config error, not a transient transport issue)", async () => {
+    const fetchImpl: typeof fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/device")) {
+        return new Response(
+          JSON.stringify({
+            device_code: "dc",
+            user_code: "UC",
+            verification_uri: "https://auth.example.com/device",
+            expires_in: 600,
+            interval: 1
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      // E.g. fetch throws TypeError("Invalid URL") on a malformed endpoint.
+      throw new TypeError("Invalid URL");
+    }) as typeof fetch;
+
+    await expect(
+      acquireTokenViaDeviceCode({
+        deviceAuthorizationEndpoint: "https://auth.example.com/device",
+        tokenEndpoint: "https://auth.example.com/token",
+        clientId: "client",
+        scopes: ["openid"],
+        serverId: "example-ai",
+        logger: createSilentLogger(),
+        fetchImpl,
+        timeoutMs: 1000,
+        sleep: async () => undefined,
+        now: () => 1_000_000
+      })
+    ).rejects.toThrow(/Invalid URL/);
+  });
+
+  it("caps polling interval growth after many transient failures", async () => {
+    // Confirms intervalSeconds doesn't grow without bound — once it hits the
+    // cap, subsequent transient failures don't make sleeps longer.
+    const sleeps: number[] = [];
+    let pollCount = 0;
+    const fetchImpl: typeof fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/device")) {
+        return new Response(
+          JSON.stringify({
+            device_code: "dc",
+            user_code: "UC",
+            verification_uri: "https://auth.example.com/device",
+            expires_in: 6000,
+            interval: 5
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      pollCount++;
+      if (pollCount <= 20) {
+        throw new Error("transient");
+      }
+      return new Response(
+        JSON.stringify({
+          access_token: "a",
+          refresh_token: "r",
+          token_type: "Bearer",
+          expires_in: 3600
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    await acquireTokenViaDeviceCode({
+      deviceAuthorizationEndpoint: "https://auth.example.com/device",
+      tokenEndpoint: "https://auth.example.com/token",
+      clientId: "client",
+      scopes: ["openid"],
+      serverId: "example-ai",
+      logger: createSilentLogger(),
+      fetchImpl,
+      timeoutMs: 1000,
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+      now: () => 1_000_000
+    });
+
+    // After several transient failures, interval should hit the cap (60s)
+    // and stay there — not keep climbing into hour-scale waits.
+    const maxSleep = Math.max(...sleeps);
+    expect(maxSleep).toBeLessThanOrEqual(60_000);
+  });
 });

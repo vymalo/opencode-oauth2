@@ -36,11 +36,11 @@ function asAuthFlow(value: unknown, source: string): OAuthAuthFlow | undefined {
   if (value === undefined || value === null) {
     return undefined;
   }
-  if (value === "authorization_code" || value === "device_code") {
+  if (value === "authorization_code" || value === "device_code" || value === "client_credentials") {
     return value;
   }
   throw new Error(
-    `${source}.authFlow must be "authorization_code" or "device_code" (received ${JSON.stringify(value)})`
+    `${source}.authFlow must be one of "authorization_code" | "device_code" | "client_credentials" (received ${JSON.stringify(value)})`
   );
 }
 

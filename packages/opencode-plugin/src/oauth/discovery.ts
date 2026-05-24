@@ -1,6 +1,10 @@
 export interface OidcMetadata {
   issuer: string;
-  authorization_endpoint: string;
+  // RFC 8414 (and OAuth 2.0 Authorization Server Metadata) allow servers that
+  // do not support browser-based flows to omit `authorization_endpoint`. The
+  // caller is expected to validate that the endpoints needed for its chosen
+  // grant are present.
+  authorization_endpoint?: string;
   token_endpoint: string;
   device_authorization_endpoint?: string;
   jwks_uri?: string;
@@ -33,8 +37,11 @@ export async function discoverOidcMetadata(
     }
 
     const metadata = (await response.json()) as Partial<OidcMetadata>;
-    if (!metadata.authorization_endpoint || !metadata.token_endpoint) {
-      throw new Error("OIDC metadata is missing required endpoints");
+    // Only the token_endpoint is universally required — every grant we support
+    // needs it. authorization_endpoint and device_authorization_endpoint are
+    // grant-specific; callers validate per their chosen flow.
+    if (!metadata.token_endpoint) {
+      throw new Error("OIDC metadata is missing token_endpoint");
     }
 
     return {
