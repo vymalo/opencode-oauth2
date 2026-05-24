@@ -10,11 +10,10 @@ import builtins from "builtin-modules";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Externalize: every Node built-in (with and without the `node:` prefix), the
-// opencode plugin host SDK, and the anticipated native addon package. Anything
-// else is bundled into the artifact.
+// Externalize: every Node built-in (with and without the `node:` prefix) and
+// the opencode plugin host SDK. Anything else is bundled into the artifact.
 const nodeBuiltins = new Set([...builtinModules, ...builtins]);
-const externalPackages = new Set(["@opencode-ai/plugin", "@lightbridge/native-core"]);
+const externalPackages = new Set(["@opencode-ai/plugin"]);
 
 /**
  * @param {string} id

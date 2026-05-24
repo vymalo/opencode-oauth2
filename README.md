@@ -84,7 +84,6 @@ This is a [pnpm](https://pnpm.io) monorepo.
 | --- | --- |
 | [`packages/opencode-plugin`](packages/opencode-plugin) | The runtime plugin — published as `@lightbridge/opencode-plugin` |
 | [`packages/plugin-bundle`](packages/plugin-bundle) | Rolldown-based bundling for distribution |
-| [`packages/native-core`](packages/native-core) | Optional Rust native scaffold (experimental) |
 | [`plans/prd.md`](plans/prd.md) | Product requirements and phased roadmap |
 
 ## Development
