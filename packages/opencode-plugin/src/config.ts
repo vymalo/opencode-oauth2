@@ -66,22 +66,14 @@ function validateRedirectPort(value: unknown, path: string): number | undefined 
     return undefined;
   }
 
-  if (
-    typeof value !== "number" ||
-    !Number.isInteger(value) ||
-    value <= 0 ||
-    value >= 65536
-  ) {
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0 || value >= 65536) {
     throw new Error(`${path} must be a positive integer less than 65536`);
   }
 
   return value;
 }
 
-function normalizeServerConfig(
-  input: OAuthServerConfigInput,
-  index: number
-): OAuthServerConfig {
+function normalizeServerConfig(input: OAuthServerConfigInput, index: number): OAuthServerConfig {
   const path = `servers[${index}]`;
 
   const id = ensureString(input.id, `${path}.id`);
@@ -116,9 +108,7 @@ function normalizeServerConfig(
   };
 }
 
-export function validateConfig(
-  input: OAuth2ModelSyncConfigInput
-): OAuth2ModelSyncConfig {
+export function validateConfig(input: OAuth2ModelSyncConfigInput): OAuth2ModelSyncConfig {
   if (!input || typeof input !== "object") {
     throw new Error("plugin config must be an object");
   }

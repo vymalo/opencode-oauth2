@@ -46,19 +46,14 @@ function normalizeToken(token: string): string {
   }
 
   if (/^\d+[a-z]+$/i.test(token)) {
-    return `${token.match(/^\d+/)?.[0] ?? ""}${token
-      .replace(/^\d+/, "")
-      .toLowerCase()}`;
+    return `${token.match(/^\d+/)?.[0] ?? ""}${token.replace(/^\d+/, "").toLowerCase()}`;
   }
 
   return titleCase(token);
 }
 
-export function normalizeModelId(
-  modelId: string,
-  overrides?: Record<string, string>
-): string {
-  if (overrides && overrides[modelId]) {
+export function normalizeModelId(modelId: string, overrides?: Record<string, string>): string {
+  if (overrides?.[modelId]) {
     return overrides[modelId];
   }
 

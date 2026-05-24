@@ -123,11 +123,7 @@ export class OAuthClient {
       };
     }
 
-    const metadata = await discoverOidcMetadata(
-      this.server.issuer,
-      this.fetchImpl,
-      this.timeoutMs
-    );
+    const metadata = await discoverOidcMetadata(this.server.issuer, this.fetchImpl, this.timeoutMs);
 
     return {
       authorizationEndpoint: this.server.authorizationEndpoint ?? metadata.authorization_endpoint,
