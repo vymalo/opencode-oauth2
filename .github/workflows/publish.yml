@@ -36,19 +36,19 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         # `release` events check out the tagged SHA, which is exactly what we
         # want — the tarball provenance attests the commit you tagged.
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
-          version: 10.26.0
+          version: 11.3.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          node-version: '24'
           cache: 'pnpm'
           registry-url: 'https://registry.npmjs.org'
           scope: '@vymalo'
@@ -145,7 +145,7 @@ jobs:
 
       - name: Attach tarball to GitHub Release
         if: ${{ github.event_name == 'release' && inputs.dry_run != true }}
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           # The tarball alongside the release page makes downstream
           # verification trivial (no need to fetch from npm just to inspect).

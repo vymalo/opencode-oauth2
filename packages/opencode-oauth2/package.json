@@ -30,7 +30,7 @@
     "dist"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "publishConfig": {
     "access": "public"
@@ -44,9 +44,10 @@
     "format:check": "biome format ."
   },
   "dependencies": {
-    "@opencode-ai/plugin": "1.2.24"
+    "@opencode-ai/plugin": "1.15.10"
   },
   "devDependencies": {
-    "vitest": "^2.1.9"
+    "vite": "^8.0.14",
+    "vitest": "^4.1.7"
   }
 }

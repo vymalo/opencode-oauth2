@@ -1,2 +1,10 @@
 packages:
   - packages/*
+
+# Native build scripts that are allowed to run on install.
+# esbuild is a vitest/vite transitive dep; msgpackr-extract is an optional
+# msgpack speedup. Both are widely-used packages with reputable maintainers
+# — keep this list minimal and audit before adding.
+onlyBuiltDependencies:
+  - esbuild
+  - msgpackr-extract
