@@ -5,7 +5,7 @@ import type { TokenSet } from "../types.js";
 import { openExternalUrl } from "./browser.js";
 import { acquireTokenViaDeviceCode } from "./device-code.js";
 import { discoverOidcMetadata } from "./discovery.js";
-import { readResponseBodyPreview, scrubSecrets } from "./http-utils.js";
+import { readResponseBodyPreview, redactUrl, scrubSecrets } from "./http-utils.js";
 import { startLocalCallbackServer } from "./local-callback.js";
 import { generatePkcePair, generateStateToken } from "./pkce.js";
 
@@ -190,7 +190,10 @@ export class OAuthClient {
 
     this.logger.info("oauth_client_credentials_started", {
       serverId: this.server.id,
-      tokenEndpoint: endpoints.tokenEndpoint
+      // tokenEndpoint comes from user-supplied config (or OIDC discovery off
+      // a user-supplied issuer); strip userinfo + query before logging so
+      // configs like `https://user:pass@.../token` don't leak credentials.
+      tokenEndpoint: redactUrl(endpoints.tokenEndpoint)
     });
 
     const response = await this.postWithTimeout(endpoints.tokenEndpoint, body);

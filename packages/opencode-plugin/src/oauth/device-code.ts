@@ -10,11 +10,12 @@ const DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
 const DEFAULT_POLL_INTERVAL_SECONDS = 5;
 const SLOW_DOWN_INCREMENT_SECONDS = 5;
 const ERROR_BODY_PREVIEW_CHARS = 500;
-// Cap on consecutive transient fetch failures during polling. Beyond this we
-// stop hiding what is almost certainly a permanent misconfiguration (wrong
-// token endpoint, TLS failure, etc.) and surface the most recent error so the
-// user gets actionable feedback well before `expires_in` runs out.
-const MAX_CONSECUTIVE_TRANSIENT_FAILURES = 3;
+// Cap on the polling interval itself, not on the number of retries. We never
+// hard-stop on transient transport errors — a VPN flap or DNS hiccup mid-flow
+// should not abort an in-progress device-code session. The `expires_in`
+// deadline bounds the overall wait. The cap keeps the interval from growing
+// without bound while we wait for transient conditions to clear.
+const MAX_POLL_INTERVAL_SECONDS = 60;
 
 export interface AcquireTokenViaDeviceCodeOptions {
   deviceAuthorizationEndpoint: string;
@@ -218,25 +219,35 @@ export async function acquireTokenViaDeviceCode(
       // (network errors, timeouts) count as transient failures.
       consecutiveTransientFailures = 0;
     } catch (error) {
+      // TypeError from fetch typically means a programming/configuration
+      // error (malformed URL, unsupported scheme) that won't resolve on
+      // retry. Fail fast on those instead of burning the expires_in window.
+      // Everything else (AbortError from timeout, network errors, DNS
+      // failures) is treated as transient and triggers backoff per
+      // RFC 8628 §3.5.
+      if (error instanceof TypeError) {
+        logger.error("oauth_device_code_poll_failed", {
+          serverId,
+          error: error.message
+        });
+        throw error;
+      }
       consecutiveTransientFailures++;
-      // Back off polling after a transient failure per RFC 8628 §3.5 (clients
-      // SHOULD slow down on connection errors). Capped to keep the loop
-      // responsive when the failures eventually resolve.
-      intervalSeconds += SLOW_DOWN_INCREMENT_SECONDS;
+      // Exponential backoff (capped) on transient transport errors. We do
+      // NOT hard-stop: VPN flaps, transient DNS/TLS outages, and similar
+      // short-lived disruptions are normal during a multi-minute device-code
+      // window. The `expires_in` deadline at the top of the loop is the
+      // sole termination condition.
+      intervalSeconds = Math.min(
+        intervalSeconds + SLOW_DOWN_INCREMENT_SECONDS,
+        MAX_POLL_INTERVAL_SECONDS
+      );
       logger.warn("oauth_device_code_poll_transient_error", {
         serverId,
         error: error instanceof Error ? error.message : String(error),
         consecutiveFailures: consecutiveTransientFailures,
         nextIntervalSeconds: intervalSeconds
       });
-      if (consecutiveTransientFailures >= MAX_CONSECUTIVE_TRANSIENT_FAILURES) {
-        // Almost certainly a permanent misconfiguration (wrong endpoint,
-        // TLS failure, etc.). Fail fast with actionable feedback rather than
-        // burning the rest of the expires_in window on hopeless polling.
-        throw new Error(
-          `device code poll failed ${consecutiveTransientFailures} times in a row (last error: ${error instanceof Error ? error.message : String(error)})`
-        );
-      }
       continue;
     } finally {
       clearTimeout(pollTimeout);
