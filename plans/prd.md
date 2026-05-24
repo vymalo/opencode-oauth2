@@ -158,7 +158,7 @@ As a Rust-capable maintainer, I want performance-sensitive work moved into a nat
 
 The product must be delivered as a pnpm workspace with at least three packages:
 
-* `packages/opencode-plugin`: runtime plugin package
+* `packages/opencode-oauth2`: runtime plugin package
 * `packages/plugin-bundle`: packaging/build-only package using Rolldown
 * `packages/native-core`: optional Rust native package
 
@@ -340,7 +340,7 @@ A pure TypeScript implementation must exist for all native functionality so the 
 
 ## 12. Proposed Package Design
 
-### 12.1 `opencode-plugin`
+### 12.1 `opencode-oauth2`
 
 Responsibilities:
 

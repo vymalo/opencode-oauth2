@@ -1,8 +1,8 @@
-// Rolldown bundling configuration for @lightbridge/opencode-plugin.
+// Rolldown bundling configuration for @vymalo/opencode-oauth2.
 //
-// Bundles the TypeScript entry from packages/opencode-plugin/src/index.ts into
+// Bundles the TypeScript entry from packages/opencode-oauth2/src/index.ts into
 // a single ESM artifact in packages/plugin-bundle/dist/index.mjs. The tsc build
-// in opencode-plugin remains the development entry; this is the release artifact.
+// in opencode-oauth2 remains the development entry; this is the release artifact.
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { builtinModules } from "node:module";
@@ -32,7 +32,7 @@ function isExternal(id) {
 
 /** @type {import('rolldown').RolldownOptions} */
 const config = {
-  input: resolve(__dirname, "../opencode-plugin/src/index.ts"),
+  input: resolve(__dirname, "../opencode-oauth2/src/index.ts"),
   external: isExternal,
   platform: "node",
   output: {

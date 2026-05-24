@@ -1,4 +1,4 @@
-# lightbridge-opencode
+# opencode-oauth2
 
 > Bring your own OAuth-protected LLM gateway to [OpenCode](https://opencode.ai).
 
@@ -38,7 +38,7 @@ In your OpenCode config:
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["@lightbridge/opencode-plugin"]
+  "plugin": ["@vymalo/opencode-oauth2"]
 }
 ```
 
@@ -46,13 +46,13 @@ Then declare a provider:
 
 ```jsonc
 {
-  "plugin": ["@lightbridge/opencode-plugin"],
+  "plugin": ["@vymalo/opencode-oauth2"],
   "provider": {
     "example-ai": {
       "name": "Example AI",
       "options": {
         "baseURL": "https://api.example.com/v1",
-        "lightbridgeOAuth2": {
+        "oauth2": {
           "issuer": "https://auth.example.com",
           "clientId": "opencode-client",
           "scopes": ["openid", "profile", "offline_access"],
@@ -64,7 +64,7 @@ Then declare a provider:
 }
 ```
 
-See [packages/opencode-plugin/README.md](packages/opencode-plugin/README.md) for the full configuration reference (including the alternative `pluginConfig.oauth2ModelSync.servers` layout).
+See [packages/opencode-oauth2/README.md](packages/opencode-oauth2/README.md) for the full configuration reference (including the alternative `pluginConfig.oauth2ModelSync.servers` layout).
 
 ## Token Policy
 
@@ -82,7 +82,7 @@ This is a [pnpm](https://pnpm.io) monorepo.
 
 | Package | Purpose |
 | --- | --- |
-| [`packages/opencode-plugin`](packages/opencode-plugin) | The runtime plugin — published as `@lightbridge/opencode-plugin` |
+| [`packages/opencode-oauth2`](packages/opencode-oauth2) | The runtime plugin — published as `@vymalo/opencode-oauth2` |
 | [`packages/plugin-bundle`](packages/plugin-bundle) | Rolldown-based bundling for distribution |
 | [`plans/prd.md`](plans/prd.md) | Product requirements and phased roadmap |
 
@@ -98,8 +98,8 @@ pnpm test
 Plugin-only iteration:
 
 ```bash
-pnpm --filter @lightbridge/opencode-plugin test
-pnpm --filter @lightbridge/opencode-plugin build
+pnpm --filter @vymalo/opencode-oauth2 test
+pnpm --filter @vymalo/opencode-oauth2 build
 ```
 
 For end-to-end usage against a local OpenCode install, see [GETTING_STARTED.md](GETTING_STARTED.md).
@@ -116,4 +116,4 @@ Issues and PRs are welcome. Please open an issue first for substantial changes s
 
 ## License
 
-[MIT](LICENSE) © adorsys-gis contributors
+[MIT](LICENSE) © vymalo contributors

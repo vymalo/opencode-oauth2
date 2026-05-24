@@ -18,9 +18,7 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
-  packages/native-core: {}
-
-  packages/opencode-plugin:
+  packages/opencode-oauth2:
     dependencies:
       '@opencode-ai/plugin':
         specifier: 1.2.24
@@ -32,9 +30,9 @@ importers:
 
   packages/plugin-bundle:
     devDependencies:
-      '@lightbridge/opencode-plugin':
+      '@vymalo/opencode-oauth2':
         specifier: workspace:*
-        version: link:../opencode-plugin
+        version: link:../opencode-oauth2
       builtin-modules:
         specifier: ^5.0.0
         version: 5.2.0

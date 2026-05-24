@@ -9,8 +9,8 @@ import { createJsonConsoleLogger, type LogFields, type Logger } from "./logging.
 import { OAuth2ModelSyncPlugin } from "./plugin.js";
 
 const OPENAI_COMPATIBLE_NPM = "@ai-sdk/openai-compatible";
-const OAUTH_OPTIONS_KEYS = ["lightbridgeOAuth2", "oauth2ModelSync"] as const;
-const PLUGIN_SERVICE_NAME = "lightbridge-opencode-plugin";
+const OAUTH_OPTIONS_KEYS = ["oauth2", "oauth2ModelSync"] as const;
+const PLUGIN_SERVICE_NAME = "opencode-oauth2-plugin";
 
 type OpenCodeConfig = Parameters<NonNullable<Hooks["config"]>>[0];
 type OpenCodeProviderMap = NonNullable<OpenCodeConfig["provider"]>;
@@ -171,7 +171,7 @@ function parseOAuthExtension(provider: OpenCodeProviderConfig): OAuthProviderExt
   return {
     issuer,
     clientId,
-    clientSecret: asClientSecret(raw.clientSecret, "provider.options.lightbridgeOAuth2"),
+    clientSecret: asClientSecret(raw.clientSecret, "provider.options.oauth2"),
     scopes,
     syncIntervalMinutes,
     nameOverrides: asStringMap(raw.nameOverrides),
@@ -179,8 +179,8 @@ function parseOAuthExtension(provider: OpenCodeProviderConfig): OAuthProviderExt
     tokenEndpoint: asString(raw.tokenEndpoint),
     deviceAuthorizationEndpoint: asString(raw.deviceAuthorizationEndpoint),
     jwksUri: asString(raw.jwksUri),
-    redirectPort: asRedirectPort(raw.redirectPort, "provider.options.lightbridgeOAuth2"),
-    authFlow: asAuthFlow(raw.authFlow, "provider.options.lightbridgeOAuth2")
+    redirectPort: asRedirectPort(raw.redirectPort, "provider.options.oauth2"),
+    authFlow: asAuthFlow(raw.authFlow, "provider.options.oauth2")
   };
 }
 

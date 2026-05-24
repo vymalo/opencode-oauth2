@@ -174,7 +174,7 @@ export async function acquireTokenViaDeviceCode(
   // Also surface to stderr so terminal users can see the code regardless of log
   // routing. Mirrors the browser-fallback pattern in client.ts.
   process.stderr.write(
-    `\n[lightbridge-opencode] device-code login for ${serverId}:\n  visit: ${verificationUri}\n  code:  ${deviceAuth.user_code}\n  (expires in ${deviceAuth.expires_in}s)\n\n`
+    `\n[opencode-oauth2] device-code login for ${serverId}:\n  visit: ${verificationUri}\n  code:  ${deviceAuth.user_code}\n  (expires in ${deviceAuth.expires_in}s)\n\n`
   );
 
   // Step 2: poll the token endpoint.

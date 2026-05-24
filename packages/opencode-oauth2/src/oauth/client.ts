@@ -376,7 +376,7 @@ export class OAuthClient {
           // nonce (and other query params) into centralized log aggregation,
           // which would enable login-CSRF via a forged localhost callback.
           process.stderr.write(
-            `\n[lightbridge-opencode] open this URL to authenticate (${this.server.id}):\n${authorizeUrl.toString()}\n\n`
+            `\n[opencode-oauth2] open this URL to authenticate (${this.server.id}):\n${authorizeUrl.toString()}\n\n`
           );
         }
       }

@@ -59,7 +59,7 @@ describe("OpenCode plugin hooks", () => {
           name: "Example AI",
           options: {
             baseURL: "https://api.example.com/v1",
-            lightbridgeOAuth2: {
+            oauth2: {
               issuer: "https://auth.example.com",
               clientId: "opencode-client",
               scopes: ["openid", "offline_access"]
@@ -125,7 +125,7 @@ describe("OpenCode plugin hooks", () => {
           name: "Example AI",
           options: {
             baseURL: "https://api.example.com/v1",
-            lightbridgeOAuth2: {
+            oauth2: {
               issuer: "https://auth.example.com",
               clientId: "opencode-client",
               scopes: ["openid", "offline_access"]
@@ -151,7 +151,7 @@ describe("OpenCode plugin hooks", () => {
     expect(output.headers.Authorization).toBe("Bearer cached-access");
   });
 
-  it("rejects invalid redirectPort in provider.options.lightbridgeOAuth2", async () => {
+  it("rejects invalid redirectPort in provider.options.oauth2", async () => {
     const cacheDir = await mkdtemp(join(tmpdir(), "opencode-hook-badport-"));
     const hooks = await createHooks(cacheDir);
 
@@ -160,7 +160,7 @@ describe("OpenCode plugin hooks", () => {
         "example-ai": {
           options: {
             baseURL: "https://api.example.com/v1",
-            lightbridgeOAuth2: {
+            oauth2: {
               issuer: "https://auth.example.com",
               clientId: "opencode-client",
               scopes: ["openid", "offline_access"],
@@ -198,7 +198,7 @@ describe("OpenCode plugin hooks", () => {
     await expect(hooks.config?.(config as never)).rejects.toThrow(/redirectPort/);
   });
 
-  it("parses clientSecret + device_code authFlow from provider.options.lightbridgeOAuth2", async () => {
+  it("parses clientSecret + device_code authFlow from provider.options.oauth2", async () => {
     const cacheDir = await mkdtemp(join(tmpdir(), "opencode-hook-secret-provider-"));
     const hooks = await createHooks(cacheDir);
 
@@ -208,7 +208,7 @@ describe("OpenCode plugin hooks", () => {
           name: "Example AI",
           options: {
             baseURL: "https://api.example.com/v1",
-            lightbridgeOAuth2: {
+            oauth2: {
               issuer: "https://auth.example.com",
               clientId: "opencode-client",
               clientSecret: "secret-from-provider",
@@ -269,7 +269,7 @@ describe("OpenCode plugin hooks", () => {
         "example-ai": {
           options: {
             baseURL: "https://api.example.com/v1",
-            lightbridgeOAuth2: {
+            oauth2: {
               issuer: "https://auth.example.com",
               clientId: "opencode-client",
               scopes: ["openid"],

@@ -1,4 +1,4 @@
-# @lightbridge/opencode-plugin
+# @vymalo/opencode-oauth2
 
 OAuth2/OIDC model sync plugin for OpenCode.
 
@@ -18,7 +18,7 @@ Add plugin package to OpenCode:
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["@lightbridge/opencode-plugin"]
+  "plugin": ["@vymalo/opencode-oauth2"]
 }
 ```
 
@@ -29,13 +29,13 @@ Add plugin package to OpenCode:
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["@lightbridge/opencode-plugin"],
+  "plugin": ["@vymalo/opencode-oauth2"],
   "provider": {
     "example-ai": {
       "name": "Example AI",
       "options": {
         "baseURL": "https://api.example.com/v1",
-        "lightbridgeOAuth2": {
+        "oauth2": {
           "issuer": "https://auth.example.com",
           "clientId": "opencode-client",
           "scopes": ["openid", "profile", "offline_access"],
@@ -55,7 +55,7 @@ Add plugin package to OpenCode:
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["@lightbridge/opencode-plugin"],
+  "plugin": ["@vymalo/opencode-oauth2"],
   "pluginConfig": {
     "oauth2ModelSync": {
       "servers": [
@@ -106,9 +106,9 @@ Refresh token support is mandatory.
 ## Development
 
 ```bash
-pnpm --filter @lightbridge/opencode-plugin typecheck
-pnpm --filter @lightbridge/opencode-plugin test
-pnpm --filter @lightbridge/opencode-plugin build
+pnpm --filter @vymalo/opencode-oauth2 typecheck
+pnpm --filter @vymalo/opencode-oauth2 test
+pnpm --filter @vymalo/opencode-oauth2 build
 ```
 
 ## Exports
