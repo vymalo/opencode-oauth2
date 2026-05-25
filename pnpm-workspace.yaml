@@ -5,6 +5,11 @@ packages:
 # esbuild is a vitest/vite transitive dep; msgpackr-extract is an optional
 # msgpack speedup. Both are widely-used packages with reputable maintainers
 # — keep this list minimal and audit before adding.
-onlyBuiltDependencies:
-  - esbuild
-  - msgpackr-extract
+#
+# pnpm 11 prefers the explicit `allowBuilds: <pkg>: true` shape over the
+# legacy `onlyBuiltDependencies` array; the latter is silently ignored in
+# `--frozen-lockfile` mode, which makes it look like local installs work
+# while CI breaks.
+allowBuilds:
+  esbuild: true
+  msgpackr-extract: true
