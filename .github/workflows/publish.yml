@@ -98,18 +98,27 @@ jobs:
           set -euo pipefail
           tarball=$(ls dist-tarball/*.tgz | head -1)
           echo "=== Tarball: $tarball ==="
-          tar -tzf "$tarball"
+          # List once into a variable. We then match against the variable with
+          # bash pattern matching — no pipes, no SIGPIPE, immune to the
+          # `grep -q | pipefail` trap regardless of listing size.
+          entries=$(tar -tzf "$tarball")
+          printf '%s\n' "$entries"
           echo
           echo "=== Validation ==="
-          if ! tar -tzf "$tarball" | grep -q '^package/dist/index\.js$'; then
+          # Wrap with newlines so a literal full-line match becomes a simple
+          # substring search.
+          haystack=$'\n'"$entries"$'\n'
+          if [[ "$haystack" != *$'\n'"package/dist/index.js"$'\n'* ]]; then
             echo "FAIL: package/dist/index.js missing from tarball"
             exit 1
           fi
-          if tar -tzf "$tarball" | grep -E '^package/(test|src|node_modules)/'; then
+          if [[ "$haystack" =~ $'\n'package/(test|src|node_modules)/ ]]; then
             echo "FAIL: tarball contains forbidden directories (test/src/node_modules)"
+            echo "Offending entries:"
+            printf '%s\n' "$entries" | grep -E '^package/(test|src|node_modules)/' || true
             exit 1
           fi
-          if ! tar -tzf "$tarball" | grep -q '^package/LICENSE$'; then
+          if [[ "$haystack" != *$'\n'"package/LICENSE"$'\n'* ]]; then
             echo "FAIL: LICENSE missing from tarball"
             exit 1
           fi
