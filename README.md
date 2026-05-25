@@ -1,4 +1,4 @@
-# lightbridge-opencode
+# opencode-oauth2
 
 > Bring your own OAuth-protected LLM gateway to [OpenCode](https://opencode.ai).
 
@@ -23,13 +23,22 @@ This plugin closes that gap. It handles the **Authorization Code + PKCE** dance,
 
 ## Features
 
-- **OAuth2 / OIDC** login via Authorization Code + PKCE
+- **Five auth flows**, pick what matches your runtime:
+  - `authorization_code` — interactive PKCE login (default)
+  - `device_code` — RFC 8628 device authorization, for browserless user auth
+  - `client_credentials` — machine-to-machine with a `clientSecret`
+  - `jwt_bearer` — RFC 7523 federated identity (GitHub Actions OIDC, Kubernetes SA tokens) — **no long-lived secret in CI**
+  - `token_exchange` — RFC 8693 federated identity with explicit audience targeting
 - **Dynamic model discovery** from `/v1/models` (no hand-maintained model lists)
 - **Display-name normalization** so `glm-5` shows up as `GLM 5`
 - **Persistent token cache** with automatic refresh
 - **`chat.headers` hook** injects bearer tokens per request
-- **Strict refresh-token policy** — access-only tokens are rejected by design
+- **Strict refresh-token policy** where it makes sense — access-only tokens are rejected by design on user-interactive flows
 - **Two configuration styles**: per-provider options or a top-level plugin block
+
+### Running in CI / Kubernetes (no long-lived secrets)
+
+For GitHub Actions and Kubernetes workloads, use the federated identity flows. See the **[Federated identity](packages/opencode-oauth2/README.md#federated-identity-no-long-lived-secrets-in-ci)** section in the package README for end-to-end examples with both `permissions: id-token: write` (GHA) and projected `serviceAccountToken` volumes (K8s).
 
 ## Install
 
@@ -38,7 +47,7 @@ In your OpenCode config:
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["@lightbridge/opencode-plugin"]
+  "plugin": ["@vymalo/opencode-oauth2"]
 }
 ```
 
@@ -46,13 +55,13 @@ Then declare a provider:
 
 ```jsonc
 {
-  "plugin": ["@lightbridge/opencode-plugin"],
+  "plugin": ["@vymalo/opencode-oauth2"],
   "provider": {
     "example-ai": {
       "name": "Example AI",
       "options": {
         "baseURL": "https://api.example.com/v1",
-        "lightbridgeOAuth2": {
+        "oauth2": {
           "issuer": "https://auth.example.com",
           "clientId": "opencode-client",
           "scopes": ["openid", "profile", "offline_access"],
@@ -64,7 +73,7 @@ Then declare a provider:
 }
 ```
 
-See [packages/opencode-plugin/README.md](packages/opencode-plugin/README.md) for the full configuration reference (including the alternative `pluginConfig.oauth2ModelSync.servers` layout).
+See [packages/opencode-oauth2/README.md](packages/opencode-oauth2/README.md) for the full configuration reference (including the alternative `pluginConfig.oauth2ModelSync.servers` layout).
 
 ## Token Policy
 
@@ -82,7 +91,7 @@ This is a [pnpm](https://pnpm.io) monorepo.
 
 | Package | Purpose |
 | --- | --- |
-| [`packages/opencode-plugin`](packages/opencode-plugin) | The runtime plugin — published as `@lightbridge/opencode-plugin` |
+| [`packages/opencode-oauth2`](packages/opencode-oauth2) | The runtime plugin — published as `@vymalo/opencode-oauth2` |
 | [`packages/plugin-bundle`](packages/plugin-bundle) | Rolldown-based bundling for distribution |
 | [`plans/prd.md`](plans/prd.md) | Product requirements and phased roadmap |
 
@@ -98,8 +107,8 @@ pnpm test
 Plugin-only iteration:
 
 ```bash
-pnpm --filter @lightbridge/opencode-plugin test
-pnpm --filter @lightbridge/opencode-plugin build
+pnpm --filter @vymalo/opencode-oauth2 test
+pnpm --filter @vymalo/opencode-oauth2 build
 ```
 
 For end-to-end usage against a local OpenCode install, see [GETTING_STARTED.md](GETTING_STARTED.md).
@@ -116,4 +125,4 @@ Issues and PRs are welcome. Please open an issue first for substantial changes s
 
 ## License
 
-[MIT](LICENSE) © adorsys-gis contributors
+[MIT](LICENSE) © vymalo contributors

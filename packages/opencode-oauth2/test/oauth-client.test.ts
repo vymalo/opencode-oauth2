@@ -288,6 +288,146 @@ describe("OAuthClient token lifecycle", () => {
     expect(calls[0]?.get("grant_type")).toBe("client_credentials");
   });
 
+  it("acquires a token via jwt_bearer (RFC 7523) using an env-sourced JWT", async () => {
+    const server = createServerConfig({
+      authFlow: "jwt_bearer",
+      subjectTokenSource: { type: "env", var: "TEST_PLATFORM_JWT" }
+    });
+
+    let captured: URLSearchParams | undefined;
+    const client = new OAuthClient(server, {
+      logger: createSilentLogger(),
+      timeoutMs: 5000,
+      fetchImpl: async (_input, init) => {
+        captured = parseFormBody(init);
+        return new Response(
+          JSON.stringify({ access_token: "fed-access", token_type: "Bearer", expires_in: 600 }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+    });
+
+    process.env.TEST_PLATFORM_JWT = "platform.jwt.value";
+    try {
+      const token = await client.ensureToken();
+      expect(token.accessToken).toBe("fed-access");
+      expect(captured?.get("grant_type")).toBe("urn:ietf:params:oauth:grant-type:jwt-bearer");
+      expect(captured?.get("assertion")).toBe("platform.jwt.value");
+      expect(captured?.get("client_id")).toBe(server.clientId);
+      expect(captured?.get("scope")).toBe(server.scopes.join(" "));
+    } finally {
+      delete process.env.TEST_PLATFORM_JWT;
+    }
+  });
+
+  it("acquires a token via token_exchange (RFC 8693), including optional audience", async () => {
+    const server = createServerConfig({
+      authFlow: "token_exchange",
+      subjectTokenSource: { type: "env", var: "TEST_PLATFORM_JWT2" },
+      tokenExchangeAudience: "https://api.example.com"
+    });
+
+    let captured: URLSearchParams | undefined;
+    const client = new OAuthClient(server, {
+      logger: createSilentLogger(),
+      timeoutMs: 5000,
+      fetchImpl: async (_input, init) => {
+        captured = parseFormBody(init);
+        return new Response(
+          JSON.stringify({ access_token: "exchanged", token_type: "Bearer", expires_in: 600 }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+    });
+
+    process.env.TEST_PLATFORM_JWT2 = "subj.jwt.value";
+    try {
+      const token = await client.ensureToken();
+      expect(token.accessToken).toBe("exchanged");
+      expect(captured?.get("grant_type")).toBe("urn:ietf:params:oauth:grant-type:token-exchange");
+      expect(captured?.get("subject_token")).toBe("subj.jwt.value");
+      expect(captured?.get("subject_token_type")).toBe("urn:ietf:params:oauth:token-type:jwt");
+      expect(captured?.get("audience")).toBe("https://api.example.com");
+    } finally {
+      delete process.env.TEST_PLATFORM_JWT2;
+    }
+  });
+
+  it("re-acquires jwt_bearer when cached token has no expiry (machine flow policy)", async () => {
+    const server = createServerConfig({
+      authFlow: "jwt_bearer",
+      subjectTokenSource: { type: "env", var: "TEST_PLATFORM_JWT3" }
+    });
+
+    let calls = 0;
+    const client = new OAuthClient(server, {
+      logger: createSilentLogger(),
+      timeoutMs: 5000,
+      fetchImpl: async () => {
+        calls++;
+        return new Response(JSON.stringify({ access_token: `t-${calls}`, token_type: "Bearer" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+    });
+
+    process.env.TEST_PLATFORM_JWT3 = "jwt";
+    try {
+      const t1 = await client.ensureToken();
+      expect(t1.accessToken).toBe("t-1");
+      // Same as client_credentials: tokens with no expiry are never trusted.
+      const t2 = await client.ensureToken(t1);
+      expect(t2.accessToken).toBe("t-2");
+      expect(calls).toBe(2);
+    } finally {
+      delete process.env.TEST_PLATFORM_JWT3;
+    }
+  });
+
+  it("federated flows never log the platform JWT or clientSecret", async () => {
+    const server = createServerConfig({
+      authFlow: "jwt_bearer",
+      clientSecret: "FEDERATED-SECRET-XYZ",
+      subjectTokenSource: { type: "env", var: "TEST_PLATFORM_JWT4" }
+    });
+
+    type Entry = { level: string; event: string; fields?: Record<string, unknown> };
+    const entries: Entry[] = [];
+    const recordingLogger = {
+      debug(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "debug", event, fields });
+      },
+      info(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "info", event, fields });
+      },
+      warn(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "warn", event, fields });
+      },
+      error(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "error", event, fields });
+      }
+    };
+
+    const client = new OAuthClient(server, {
+      logger: recordingLogger,
+      timeoutMs: 5000,
+      // Force a failure path so we exercise error logging too.
+      fetchImpl: async () => new Response("invalid_grant", { status: 401 })
+    });
+
+    process.env.TEST_PLATFORM_JWT4 = "DO-NOT-LOG-THIS-JWT-VALUE";
+    try {
+      await expect(client.ensureToken()).rejects.toThrow();
+    } finally {
+      delete process.env.TEST_PLATFORM_JWT4;
+    }
+
+    const serialized = JSON.stringify(entries);
+    expect(serialized).not.toContain("DO-NOT-LOG-THIS-JWT-VALUE");
+    expect(serialized).not.toContain("FEDERATED-SECRET-XYZ");
+  });
+
   it("does not log clientSecret on success or failure of client_credentials", async () => {
     const server = createServerConfig({
       authFlow: "client_credentials",

@@ -3,14 +3,15 @@ import type { Hooks, Plugin, PluginInput } from "@opencode-ai/plugin";
 import type {
   OAuth2ModelSyncConfigInput,
   OAuthAuthFlow,
-  OAuthServerConfigInput
+  OAuthServerConfigInput,
+  SubjectTokenSource
 } from "./config.js";
 import { createJsonConsoleLogger, type LogFields, type Logger } from "./logging.js";
 import { OAuth2ModelSyncPlugin } from "./plugin.js";
 
 const OPENAI_COMPATIBLE_NPM = "@ai-sdk/openai-compatible";
-const OAUTH_OPTIONS_KEYS = ["lightbridgeOAuth2", "oauth2ModelSync"] as const;
-const PLUGIN_SERVICE_NAME = "lightbridge-opencode-plugin";
+const OAUTH_OPTIONS_KEYS = ["oauth2", "oauth2ModelSync"] as const;
+const PLUGIN_SERVICE_NAME = "opencode-oauth2-plugin";
 
 type OpenCodeConfig = Parameters<NonNullable<Hooks["config"]>>[0];
 type OpenCodeProviderMap = NonNullable<OpenCodeConfig["provider"]>;
@@ -30,17 +31,25 @@ interface OAuthProviderExtension {
   jwksUri?: string;
   redirectPort?: number;
   authFlow?: OAuthAuthFlow;
+  subjectTokenSource?: SubjectTokenSource;
+  tokenExchangeAudience?: string;
 }
 
 function asAuthFlow(value: unknown, source: string): OAuthAuthFlow | undefined {
   if (value === undefined || value === null) {
     return undefined;
   }
-  if (value === "authorization_code" || value === "device_code" || value === "client_credentials") {
+  if (
+    value === "authorization_code" ||
+    value === "device_code" ||
+    value === "client_credentials" ||
+    value === "jwt_bearer" ||
+    value === "token_exchange"
+  ) {
     return value;
   }
   throw new Error(
-    `${source}.authFlow must be one of "authorization_code" | "device_code" | "client_credentials" (received ${JSON.stringify(value)})`
+    `${source}.authFlow must be one of "authorization_code" | "device_code" | "client_credentials" | "jwt_bearer" | "token_exchange" (received ${JSON.stringify(value)})`
   );
 }
 
@@ -171,7 +180,7 @@ function parseOAuthExtension(provider: OpenCodeProviderConfig): OAuthProviderExt
   return {
     issuer,
     clientId,
-    clientSecret: asClientSecret(raw.clientSecret, "provider.options.lightbridgeOAuth2"),
+    clientSecret: asClientSecret(raw.clientSecret, "provider.options.oauth2"),
     scopes,
     syncIntervalMinutes,
     nameOverrides: asStringMap(raw.nameOverrides),
@@ -179,8 +188,13 @@ function parseOAuthExtension(provider: OpenCodeProviderConfig): OAuthProviderExt
     tokenEndpoint: asString(raw.tokenEndpoint),
     deviceAuthorizationEndpoint: asString(raw.deviceAuthorizationEndpoint),
     jwksUri: asString(raw.jwksUri),
-    redirectPort: asRedirectPort(raw.redirectPort, "provider.options.lightbridgeOAuth2"),
-    authFlow: asAuthFlow(raw.authFlow, "provider.options.lightbridgeOAuth2")
+    redirectPort: asRedirectPort(raw.redirectPort, "provider.options.oauth2"),
+    authFlow: asAuthFlow(raw.authFlow, "provider.options.oauth2"),
+    // Deep validation of subjectTokenSource happens in validateConfig — this
+    // layer just passes the raw value through so error messages reference
+    // the canonical config path.
+    subjectTokenSource: raw.subjectTokenSource as SubjectTokenSource | undefined,
+    tokenExchangeAudience: asString(raw.tokenExchangeAudience)
   };
 }
 
@@ -241,7 +255,9 @@ function parsePluginConfigServers(
       deviceAuthorizationEndpoint: asString(entry.deviceAuthorizationEndpoint),
       jwksUri: asString(entry.jwksUri),
       redirectPort: asRedirectPort(entry.redirectPort, sourceLabel),
-      authFlow: asAuthFlow(entry.authFlow, sourceLabel)
+      authFlow: asAuthFlow(entry.authFlow, sourceLabel),
+      subjectTokenSource: entry.subjectTokenSource as SubjectTokenSource | undefined,
+      tokenExchangeAudience: asString(entry.tokenExchangeAudience)
     });
   }
 
@@ -305,7 +321,9 @@ function collectManagedProviders(config: OpenCodeConfig, logger: Logger): Manage
       deviceAuthorizationEndpoint: extension.deviceAuthorizationEndpoint,
       jwksUri: extension.jwksUri,
       redirectPort: extension.redirectPort,
-      authFlow: extension.authFlow
+      authFlow: extension.authFlow,
+      subjectTokenSource: extension.subjectTokenSource,
+      tokenExchangeAudience: extension.tokenExchangeAudience
     });
   }
 
@@ -372,7 +390,7 @@ function createOpenCodeLogger(client: PluginInput["client"]): Logger {
   };
 }
 
-export function createLightbridgeOAuth2ModelSyncPlugin(
+export function createOpencodeOauth2Plugin(
   factoryOptions: OpenCodePluginFactoryOptions = {}
 ): Plugin {
   return async ({ client }) => {
@@ -451,6 +469,6 @@ export function createLightbridgeOAuth2ModelSyncPlugin(
   };
 }
 
-export const LightbridgeOAuth2ModelSyncPlugin = createLightbridgeOAuth2ModelSyncPlugin();
+export const OpencodeOauth2Plugin = createOpencodeOauth2Plugin();
 
-export default LightbridgeOAuth2ModelSyncPlugin;
+export default OpencodeOauth2Plugin;

@@ -1,6 +1,6 @@
 {
-  "name": "@lightbridge/plugin-bundle",
-  "version": "0.1.0",
+  "name": "@vymalo/opencode-oauth2-bundle",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,7 +13,7 @@
     "format:check": "biome format ."
   },
   "devDependencies": {
-    "@lightbridge/opencode-plugin": "workspace:*",
+    "@vymalo/opencode-oauth2": "workspace:*",
     "builtin-modules": "^5.0.0",
     "rolldown": "^1.0.2"
   }

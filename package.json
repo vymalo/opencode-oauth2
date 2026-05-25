@@ -1,9 +1,9 @@
 {
-  "name": "lightbridge-opencode",
-  "version": "0.1.0",
+  "name": "opencode-oauth2-workspace",
+  "version": "0.2.0",
   "private": true,
-  "description": "Workspace for the OpenCode OAuth2 model sync plugin.",
-  "packageManager": "pnpm@10.26.0",
+  "description": "Workspace for @vymalo/opencode-oauth2 — OAuth2/OIDC-secured OpenAI-compatible providers for OpenCode.",
+  "packageManager": "pnpm@11.3.0",
   "scripts": {
     "build": "pnpm -r build",
     "lint": "biome lint .",
@@ -14,7 +14,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.15",
-    "@types/node": "^24.10.1",
-    "typescript": "^5.9.3"
+    "@types/node": "^25.9.1",
+    "typescript": "^6.0.3"
   }
 }

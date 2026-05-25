@@ -1,17 +1,17 @@
 {
-  "name": "@lightbridge/opencode-plugin",
-  "version": "0.1.0",
+  "name": "@vymalo/opencode-oauth2",
+  "version": "0.2.0",
   "description": "OpenCode plugin for OAuth2/OIDC-secured, OpenAI-compatible model providers with periodic model sync.",
   "license": "MIT",
-  "author": "adorsys-gis contributors",
-  "homepage": "https://github.com/ADORSYS-GIS/opencode-oauth2#readme",
+  "author": "vymalo contributors",
+  "homepage": "https://github.com/vymalo/opencode-oauth2#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ADORSYS-GIS/opencode-oauth2.git",
-    "directory": "packages/opencode-plugin"
+    "url": "git+https://github.com/vymalo/opencode-oauth2.git",
+    "directory": "packages/opencode-oauth2"
   },
   "bugs": {
-    "url": "https://github.com/ADORSYS-GIS/opencode-oauth2/issues"
+    "url": "https://github.com/vymalo/opencode-oauth2/issues"
   },
   "keywords": [
     "opencode",
@@ -30,7 +30,7 @@
     "dist"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "publishConfig": {
     "access": "public"
@@ -44,9 +44,10 @@
     "format:check": "biome format ."
   },
   "dependencies": {
-    "@opencode-ai/plugin": "1.2.24"
+    "@opencode-ai/plugin": "1.15.10"
   },
   "devDependencies": {
-    "vitest": "^2.1.9"
+    "vite": "^8.0.14",
+    "vitest": "^4.1.7"
   }
 }

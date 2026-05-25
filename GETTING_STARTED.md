@@ -18,17 +18,17 @@ From repo root:
 
 ```bash
 pnpm install
-pnpm --filter @lightbridge/opencode-plugin build
+pnpm --filter @vymalo/opencode-oauth2 build
 ```
 
 ## 2. Register It In OpenCode (Local Plugin Mode)
 
 Create a local OpenCode plugin file in your target project:
 
-`<your-project>/.opencode/plugins/lightbridge-oauth2-model-sync.ts`
+`<your-project>/.opencode/plugins/opencode-oauth2.ts`
 
 ```ts
-import LightbridgeOAuth2ModelSyncPlugin from "/absolute/path/to/lightbridge-opencode/packages/opencode-plugin/dist/index.js";
+import LightbridgeOAuth2ModelSyncPlugin from "/absolute/path/to/opencode-oauth2/packages/opencode-oauth2/dist/index.js";
 
 export default LightbridgeOAuth2ModelSyncPlugin;
 ```
@@ -47,7 +47,7 @@ In your project `opencode.json`, add provider configuration:
       "name": "Example AI",
       "options": {
         "baseURL": "https://api.example.com/v1",
-        "lightbridgeOAuth2": {
+        "oauth2": {
           "issuer": "https://auth.example.com",
           "clientId": "opencode-client",
           "scopes": ["openid", "profile", "offline_access"],
@@ -100,8 +100,8 @@ Refresh token support is mandatory:
 ## Useful Commands
 
 ```bash
-pnpm --filter @lightbridge/opencode-plugin typecheck
-pnpm --filter @lightbridge/opencode-plugin test
-pnpm --filter @lightbridge/opencode-plugin build
+pnpm --filter @vymalo/opencode-oauth2 typecheck
+pnpm --filter @vymalo/opencode-oauth2 test
+pnpm --filter @vymalo/opencode-oauth2 build
 ```
 

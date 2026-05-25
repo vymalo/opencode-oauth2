@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Build entry point for @lightbridge/plugin-bundle.
+// Build entry point for @vymalo/opencode-oauth2-bundle.
 //
 // Loads the Rolldown config and writes the bundled ESM artifact + sourcemap to
 // packages/plugin-bundle/dist/. Targets Node 20+.
@@ -34,10 +34,10 @@ async function main() {
 
   const elapsedMs = (performance.now() - started).toFixed(1);
   const rel = relative(repoRoot, output.file);
-  console.log(`plugin-bundle: wrote ${rel} (${elapsedMs} ms)`);
+  console.log(`opencode-oauth2-bundle: wrote ${rel} (${elapsedMs} ms)`);
 }
 
 main().catch((err) => {
-  console.error("plugin-bundle build failed:", err);
+  console.error("opencode-oauth2-bundle build failed:", err);
   process.exitCode = 1;
 });

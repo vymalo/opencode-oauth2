@@ -1,0 +1,152 @@
+name: Publish
+
+# When this runs:
+#   * On a GitHub Release being published — the common path. Tag the commit
+#     you want to ship (e.g. `v0.2.0`), draft a release, hit "Publish release"
+#     in the UI, and this workflow ships it.
+#   * Manually via "Run workflow" — supports `dry_run: true` so you can
+#     validate the full pipeline (verify + build + pack + verify tarball)
+#     without actually pushing to npm.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Skip the actual npm publish (everything else still runs)"
+        type: boolean
+        default: false
+
+# id-token: write is REQUIRED for npm provenance — it's how npm verifies the
+# tarball was produced by this GitHub Actions workflow on this commit. See
+# https://docs.npmjs.com/generating-provenance-statements
+permissions:
+  contents: read
+  id-token: write
+
+# Never run two publishes in parallel; allow them to queue rather than cancel.
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build, verify, publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        # `release` events check out the tagged SHA, which is exactly what we
+        # want — the tarball provenance attests the commit you tagged.
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.3.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+          registry-url: 'https://registry.npmjs.org'
+          scope: '@vymalo'
+          always-auth: true
+
+      - name: Install (frozen lockfile)
+        # Guarantees the installed tree exactly matches pnpm-lock.yaml — no
+        # silent dependency drift between dev and the publish run.
+        run: pnpm install --frozen-lockfile
+
+      - name: Audit dependencies (fail on high+ severity)
+        # Hard-fail on high/critical CVEs. Moderate/low are tracked but don't
+        # gate the release — moderate-severity Node CVEs are noisy.
+        run: pnpm audit --audit-level=high --prod
+
+      - name: Typecheck
+        run: pnpm -r typecheck
+
+      - name: Test
+        run: pnpm -r test
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Build plugin (tsc → packages/opencode-oauth2/dist)
+        run: pnpm --filter @vymalo/opencode-oauth2 build
+
+      - name: Build release bundle (Rolldown)
+        # Not what we publish to npm (that's the tsc output), but we still
+        # build it on every publish so a broken bundler is caught here.
+        run: pnpm --filter @vymalo/opencode-oauth2-bundle build
+
+      - name: Pack tarball (for inspection and as a release asset)
+        run: |
+          mkdir -p dist-tarball
+          pnpm --filter @vymalo/opencode-oauth2 pack \
+            --pack-destination "$PWD/dist-tarball"
+          ls -la dist-tarball/
+
+      - name: Verify tarball contents
+        # Defense-in-depth: confirms we're shipping the dist/, NOT shipping
+        # source or tests, and that the package isn't accidentally empty.
+        run: |
+          set -euo pipefail
+          tarball=$(ls dist-tarball/*.tgz | head -1)
+          echo "=== Tarball: $tarball ==="
+          tar -tzf "$tarball"
+          echo
+          echo "=== Validation ==="
+          if ! tar -tzf "$tarball" | grep -q '^package/dist/index\.js$'; then
+            echo "FAIL: package/dist/index.js missing from tarball"
+            exit 1
+          fi
+          if tar -tzf "$tarball" | grep -E '^package/(test|src|node_modules)/'; then
+            echo "FAIL: tarball contains forbidden directories (test/src/node_modules)"
+            exit 1
+          fi
+          if ! tar -tzf "$tarball" | grep -q '^package/LICENSE$'; then
+            echo "FAIL: LICENSE missing from tarball"
+            exit 1
+          fi
+          echo "OK"
+
+      - name: Publish to npm (with provenance)
+        if: ${{ inputs.dry_run != true }}
+        # --provenance:    generates a signed SLSA L2 attestation linking the
+        #                  tarball to this workflow run + commit SHA. npm
+        #                  verifies it server-side; consumers can verify
+        #                  locally via `npm install --provenance` or by
+        #                  inspecting the package page on npmjs.com.
+        # --no-git-checks: bypass pnpm's "are you on a clean main branch?"
+        #                  guard. Release events check out a detached HEAD on
+        #                  the tag SHA, which would otherwise trip the check.
+        # --access public: required for first publish under a new scope.
+        run: |
+          pnpm --filter @vymalo/opencode-oauth2 publish \
+            --access public \
+            --no-git-checks \
+            --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.MCP_NPM_AUTH_TOKEN }}
+          # Belt and braces — also enables provenance for any underlying npm
+          # CLI invocation that pnpm delegates to.
+          NPM_CONFIG_PROVENANCE: "true"
+
+      - name: Dry-run notice
+        if: ${{ inputs.dry_run == true }}
+        run: |
+          echo "::notice::DRY RUN — skipped npm publish."
+          echo "Tarball ready at: dist-tarball/"
+
+      - name: Attach tarball to GitHub Release
+        if: ${{ github.event_name == 'release' && inputs.dry_run != true }}
+        uses: softprops/action-gh-release@v3
+        with:
+          # The tarball alongside the release page makes downstream
+          # verification trivial (no need to fetch from npm just to inspect).
+          files: dist-tarball/*.tgz

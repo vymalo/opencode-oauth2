@@ -18,7 +18,7 @@ function resolveDefaultCacheRoot(): string {
 }
 
 export function resolveCacheDir(namespace: string): string {
-  return join(resolveDefaultCacheRoot(), "lightbridge-opencode", namespace);
+  return join(resolveDefaultCacheRoot(), "opencode-oauth2", namespace);
 }
 
 function statePath(baseDir: string, serverId: string): string {
