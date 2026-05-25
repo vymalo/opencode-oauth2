@@ -98,18 +98,21 @@ jobs:
           set -euo pipefail
           tarball=$(ls dist-tarball/*.tgz | head -1)
           echo "=== Tarball: $tarball ==="
-          tar -tzf "$tarball"
+          # List once into a variable so `grep -q` early-exit doesn't SIGPIPE
+          # tar and trip pipefail.
+          entries=$(tar -tzf "$tarball")
+          printf '%s\n' "$entries"
           echo
           echo "=== Validation ==="
-          if ! tar -tzf "$tarball" | grep -q '^package/dist/index\.js$'; then
+          if ! printf '%s\n' "$entries" | grep -q '^package/dist/index\.js$'; then
             echo "FAIL: package/dist/index.js missing from tarball"
             exit 1
           fi
-          if tar -tzf "$tarball" | grep -E '^package/(test|src|node_modules)/'; then
+          if printf '%s\n' "$entries" | grep -E '^package/(test|src|node_modules)/'; then
             echo "FAIL: tarball contains forbidden directories (test/src/node_modules)"
             exit 1
           fi
-          if ! tar -tzf "$tarball" | grep -q '^package/LICENSE$'; then
+          if ! printf '%s\n' "$entries" | grep -q '^package/LICENSE$'; then
             echo "FAIL: LICENSE missing from tarball"
             exit 1
           fi
