@@ -87,12 +87,36 @@ jobs:
 
 The reusable workflow handles:
 
-- Installing pnpm + Node 22.
-- `npm install -g opencode @vymalo/opencode-oauth2`.
+- Installing Node 22.
+- Installing the plugin + opencode CLI via the [setup composite action](#composite-action-bring-your-own-job), which caches the global `node_modules` between runs.
 - Pointing `OPENCODE_CONFIG_DIR` at the directory you specify.
 - Running `opencode run --model "<model>" "<prompt>"`.
 
 You're responsible for committing `.opencode-ci/opencode.json` (or wherever you pointed `opencode-config-path`) with the `authFlow: "jwt_bearer"` config.
+
+## Composite action (bring-your-own-job)
+
+If you need to compose your own job — different runner image, custom pre/post steps, multiple `opencode run` calls in one job — use the composite setup action directly. It installs the plugin (and optionally the CLI) globally and caches the install across runs.
+
+```yaml
+- uses: vymalo/opencode-oauth2/.github/actions/setup@v0.2.0
+  with:
+    node-version: '22'
+    install-opencode: 'true'
+```
+
+| Input | Default | Purpose |
+| --- | --- | --- |
+| `version` | `latest` | Plugin version (`"0.2.0"`, `"^0.2.0"`, `"next"`, …). |
+| `install-opencode` | `false` | Also install the opencode CLI globally. |
+| `opencode-package` | `opencode-ai` | npm package name for the CLI. Override for forks/mirrors. |
+| `opencode-version` | `latest` | CLI version. Used only when `install-opencode=true`. |
+| `node-version` | _(unset)_ | If set, runs `actions/setup-node@v4` first. Leave empty if you already set up Node. |
+| `cache` | `true` | Cache the global install between runs. |
+
+Outputs: `version`, `opencode-version`, `node-path`, `cache-hit`. `NODE_PATH` is exported for subsequent steps so `opencode` finds the plugin no matter what cwd you `cd` to. Full reference in [`.github/actions/setup/README.md`](../.github/actions/setup/README.md).
+
+On a cache hit (same version, same runner OS) the install step is a no-op — useful for high-frequency triggers like `pull_request`.
 
 ## Minimal worked example
 
@@ -114,7 +138,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: npm install -g opencode @vymalo/opencode-oauth2
+      - uses: vymalo/opencode-oauth2/.github/actions/setup@v0.2.0
+        with:
+          node-version: '22'
+          install-opencode: 'true'
       - run: opencode run --model "miaou/glm-5" "Summarize the changes in this PR" > summary.md
         env:
           OPENCODE_CONFIG_DIR: "${{ github.workspace }}/.opencode-ci"
@@ -174,10 +201,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: vymalo/opencode-oauth2/.github/actions/setup@v0.2.0
         with:
           node-version: ${{ matrix.node }}
-      - run: npm install -g opencode @vymalo/opencode-oauth2
+          install-opencode: 'true'
       - run: opencode run --model "miaou/glm-5" "say hi from ${{ matrix.os }} node${{ matrix.node }}"
         env:
           OPENCODE_CONFIG_DIR: "${{ github.workspace }}/.opencode-ci"
@@ -245,7 +272,10 @@ jobs:
         # Code from the PR is treated as untrusted input.
         with:
           ref: ${{ github.event.pull_request.base.ref }}
-      - run: npm install -g opencode @vymalo/opencode-oauth2
+      - uses: vymalo/opencode-oauth2/.github/actions/setup@v0.2.0
+        with:
+          node-version: '22'
+          install-opencode: 'true'
       # Read the PR diff but do not execute fork-provided code.
       - id: diff
         run: gh pr diff ${{ github.event.pull_request.number }} > /tmp/diff.patch

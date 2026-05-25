@@ -75,23 +75,25 @@ jobs:
       - name: Checkout caller repo
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      # The reusable workflow lives in vymalo/opencode-oauth2, so we also need
+      # to check out THIS repo to a side path to load the composite action from
+      # the same ref the caller pinned. `github.job_workflow_sha` is the SHA of
+      # this reusable workflow file's commit — guarantees action + workflow stay
+      # in lockstep.
+      - name: Checkout opencode-oauth2 (for the setup action)
+        uses: actions/checkout@v4
+        with:
+          repository: vymalo/opencode-oauth2
+          ref: ${{ github.job_workflow_sha }}
+          path: .opencode-oauth2-action
+
+      - name: Install opencode + plugin (cached)
+        uses: ./.opencode-oauth2-action/.github/actions/setup
         with:
           node-version: ${{ inputs.node-version }}
-
-      - name: Install opencode + plugin
-        run: |
-          set -euo pipefail
-          opencode_spec="opencode"
-          if [ -n "${{ inputs.opencode-version }}" ]; then
-            opencode_spec="opencode@${{ inputs.opencode-version }}"
-          fi
-          plugin_spec="@vymalo/opencode-oauth2"
-          if [ -n "${{ inputs.plugin-version }}" ]; then
-            plugin_spec="@vymalo/opencode-oauth2@${{ inputs.plugin-version }}"
-          fi
-          npm install -g "$opencode_spec" "$plugin_spec"
+          version: ${{ inputs.plugin-version || 'latest' }}
+          install-opencode: 'true'
+          opencode-version: ${{ inputs.opencode-version || 'latest' }}
 
       - name: Verify opencode config exists
         run: |

@@ -1,0 +1,127 @@
+name: 'Setup @vymalo/opencode-oauth2'
+description: >-
+  Install the @vymalo/opencode-oauth2 OpenCode plugin (and optionally the
+  opencode CLI) into the runner's global node_modules, with cross-run caching
+  so subsequent runs skip the install entirely.
+author: 'vymalo contributors'
+branding:
+  icon: 'lock'
+  color: 'purple'
+
+inputs:
+  version:
+    description: >-
+      Version of @vymalo/opencode-oauth2 to install. Accepts any valid npm
+      version spec ("0.2.0", "^0.2.0", "next"). Defaults to "latest".
+    required: false
+    default: 'latest'
+  install-opencode:
+    description: >-
+      If "true", also installs the opencode CLI globally so the runner can
+      invoke `opencode run ...` without a separate step.
+    required: false
+    default: 'false'
+  opencode-package:
+    description: >-
+      npm package name for the opencode CLI. Override if you publish a fork
+      or use a private mirror.
+    required: false
+    default: 'opencode-ai'
+  opencode-version:
+    description: 'opencode CLI version. Used only when install-opencode=true.'
+    required: false
+    default: 'latest'
+  node-version:
+    description: >-
+      If set, the action runs actions/setup-node@v4 with this version first.
+      Leave empty to assume the caller has already set up Node.
+    required: false
+    default: ''
+  cache:
+    description: 'Cache the global install between runs. Defaults to "true".'
+    required: false
+    default: 'true'
+
+outputs:
+  version:
+    description: 'Resolved plugin version that was installed.'
+    value: ${{ steps.resolve.outputs.plugin-version }}
+  opencode-version:
+    description: >-
+      Resolved opencode CLI version. Empty when install-opencode=false.
+    value: ${{ steps.resolve.outputs.opencode-version }}
+  node-path:
+    description: >-
+      Absolute path to the global node_modules directory where the plugin was
+      installed. Already exported as NODE_PATH for subsequent steps.
+    value: ${{ steps.resolve.outputs.modules }}
+  cache-hit:
+    description: '"true" when the install was restored from cache.'
+    value: ${{ steps.cache.outputs.cache-hit }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Node.js
+      if: inputs.node-version != ''
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Resolve versions and paths
+      id: resolve
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        plugin_spec='${{ inputs.version }}'
+        if [ "$plugin_spec" = "latest" ]; then
+          plugin_version=$(npm view @vymalo/opencode-oauth2 version)
+        else
+          plugin_version="$plugin_spec"
+        fi
+        echo "plugin-version=$plugin_version" >> "$GITHUB_OUTPUT"
+
+        opencode_version=""
+        if [ '${{ inputs.install-opencode }}' = 'true' ]; then
+          ov_spec='${{ inputs.opencode-version }}'
+          if [ "$ov_spec" = "latest" ]; then
+            opencode_version=$(npm view '${{ inputs.opencode-package }}' version)
+          else
+            opencode_version="$ov_spec"
+          fi
+        fi
+        echo "opencode-version=$opencode_version" >> "$GITHUB_OUTPUT"
+
+        prefix=$(npm config get prefix)
+        if [ "$RUNNER_OS" = "Windows" ]; then
+          modules="$prefix/node_modules"
+        else
+          modules="$prefix/lib/node_modules"
+        fi
+        echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+        echo "modules=$modules" >> "$GITHUB_OUTPUT"
+
+    - name: Restore install cache
+      if: inputs.cache == 'true'
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.resolve.outputs.modules }}
+        key: vymalo-opencode-oauth2-${{ runner.os }}-plugin-${{ steps.resolve.outputs.plugin-version }}-cli-${{ steps.resolve.outputs.opencode-version || 'none' }}
+
+    - name: Install plugin (and optionally opencode)
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        pkgs=( "@vymalo/opencode-oauth2@${{ steps.resolve.outputs.plugin-version }}" )
+        if [ '${{ inputs.install-opencode }}' = 'true' ]; then
+          pkgs+=( "${{ inputs.opencode-package }}@${{ steps.resolve.outputs.opencode-version }}" )
+        fi
+        npm install -g --no-audit --no-fund "${pkgs[@]}"
+
+    - name: Export NODE_PATH
+      shell: bash
+      run: |
+        echo "NODE_PATH=${{ steps.resolve.outputs.modules }}" >> "$GITHUB_ENV"
