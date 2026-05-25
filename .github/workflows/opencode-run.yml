@@ -1,0 +1,124 @@
+name: Reusable — opencode run
+
+# Consumers call this via:
+#
+#   jobs:
+#     run:
+#       uses: vymalo/opencode-oauth2/.github/workflows/opencode-run.yml@v0.2.0
+#       with:
+#         model: miaou/glm-5
+#         prompt: "Summarize the changes"
+#         opencode-config-path: .opencode-ci/opencode.json
+#
+# Consumer must:
+#   - grant `permissions: { id-token: write, contents: read }` on the caller job
+#   - commit an opencode.json at `opencode-config-path` with
+#     `authFlow: "jwt_bearer"` + `subjectTokenSource: { type: "github_actions" }`
+#   - have an IdP that trusts GitHub Actions OIDC for the configured audience
+#
+# See docs/github-actions.md for end-to-end setup.
+
+on:
+  workflow_call:
+    inputs:
+      model:
+        description: 'Model id passed to `opencode run --model` (e.g. miaou/glm-5).'
+        required: true
+        type: string
+      prompt:
+        description: 'Prompt passed to `opencode run`.'
+        required: true
+        type: string
+      opencode-config-path:
+        description: 'Path (relative to the repo root) to the opencode.json the runner should use.'
+        required: false
+        type: string
+        default: '.opencode-ci/opencode.json'
+      node-version:
+        description: 'Node.js version installed on the runner.'
+        required: false
+        type: string
+        default: '22'
+      runs-on:
+        description: 'Runner image. Defaults to ubuntu-latest.'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      opencode-version:
+        description: 'Pinned `opencode` version to install (npm dist-tag or semver). Empty == latest.'
+        required: false
+        type: string
+        default: ''
+      plugin-version:
+        description: 'Pinned `@vymalo/opencode-oauth2` version. Empty == latest.'
+        required: false
+        type: string
+        default: ''
+    outputs:
+      stdout-artifact:
+        description: 'Name of the uploaded artifact containing opencode stdout.'
+        value: ${{ jobs.run.outputs.stdout-artifact }}
+
+jobs:
+  run:
+    name: opencode run
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      # OIDC token minting for federated identity (jwt_bearer / token_exchange).
+      # The caller must also grant id-token: write — workflow_call inherits
+      # the caller's permissions, but the caller cannot grant more than it has.
+      id-token: write
+      contents: read
+    outputs:
+      stdout-artifact: opencode-stdout-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Checkout caller repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Install opencode + plugin
+        run: |
+          set -euo pipefail
+          opencode_spec="opencode"
+          if [ -n "${{ inputs.opencode-version }}" ]; then
+            opencode_spec="opencode@${{ inputs.opencode-version }}"
+          fi
+          plugin_spec="@vymalo/opencode-oauth2"
+          if [ -n "${{ inputs.plugin-version }}" ]; then
+            plugin_spec="@vymalo/opencode-oauth2@${{ inputs.plugin-version }}"
+          fi
+          npm install -g "$opencode_spec" "$plugin_spec"
+
+      - name: Verify opencode config exists
+        run: |
+          set -euo pipefail
+          cfg="${{ inputs.opencode-config-path }}"
+          if [ ! -f "$cfg" ]; then
+            echo "::error::opencode config not found at $cfg — commit one (see docs/github-actions.md)" >&2
+            exit 1
+          fi
+          # The config dir is what OPENCODE_CONFIG_DIR points to; opencode will
+          # read opencode.json from there.
+          echo "OPENCODE_CONFIG_DIR=$(dirname "$cfg")" >> "$GITHUB_ENV"
+
+      - name: opencode run
+        id: run
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/opencode-out
+          opencode run \
+            --model "${{ inputs.model }}" \
+            "${{ inputs.prompt }}" \
+            | tee /tmp/opencode-out/stdout.txt
+
+      - name: Upload stdout as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencode-stdout-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/opencode-out/stdout.txt
+          if-no-files-found: warn

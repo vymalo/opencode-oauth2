@@ -1,6 +1,6 @@
 # @vymalo/opencode-oauth2
 
-OAuth2/OIDC model sync plugin for OpenCode.
+OAuth2/OIDC model sync plugin for OpenCode. This is the canonical configuration reference for the plugin. Long-form usage guides (CI cookbooks, Kubernetes manifests, troubleshooting) live in [`/docs/`](../../docs/) at the repo root.
 
 ## What It Does
 
@@ -95,6 +95,17 @@ These apply to both config shapes above.
 | `authorizationEndpoint` | discovered | Override for the authorization endpoint. |
 | `tokenEndpoint` | discovered | Override for the token endpoint. |
 | `redirectPort` | random | Fixed port for the local callback server (authorization-code only). |
+| `nameOverrides` | `{}` | Map of model id → friendly display name. Applied during catalog normalization. |
+| `syncIntervalMinutes` | `60` | Per-server scheduler interval. Failures preserve the last-known-good model list. |
+| `jwksUri` | _(unset)_ | Reserved; not currently used at runtime. |
+
+Plus the top-level `pluginConfig.oauth2ModelSync` block accepts:
+
+| Field | Default | Notes |
+| --- | --- | --- |
+| `cacheNamespace` | `"opencode-oauth2-model-sync"` (OpenCode-hosted) / `"oauth2-model-sync"` (standalone) | Subdirectory under the OS cache root. See [architecture.md](../../docs/architecture.md#cache-layout) for the path table per OS. |
+| `httpTimeoutMs` | `15000` | Timeout for token-endpoint / `/models` round trips. |
+| `tokenExpirySkewMs` | `30000` | Treat a token as expired this many ms before its real `expiresAt`. |
 
 ## Federated identity (no long-lived secrets in CI)
 
@@ -109,51 +120,19 @@ The plugin reads the platform JWT at token-acquisition time (never caches it) an
 | `github_actions` | `ACTIONS_ID_TOKEN_REQUEST_URL` + `ACTIONS_ID_TOKEN_REQUEST_TOKEN` env vars | `audience` |
 | `kubernetes_sa` | Projected service-account token file (default `/var/run/secrets/tokens/oauth2/token`) | _(optional `tokenPath`)_ |
 | `file` | Arbitrary file path | `path` |
-| `env` | Environment variable | `var` |
+| `env` | Environment variable (dev/test only) | `var` |
 
-### GitHub Actions
+End-to-end recipes:
 
-**1. Register the workflow's OIDC identity with your OAuth server.** For Keycloak, add an Identity Provider of type "OpenID Connect" with:
-- Issuer: `https://token.actions.githubusercontent.com`
-- Audience: an identifier you choose (used below as `audience`)
-- Map claims so a specific `repository:` / `workflow:` subject can mint a token for your client
+- **GitHub Actions** — see [`docs/github-actions.md`](../../docs/github-actions.md) for the Keycloak / Auth0 / Okta setup walkthroughs, the reusable workflow at [`.github/workflows/opencode-run.yml`](../../.github/workflows/opencode-run.yml), matrix builds, audience pinning, and fork-PR limitations.
+- **Kubernetes** — see [`docs/kubernetes.md`](../../docs/kubernetes.md) for the `CronJob` (headline), `Job`, and `Deployment` manifests, multi-provider pods, IdP setup with Keycloak/Dex, and RBAC notes (spoiler: you need almost none).
 
-Auth0, Okta, and similar all support the same flow — see your IdP's docs for "trust GitHub Actions OIDC tokens".
-
-**2. Set up the workflow:**
-
-```yaml
-name: AI-assisted job
-
-on:
-  workflow_dispatch:
-
-permissions:
-  id-token: write   # required — lets the runner mint an OIDC token
-  contents: read
-
-jobs:
-  run:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: |
-          # opencode + plugin must be installed first; here as an example
-          npm install -g opencode @vymalo/opencode-oauth2
-      - run: opencode run --model "example-ai/glm-5" "summarize the diff"
-        env:
-          OPENCODE_CONFIG_DIR: ${{ github.workspace }}/.opencode-ci
-```
-
-**3. Provide the opencode config** (e.g. `.opencode-ci/opencode.json`):
+### Quick GHA reference
 
 ```jsonc
 {
-  "$schema": "https://opencode.ai/config.json",
-  "plugin": ["@vymalo/opencode-oauth2"],
   "provider": {
     "example-ai": {
-      "name": "Example AI",
       "options": {
         "baseURL": "https://api.example.com/v1",
         "oauth2": {
@@ -172,87 +151,32 @@ jobs:
 }
 ```
 
-**No `clientSecret` anywhere.** The runner presents its short-lived OIDC token; your OAuth server trusts it because you configured GHA as an IdP. The plugin re-fetches the OIDC token on each access-token expiry (cheap and automatic).
+Workflow needs `permissions: { id-token: write }`. No `clientSecret` anywhere.
 
-### Kubernetes ServiceAccount Job
+### Quick Kubernetes reference
 
-**1. Register the cluster's OIDC issuer with your OAuth server** (same as the GHA setup — add an Identity Provider with the cluster's discovery URL).
-
-**2. Mount a projected service-account token** with your OAuth server as the audience:
-
-```yaml
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: opencode-ai-task
-spec:
-  template:
-    spec:
-      serviceAccountName: opencode-runner
-      restartPolicy: Never
-      containers:
-        - name: runner
-          image: ghcr.io/your-org/opencode-with-plugin:latest
-          env:
-            - name: OPENCODE_CONFIG_DIR
-              value: /etc/opencode
-          command: ["opencode", "run", "--model", "example-ai/glm-5", "summarize the day"]
-          volumeMounts:
-            - name: oauth2-token
-              mountPath: /var/run/secrets/tokens/oauth2
-              readOnly: true
-            - name: opencode-config
-              mountPath: /etc/opencode
-              readOnly: true
-      volumes:
-        - name: oauth2-token
-          projected:
-            sources:
-              - serviceAccountToken:
-                  path: token
-                  # MUST match the IdP's expected audience exactly.
-                  audience: https://auth.example.com/realms/example
-                  expirationSeconds: 3600
-        - name: opencode-config
-          configMap:
-            name: opencode-config
-```
-
-**3. The ConfigMap holds the opencode config:**
-
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: opencode-config
-data:
-  opencode.json: |
-    {
-      "$schema": "https://opencode.ai/config.json",
-      "plugin": ["@vymalo/opencode-oauth2"],
-      "provider": {
-        "example-ai": {
-          "name": "Example AI",
-          "options": {
-            "baseURL": "https://api.example.com/v1",
-            "oauth2": {
-              "issuer": "https://auth.example.com/realms/example",
-              "clientId": "k8s-runner",
-              "scopes": ["openid"],
-              "authFlow": "jwt_bearer",
-              "subjectTokenSource": {
-                "type": "kubernetes_sa"
-              }
-            }
+```jsonc
+{
+  "provider": {
+    "example-ai": {
+      "options": {
+        "baseURL": "https://api.example.com/v1",
+        "oauth2": {
+          "issuer": "https://auth.example.com/realms/example",
+          "clientId": "k8s-runner",
+          "scopes": ["openid"],
+          "authFlow": "jwt_bearer",
+          "subjectTokenSource": {
+            "type": "kubernetes_sa"
           }
         }
       }
     }
+  }
+}
 ```
 
-The projected token at `/var/run/secrets/tokens/oauth2/token` rotates automatically (kubelet refreshes it). The plugin re-reads on every access-token expiry, so rotation is transparent.
-
-**Note:** the default `subjectTokenSource.tokenPath` is `/var/run/secrets/tokens/oauth2/token`. Override it via `"tokenPath": "..."` if your projected mount uses a different path.
+The pod must mount a projected `serviceAccountToken` at `/var/run/secrets/tokens/oauth2/token` with the IdP's expected `audience`. The projected token rotates automatically (kubelet refreshes it); the plugin re-reads on every access-token expiry, so rotation is transparent. Full manifests in [`docs/kubernetes.md`](../../docs/kubernetes.md).
 
 ### Choosing between `jwt_bearer` and `token_exchange`
 
@@ -261,10 +185,10 @@ The projected token at `/var/run/secrets/tokens/oauth2/token` rotates automatica
 
 ## OAuth Token Requirements
 
-Refresh token support is mandatory.
+Refresh tokens are mandatory for the flows that issue them (`authorization_code`, `device_code`).
 
-- Initial token exchange must return `refresh_token`.
-- Cached tokens missing `refreshToken` are invalidated.
+- Initial token exchange for those flows must return `refresh_token`; missing → rejected.
+- Cached tokens missing `refreshToken` are invalidated on load (unless the flow doesn't issue one — `client_credentials`, `jwt_bearer`, `token_exchange`).
 - Refresh flow preserves the previous refresh token when providers omit it in refresh responses.
 
 ## Hooks Used
@@ -272,9 +196,11 @@ Refresh token support is mandatory.
 - `config`: register/patch provider config and merge cached discovered models
 - `chat.headers`: ensure valid token and set `Authorization` header
 
+See [architecture.md](../../docs/architecture.md#the-two-hooks) for the full hook semantics.
+
 ## Development
 
-```bash
+```sh
 pnpm --filter @vymalo/opencode-oauth2 typecheck
 pnpm --filter @vymalo/opencode-oauth2 test
 pnpm --filter @vymalo/opencode-oauth2 build

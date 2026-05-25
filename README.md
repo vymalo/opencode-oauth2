@@ -11,6 +11,14 @@ An [OpenCode](https://opencode.ai) plugin that lets you wire up **OpenAI-compati
 
 ---
 
+```mermaid
+flowchart LR
+    OC[opencode] -->|chat.headers| Plugin[opencode-oauth2]
+    Plugin -->|cached token?| Cache[(~/.cache/opencode-oauth2)]
+    Plugin -->|acquire / refresh| IdP[OAuth server]
+    Plugin -->|Authorization: Bearer …| Upstream[Provider API]
+```
+
 ## Why
 
 Most OpenCode providers assume a static bearer key. That works for hosted SaaS, but breaks down the moment you put your models behind:
@@ -18,14 +26,15 @@ Most OpenCode providers assume a static bearer key. That works for hosted SaaS, 
 - a corporate Identity Provider (Keycloak, Auth0, Okta, Azure AD, …)
 - a self-hosted gateway with short-lived tokens
 - a multi-tenant setup where each user authenticates as themselves
+- a CI runner that has no business carrying a long-lived secret
 
-This plugin closes that gap. It handles the **Authorization Code + PKCE** dance, caches tokens, refreshes them silently, and feeds OpenCode a normal-looking provider with a fresh `Authorization` header on every request.
+This plugin closes that gap. It handles the OAuth dance for the flow you need, caches tokens, refreshes silently, and feeds OpenCode a normal-looking provider with a fresh `Authorization` header on every request.
 
 ## Features
 
 - **Five auth flows**, pick what matches your runtime:
   - `authorization_code` — interactive PKCE login (default)
-  - `device_code` — RFC 8628 device authorization, for browserless user auth
+  - `device_code` — RFC 8628, for browserless user auth
   - `client_credentials` — machine-to-machine with a `clientSecret`
   - `jwt_bearer` — RFC 7523 federated identity (GitHub Actions OIDC, Kubernetes SA tokens) — **no long-lived secret in CI**
   - `token_exchange` — RFC 8693 federated identity with explicit audience targeting
@@ -33,16 +42,9 @@ This plugin closes that gap. It handles the **Authorization Code + PKCE** dance,
 - **Display-name normalization** so `glm-5` shows up as `GLM 5`
 - **Persistent token cache** with automatic refresh
 - **`chat.headers` hook** injects bearer tokens per request
-- **Strict refresh-token policy** where it makes sense — access-only tokens are rejected by design on user-interactive flows
 - **Two configuration styles**: per-provider options or a top-level plugin block
 
-### Running in CI / Kubernetes (no long-lived secrets)
-
-For GitHub Actions and Kubernetes workloads, use the federated identity flows. See the **[Federated identity](packages/opencode-oauth2/README.md#federated-identity-no-long-lived-secrets-in-ci)** section in the package README for end-to-end examples with both `permissions: id-token: write` (GHA) and projected `serviceAccountToken` volumes (K8s).
-
 ## Install
-
-In your OpenCode config:
 
 ```jsonc
 {
@@ -73,17 +75,33 @@ Then declare a provider:
 }
 ```
 
-See [packages/opencode-oauth2/README.md](packages/opencode-oauth2/README.md) for the full configuration reference (including the alternative `pluginConfig.oauth2ModelSync.servers` layout).
+See [packages/opencode-oauth2/README.md](packages/opencode-oauth2/README.md) for the **full configuration reference** (including the alternative `pluginConfig.oauth2ModelSync.servers` layout and every optional field).
+
+## Documentation
+
+| Page | When you need it |
+| --- | --- |
+| [`docs/architecture.md`](docs/architecture.md) | Understand the hooks, token lifecycle per flow, cache layout, sync scheduler, logging |
+| [`docs/github-actions.md`](docs/github-actions.md) | CI without stored secrets — Keycloak/Auth0/Okta setup, reusable workflow, matrix, fork-PR limits |
+| [`docs/kubernetes.md`](docs/kubernetes.md) | `CronJob` / `Job` / `Deployment` with projected SA tokens, multi-provider pods, RBAC |
+| [`docs/local-development.md`](docs/local-development.md) | Sandbox setup, plugin re-export trick, forcing re-auth, dev-only `env` subject token |
+| [`docs/troubleshooting.md`](docs/troubleshooting.md) | Symptom-keyed fixes — `redirect_uri_mismatch`, model discovery 403, `invalid_client`, projected-token rotation |
+
+## Federated identity (CI / Kubernetes)
+
+For GitHub Actions and Kubernetes workloads, use `jwt_bearer` (or `token_exchange`) with the platform's own short-lived OIDC token as the subject. The plugin re-fetches it on every access-token expiry; nothing long-lived gets cached.
+
+End-to-end recipes live in [`docs/github-actions.md`](docs/github-actions.md) and [`docs/kubernetes.md`](docs/kubernetes.md). The shipped reusable workflow at [`.github/workflows/opencode-run.yml`](.github/workflows/opencode-run.yml) covers the common `opencode run` case.
 
 ## Token Policy
 
-Refresh tokens are **mandatory** — not a nicety.
+Refresh tokens are **mandatory** for the flows that issue them.
 
-- Access tokens returned without a `refresh_token` are rejected at exchange time.
-- Cached tokens missing `refreshToken` are evicted on load.
+- `authorization_code` / `device_code` exchanges that don't return `refresh_token` are rejected.
+- Cached tokens missing `refreshToken` are evicted on load (unless they're from `client_credentials` / `jwt_bearer` / `token_exchange`, which don't issue one).
 - Refresh responses that omit a new `refresh_token` re-use the existing one.
 
-The intent: a session is either fully renewable or it doesn't get cached. No silent fallbacks to short-lived tokens that fail mid-conversation.
+The intent: a user-flow session is either fully renewable or it doesn't get cached. Machine flows re-acquire on every expiry; refresh tokens have no role there.
 
 ## Workspace Layout
 
@@ -97,7 +115,7 @@ This is a [pnpm](https://pnpm.io) monorepo.
 
 ## Development
 
-```bash
+```sh
 pnpm install
 pnpm build
 pnpm typecheck
@@ -106,7 +124,7 @@ pnpm test
 
 Plugin-only iteration:
 
-```bash
+```sh
 pnpm --filter @vymalo/opencode-oauth2 test
 pnpm --filter @vymalo/opencode-oauth2 build
 ```
