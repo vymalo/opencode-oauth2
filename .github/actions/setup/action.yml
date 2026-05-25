@@ -1,8 +1,8 @@
 name: 'Setup @vymalo/opencode-oauth2'
 description: >-
   Install the @vymalo/opencode-oauth2 OpenCode plugin (and optionally the
-  opencode CLI) into the runner's global node_modules, with cross-run caching
-  so subsequent runs skip the install entirely.
+  opencode CLI) into a runner-local prefix, with cross-run caching so
+  subsequent runs skip the install entirely.
 author: 'vymalo contributors'
 branding:
   icon: 'lock'
@@ -38,7 +38,7 @@ inputs:
     required: false
     default: ''
   cache:
-    description: 'Cache the global install between runs. Defaults to "true".'
+    description: 'Cache the install between runs. Defaults to "true".'
     required: false
     default: 'true'
 
@@ -52,8 +52,8 @@ outputs:
     value: ${{ steps.resolve.outputs.opencode-version }}
   node-path:
     description: >-
-      Absolute path to the global node_modules directory where the plugin was
-      installed. Already exported as NODE_PATH for subsequent steps.
+      Absolute path to the node_modules directory holding the plugin. Already
+      exported as NODE_PATH for subsequent steps.
     value: ${{ steps.resolve.outputs.modules }}
   cache-hit:
     description: '"true" when the install was restored from cache.'
@@ -68,60 +68,108 @@ runs:
       with:
         node-version: ${{ inputs.node-version }}
 
+    # All `${{ inputs.* }}` interpolations are routed through env: vars so the
+    # values never get spliced into the shell script body — that closes the
+    # shell-injection vector on action inputs that downstream consumers control.
     - name: Resolve versions and paths
       id: resolve
       shell: bash
+      env:
+        PLUGIN_SPEC: ${{ inputs.version }}
+        INSTALL_OPENCODE: ${{ inputs.install-opencode }}
+        OPENCODE_PACKAGE: ${{ inputs.opencode-package }}
+        OPENCODE_VERSION_SPEC: ${{ inputs.opencode-version }}
       run: |
         set -euo pipefail
 
-        plugin_spec='${{ inputs.version }}'
-        if [ "$plugin_spec" = "latest" ]; then
-          plugin_version=$(npm view @vymalo/opencode-oauth2 version)
-        else
-          plugin_version="$plugin_spec"
+        # Resolve any spec (dist-tag, range, exact) to a single concrete version.
+        # `npm view "<spec>" version` returns one line per matching version in
+        # ascending order; the highest match is the last line.
+        resolve_version() {
+          local spec="$1"
+          npm view "$spec" version 2>/dev/null | tail -1 | tr -d '[:space:]'
+        }
+
+        plugin_version=$(resolve_version "@vymalo/opencode-oauth2@${PLUGIN_SPEC}")
+        if [ -z "$plugin_version" ]; then
+          echo "::error::Could not resolve @vymalo/opencode-oauth2@${PLUGIN_SPEC}" >&2
+          exit 1
         fi
         echo "plugin-version=$plugin_version" >> "$GITHUB_OUTPUT"
 
         opencode_version=""
-        if [ '${{ inputs.install-opencode }}' = 'true' ]; then
-          ov_spec='${{ inputs.opencode-version }}'
-          if [ "$ov_spec" = "latest" ]; then
-            opencode_version=$(npm view '${{ inputs.opencode-package }}' version)
-          else
-            opencode_version="$ov_spec"
+        if [ "$INSTALL_OPENCODE" = "true" ]; then
+          opencode_version=$(resolve_version "${OPENCODE_PACKAGE}@${OPENCODE_VERSION_SPEC}")
+          if [ -z "$opencode_version" ]; then
+            echo "::error::Could not resolve ${OPENCODE_PACKAGE}@${OPENCODE_VERSION_SPEC}" >&2
+            exit 1
           fi
         fi
         echo "opencode-version=$opencode_version" >> "$GITHUB_OUTPUT"
 
-        prefix=$(npm config get prefix)
+        # Use a runner-local prefix instead of the npm default so:
+        #   - we don't need sudo for /usr/local/lib/node_modules on hosted runners,
+        #   - the layout is identical across OSes (caching is hermetic),
+        #   - cache restore brings back BOTH lib/node_modules AND bin/.
+        prefix="$HOME/.opencode-oauth2-setup"
+        mkdir -p "$prefix"
         if [ "$RUNNER_OS" = "Windows" ]; then
+          # npm on Windows puts modules and bin shims directly under the prefix.
           modules="$prefix/node_modules"
+          bin="$prefix"
         else
           modules="$prefix/lib/node_modules"
+          bin="$prefix/bin"
         fi
         echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
         echo "modules=$modules" >> "$GITHUB_OUTPUT"
+        echo "bin=$bin" >> "$GITHUB_OUTPUT"
 
+        # Node ABI matters for native deps and for npm's prefix layout. Captured
+        # after setup-node has run (if it ran), so the cache key reflects the
+        # actually-active Node.
+        node_version=$(node --version)
+        echo "node-version=$node_version" >> "$GITHUB_OUTPUT"
+
+    # Cache the entire prefix (modules + bin). Key includes:
+    #   - OS (binaries are platform-specific),
+    #   - Node version (ABI + npm prefix layout),
+    #   - resolved plugin version (NOT the input spec — mutable specs like "next"
+    #     get pinned to a concrete version above before landing in the key),
+    #   - resolved CLI package + version (same reasoning; package name varies
+    #     when consumers point at a fork/mirror).
     - name: Restore install cache
       if: inputs.cache == 'true'
       id: cache
       uses: actions/cache@v4
       with:
-        path: ${{ steps.resolve.outputs.modules }}
-        key: vymalo-opencode-oauth2-${{ runner.os }}-plugin-${{ steps.resolve.outputs.plugin-version }}-cli-${{ steps.resolve.outputs.opencode-version || 'none' }}
+        path: ${{ steps.resolve.outputs.prefix }}
+        key: vymalo-opencode-oauth2-${{ runner.os }}-node-${{ steps.resolve.outputs.node-version }}-plugin-${{ steps.resolve.outputs.plugin-version }}-cli-${{ inputs.opencode-package }}@${{ steps.resolve.outputs.opencode-version || 'none' }}
 
     - name: Install plugin (and optionally opencode)
       if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
+      env:
+        PLUGIN_VERSION: ${{ steps.resolve.outputs.plugin-version }}
+        INSTALL_OPENCODE: ${{ inputs.install-opencode }}
+        OPENCODE_PACKAGE: ${{ inputs.opencode-package }}
+        OPENCODE_VERSION: ${{ steps.resolve.outputs.opencode-version }}
+        PREFIX: ${{ steps.resolve.outputs.prefix }}
       run: |
         set -euo pipefail
-        pkgs=( "@vymalo/opencode-oauth2@${{ steps.resolve.outputs.plugin-version }}" )
-        if [ '${{ inputs.install-opencode }}' = 'true' ]; then
-          pkgs+=( "${{ inputs.opencode-package }}@${{ steps.resolve.outputs.opencode-version }}" )
+        pkgs=( "@vymalo/opencode-oauth2@$PLUGIN_VERSION" )
+        if [ "$INSTALL_OPENCODE" = "true" ]; then
+          pkgs+=( "${OPENCODE_PACKAGE}@${OPENCODE_VERSION}" )
         fi
-        npm install -g --no-audit --no-fund "${pkgs[@]}"
+        npm install -g --prefix "$PREFIX" --no-audit --no-fund "${pkgs[@]}"
 
-    - name: Export NODE_PATH
+    - name: Export PATH and NODE_PATH
       shell: bash
+      env:
+        MODULES: ${{ steps.resolve.outputs.modules }}
+        BIN: ${{ steps.resolve.outputs.bin }}
       run: |
-        echo "NODE_PATH=${{ steps.resolve.outputs.modules }}" >> "$GITHUB_ENV"
+        echo "NODE_PATH=$MODULES" >> "$GITHUB_ENV"
+        # Prepend the prefix's bin to PATH so `opencode` (and any peer CLI) is
+        # invocable in subsequent steps without a wrapper.
+        echo "$BIN" >> "$GITHUB_PATH"
