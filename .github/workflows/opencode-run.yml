@@ -80,18 +80,63 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
 
-      - name: Install opencode + plugin
+      # Resolve any mutable npm spec (dist-tag, range) to a concrete version so
+      # the cache key below pins to a stable identity. Inputs are routed via
+      # env: to keep them out of the shell body (no injection vector).
+      - name: Resolve plugin + CLI versions
+        id: resolve
+        env:
+          PLUGIN_SPEC: ${{ inputs.plugin-version }}
+          OPENCODE_SPEC: ${{ inputs.opencode-version }}
         run: |
           set -euo pipefail
-          opencode_spec="opencode"
-          if [ -n "${{ inputs.opencode-version }}" ]; then
-            opencode_spec="opencode@${{ inputs.opencode-version }}"
+          resolve_version() {
+            npm view "$1" version 2>/dev/null | tail -1 | tr -d '[:space:]'
+          }
+          plugin_version=$(resolve_version "@vymalo/opencode-oauth2@${PLUGIN_SPEC:-latest}")
+          opencode_version=$(resolve_version "opencode@${OPENCODE_SPEC:-latest}")
+          if [ -z "$plugin_version" ] || [ -z "$opencode_version" ]; then
+            echo "::error::Could not resolve plugin or CLI version" >&2
+            exit 1
           fi
-          plugin_spec="@vymalo/opencode-oauth2"
-          if [ -n "${{ inputs.plugin-version }}" ]; then
-            plugin_spec="@vymalo/opencode-oauth2@${{ inputs.plugin-version }}"
-          fi
-          npm install -g "$opencode_spec" "$plugin_spec"
+          prefix="$HOME/.opencode-oauth2-setup"
+          mkdir -p "$prefix"
+          node_version=$(node --version)
+          {
+            echo "plugin-version=$plugin_version"
+            echo "opencode-version=$opencode_version"
+            echo "prefix=$prefix"
+            echo "modules=$prefix/lib/node_modules"
+            echo "bin=$prefix/bin"
+            echo "node-version=$node_version"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Restore install cache
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.resolve.outputs.prefix }}
+          key: vymalo-opencode-oauth2-${{ runner.os }}-node-${{ steps.resolve.outputs.node-version }}-plugin-${{ steps.resolve.outputs.plugin-version }}-cli-opencode@${{ steps.resolve.outputs.opencode-version }}
+
+      - name: Install opencode + plugin
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          PLUGIN_VERSION: ${{ steps.resolve.outputs.plugin-version }}
+          OPENCODE_VERSION: ${{ steps.resolve.outputs.opencode-version }}
+          PREFIX: ${{ steps.resolve.outputs.prefix }}
+        run: |
+          set -euo pipefail
+          npm install -g --prefix "$PREFIX" --no-audit --no-fund \
+            "opencode@$OPENCODE_VERSION" \
+            "@vymalo/opencode-oauth2@$PLUGIN_VERSION"
+
+      - name: Export PATH and NODE_PATH
+        env:
+          MODULES: ${{ steps.resolve.outputs.modules }}
+          BIN: ${{ steps.resolve.outputs.bin }}
+        run: |
+          echo "NODE_PATH=$MODULES" >> "$GITHUB_ENV"
+          echo "$BIN" >> "$GITHUB_PATH"
 
       - name: Verify opencode config exists
         run: |
