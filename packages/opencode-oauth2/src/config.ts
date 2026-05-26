@@ -1,6 +1,9 @@
+import type { LogLevel } from "./logging.js";
+
 export const DEFAULT_SYNC_INTERVAL_MINUTES = 60;
 export const DEFAULT_HTTP_TIMEOUT_MS = 15_000;
 export const DEFAULT_TOKEN_EXPIRY_SKEW_MS = 30_000;
+export const DEFAULT_LOG_LEVEL: LogLevel = "info";
 
 export type OAuthAuthFlow =
   | "authorization_code"
@@ -71,6 +74,11 @@ export interface OAuth2ModelSyncConfigInput {
   cacheNamespace?: string;
   httpTimeoutMs?: number;
   tokenExpirySkewMs?: number;
+  /**
+   * Minimum log level the plugin emits. Lower-priority records are dropped.
+   * One of `"debug" | "info" | "warn" | "error"`. Defaults to `"info"`.
+   */
+  logLevel?: LogLevel;
 }
 
 export interface OAuthServerConfig {
@@ -98,6 +106,7 @@ export interface OAuth2ModelSyncConfig {
   cacheNamespace: string;
   httpTimeoutMs: number;
   tokenExpirySkewMs: number;
+  logLevel: LogLevel;
 }
 
 function ensureString(value: unknown, path: string): string {
@@ -125,6 +134,20 @@ function validateRedirectPort(value: unknown, path: string): number | undefined 
   }
 
   return value;
+}
+
+function validateLogLevel(value: unknown, path: string): LogLevel {
+  if (value === undefined || value === null) {
+    return DEFAULT_LOG_LEVEL;
+  }
+
+  if (value === "debug" || value === "info" || value === "warn" || value === "error") {
+    return value;
+  }
+
+  throw new Error(
+    `${path} must be one of "debug" | "info" | "warn" | "error" (received ${JSON.stringify(value)})`
+  );
 }
 
 function validateAuthFlow(value: unknown, path: string): OAuthAuthFlow {
@@ -314,6 +337,7 @@ export function validateConfig(input: OAuth2ModelSyncConfigInput): OAuth2ModelSy
       input.httpTimeoutMs > 0
         ? input.httpTimeoutMs
         : DEFAULT_HTTP_TIMEOUT_MS,
-    tokenExpirySkewMs
+    tokenExpirySkewMs,
+    logLevel: validateLogLevel(input.logLevel, "logLevel")
   };
 }

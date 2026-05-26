@@ -1,13 +1,46 @@
 import type { Hooks, Plugin, PluginInput } from "@opencode-ai/plugin";
 
-import type {
-  OAuth2ModelSyncConfigInput,
-  OAuthAuthFlow,
-  OAuthServerConfigInput,
-  SubjectTokenSource
+import {
+  DEFAULT_LOG_LEVEL,
+  type OAuth2ModelSyncConfigInput,
+  type OAuthAuthFlow,
+  type OAuthServerConfigInput,
+  type SubjectTokenSource
 } from "./config.js";
-import { createJsonConsoleLogger, type LogFields, type Logger } from "./logging.js";
+import { createJsonConsoleLogger, type LogFields, type Logger, type LogLevel } from "./logging.js";
 import { OAuth2ModelSyncPlugin } from "./plugin.js";
+
+const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
+  debug: 10,
+  info: 20,
+  warn: 30,
+  error: 40
+};
+
+/**
+ * Map OpenCode's host-level `config.logLevel` (uppercase `"DEBUG" | "INFO" |
+ * "WARN" | "ERROR"`) to this plugin's internal `LogLevel`. Unknown / missing
+ * values fall through to `undefined` so the caller can apply its own default —
+ * we never throw on the OpenCode-supplied value because the host owns
+ * validation of its own field.
+ */
+export function fromOpenCodeLogLevel(value: unknown): LogLevel | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  switch (value.toUpperCase()) {
+    case "DEBUG":
+      return "debug";
+    case "INFO":
+      return "info";
+    case "WARN":
+      return "warn";
+    case "ERROR":
+      return "error";
+    default:
+      return undefined;
+  }
+}
 
 const OPENAI_COMPATIBLE_NPM = "@ai-sdk/openai-compatible";
 const OAUTH_OPTIONS_KEYS = ["oauth2", "oauth2ModelSync"] as const;
@@ -354,10 +387,17 @@ function mergeDiscoveredModels(
   providerConfig.models = merged;
 }
 
-function createOpenCodeLogger(client: PluginInput["client"]): Logger {
-  const fallback = createJsonConsoleLogger("info");
+function createOpenCodeLogger(client: PluginInput["client"], getMinLevel: () => LogLevel): Logger {
+  // Bypass createJsonConsoleLogger's own filter so the gate stays driven by
+  // the current value of getMinLevel() — the level can change once the plugin
+  // sees `pluginConfig.oauth2ModelSync.logLevel` during the `config` hook.
+  const fallback = createJsonConsoleLogger("debug");
 
   const write = (level: "debug" | "info" | "warn" | "error", event: string, fields?: LogFields) => {
+    if (LOG_LEVEL_PRIORITY[level] < LOG_LEVEL_PRIORITY[getMinLevel()]) {
+      return;
+    }
+
     fallback[level](event, fields);
 
     void client.app
@@ -394,7 +434,12 @@ export function createOpencodeOauth2Plugin(
   factoryOptions: OpenCodePluginFactoryOptions = {}
 ): Plugin {
   return async ({ client }) => {
-    const logger = factoryOptions.logger ?? createOpenCodeLogger(client);
+    // The plugin defers to OpenCode's own `config.logLevel` for filter
+    // decisions. Until the first `config` hook fires we don't know what the
+    // host picked, so we start at the package default (`"info"`) and update
+    // the holder once we see the real value.
+    let currentLogLevel: LogLevel = DEFAULT_LOG_LEVEL;
+    const logger = factoryOptions.logger ?? createOpenCodeLogger(client, () => currentLogLevel);
 
     const state: RuntimeState = {
       runtime: undefined,
@@ -405,6 +450,7 @@ export function createOpencodeOauth2Plugin(
     return {
       config: async (config) => {
         const managed = collectManagedProviders(config, logger);
+        currentLogLevel = fromOpenCodeLogLevel(config.logLevel) ?? DEFAULT_LOG_LEVEL;
 
         if (managed.servers.length === 0) {
           state.runtime?.stop();
@@ -416,7 +462,8 @@ export function createOpencodeOauth2Plugin(
 
         const pluginConfig: OAuth2ModelSyncConfigInput = {
           servers: managed.servers,
-          cacheNamespace: "opencode-oauth2-model-sync"
+          cacheNamespace: "opencode-oauth2-model-sync",
+          logLevel: currentLogLevel
         };
 
         const signature = runtimeSignature(pluginConfig);
