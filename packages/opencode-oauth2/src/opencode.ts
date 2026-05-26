@@ -7,15 +7,14 @@ import {
   type OAuthServerConfigInput,
   type SubjectTokenSource
 } from "./config.js";
-import { createJsonConsoleLogger, type LogFields, type Logger, type LogLevel } from "./logging.js";
+import {
+  createJsonConsoleLogger,
+  type LogFields,
+  LOG_LEVEL_PRIORITY,
+  type Logger,
+  type LogLevel
+} from "./logging.js";
 import { OAuth2ModelSyncPlugin } from "./plugin.js";
-
-const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
-  debug: 10,
-  info: 20,
-  warn: 30,
-  error: 40
-};
 
 /**
  * Map OpenCode's host-level `config.logLevel` (uppercase `"DEBUG" | "INFO" |
@@ -449,8 +448,12 @@ export function createOpencodeOauth2Plugin(
 
     return {
       config: async (config) => {
-        const managed = collectManagedProviders(config, logger);
+        // Apply the host's logLevel BEFORE walking the config: parsing emits
+        // `plugin_config_server_invalid` / `plugin_config_server_missing_fields`
+        // warnings via `logger`, and those need to be filtered against the
+        // user's chosen threshold — not the bootstrap default.
         currentLogLevel = fromOpenCodeLogLevel(config.logLevel) ?? DEFAULT_LOG_LEVEL;
+        const managed = collectManagedProviders(config, logger);
 
         if (managed.servers.length === 0) {
           state.runtime?.stop();
