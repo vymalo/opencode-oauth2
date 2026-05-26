@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { FileCacheStore } from "../src/cache.js";
-import { createOpencodeOauth2Plugin } from "../src/opencode.js";
+import { createOpencodeOauth2Plugin, fromOpenCodeLogLevel } from "../src/opencode.js";
 import { createSilentLogger } from "./helpers.js";
 
 async function createHooks(cacheDir: string) {
@@ -312,5 +312,53 @@ describe("OpenCode plugin hooks", () => {
 
     const options = providers["server-from-plugin-config"]?.options as Record<string, unknown>;
     expect(options.baseURL).toBe("https://api.example.com/v1");
+  });
+
+  it("accepts an OpenCode host logLevel without requiring a plugin-specific override", async () => {
+    const cacheDir = await mkdtemp(join(tmpdir(), "opencode-hook-host-loglevel-"));
+    const hooks = await createHooks(cacheDir);
+
+    const config: Record<string, unknown> = {
+      logLevel: "DEBUG",
+      pluginConfig: {
+        oauth2ModelSync: {
+          servers: [
+            {
+              id: "server-1",
+              issuer: "https://auth.example.com",
+              baseURL: "https://api.example.com/v1",
+              clientId: "opencode-client",
+              scopes: ["openid"]
+            }
+          ]
+        }
+      }
+    };
+
+    await expect(hooks.config?.(config as never)).resolves.not.toThrow();
+
+    const providers = config.provider as Record<string, Record<string, unknown>>;
+    expect(providers["server-1"]?.npm).toBe("@ai-sdk/openai-compatible");
+  });
+});
+
+describe("fromOpenCodeLogLevel", () => {
+  it("maps OpenCode's uppercase log levels to internal lowercase levels", () => {
+    expect(fromOpenCodeLogLevel("DEBUG")).toBe("debug");
+    expect(fromOpenCodeLogLevel("INFO")).toBe("info");
+    expect(fromOpenCodeLogLevel("WARN")).toBe("warn");
+    expect(fromOpenCodeLogLevel("ERROR")).toBe("error");
+  });
+
+  it("tolerates mixed-case input from non-canonical hosts", () => {
+    expect(fromOpenCodeLogLevel("debug")).toBe("debug");
+    expect(fromOpenCodeLogLevel("Info")).toBe("info");
+  });
+
+  it("returns undefined for missing or unrecognized values so the caller can apply a default", () => {
+    expect(fromOpenCodeLogLevel(undefined)).toBeUndefined();
+    expect(fromOpenCodeLogLevel(null)).toBeUndefined();
+    expect(fromOpenCodeLogLevel("trace")).toBeUndefined();
+    expect(fromOpenCodeLogLevel(42)).toBeUndefined();
   });
 });

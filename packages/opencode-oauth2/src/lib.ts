@@ -1,5 +1,6 @@
 export {
   DEFAULT_HTTP_TIMEOUT_MS,
+  DEFAULT_LOG_LEVEL,
   DEFAULT_SYNC_INTERVAL_MINUTES,
   type OAuth2ModelSyncConfig,
   type OAuth2ModelSyncConfigInput,

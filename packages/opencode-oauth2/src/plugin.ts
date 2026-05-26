@@ -44,7 +44,7 @@ export class OAuth2ModelSyncPlugin {
     private readonly options: PluginOptions = {}
   ) {
     this.config = validateConfig(this.configInput);
-    this.logger = options.logger ?? createJsonConsoleLogger("info");
+    this.logger = options.logger ?? createJsonConsoleLogger(this.config.logLevel);
     this.cacheStore = new FileCacheStore(
       options.cacheDir ?? resolveCacheDir(this.config.cacheNamespace)
     );

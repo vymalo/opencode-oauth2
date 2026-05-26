@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DEFAULT_HTTP_TIMEOUT_MS,
+  DEFAULT_LOG_LEVEL,
   DEFAULT_SYNC_INTERVAL_MINUTES,
   DEFAULT_TOKEN_EXPIRY_SKEW_MS,
   validateConfig
@@ -382,6 +383,58 @@ describe("validateConfig", () => {
         ]
       })
     ).toThrow(/audience/);
+  });
+
+  it("defaults logLevel to info when omitted", () => {
+    const result = validateConfig({
+      servers: [
+        {
+          id: "server-1",
+          issuer: "https://auth.example.com",
+          baseURL: "https://api.example.com/v1",
+          clientId: "client-id",
+          scopes: ["openid"]
+        }
+      ]
+    });
+
+    expect(result.logLevel).toBe(DEFAULT_LOG_LEVEL);
+    expect(result.logLevel).toBe("info");
+  });
+
+  it("accepts a valid logLevel override", () => {
+    const result = validateConfig({
+      logLevel: "debug",
+      servers: [
+        {
+          id: "server-1",
+          issuer: "https://auth.example.com",
+          baseURL: "https://api.example.com/v1",
+          clientId: "client-id",
+          scopes: ["openid"]
+        }
+      ]
+    });
+
+    expect(result.logLevel).toBe("debug");
+  });
+
+  it("rejects an unknown logLevel value", () => {
+    expect(() =>
+      validateConfig({
+        // biome-ignore lint/suspicious/noExplicitAny: testing invalid input
+        logLevel: "trace" as any,
+        servers: [
+          {
+            id: "server-1",
+            issuer: "https://auth.example.com",
+            baseURL: "https://api.example.com/v1",
+            clientId: "client-id",
+            scopes: ["openid"]
+          }
+        ]
+      })
+    ).toThrow(/logLevel/);
   });
 
   it("rejects an unknown subjectTokenSource type", () => {

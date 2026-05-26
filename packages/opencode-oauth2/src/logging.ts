@@ -1,6 +1,6 @@
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
-const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
+export const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
   debug: 10,
   info: 20,
   warn: 30,

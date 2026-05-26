@@ -107,6 +107,8 @@ Plus the top-level `pluginConfig.oauth2ModelSync` block accepts:
 | `httpTimeoutMs` | `15000` | Timeout for token-endpoint / `/models` round trips. |
 | `tokenExpirySkewMs` | `30000` | Treat a token as expired this many ms before its real `expiresAt`. |
 
+The plugin's log level follows the host's top-level `logLevel` (`"DEBUG" | "INFO" | "WARN" | "ERROR"`) — set it once in your OpenCode config and the plugin honors the same threshold for both console output and forwarded `app.log` records. Defaults to `"info"` when the host doesn't set one.
+
 ## Federated identity (no long-lived secrets in CI)
 
 For CI runners and Kubernetes workloads, the modern best practice is to skip stored client secrets entirely and use the platform's own short-lived OIDC token to authenticate. `@vymalo/opencode-oauth2` supports this via the **`jwt_bearer`** (RFC 7523) and **`token_exchange`** (RFC 8693) grants.
