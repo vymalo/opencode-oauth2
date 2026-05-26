@@ -148,7 +148,7 @@ echo "$jwt" | cut -d. -f2 | base64 -d 2>/dev/null | jq '{aud, iss, sub}'
 The principled fix on the embedder side:
 
 ```ts
-import { OAuth2ModelSyncPlugin } from "@vymalo/opencode-oauth2";
+import { OAuth2ModelSyncPlugin } from "@vymalo/opencode-oauth2/lib";
 const runtime = new OAuth2ModelSyncPlugin(cfg, { /* ... */ });
 await runtime.initialize();
 await runtime.start({ warmup: true, interactive: false });
