@@ -18,6 +18,19 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
 
+  packages/opencode-models-info:
+    dependencies:
+      '@opencode-ai/plugin':
+        specifier: 1.15.10
+        version: 1.15.10
+    devDependencies:
+      vite:
+        specifier: ^8.0.14
+        version: 8.0.14(@types/node@25.9.1)(yaml@2.9.0)
+      vitest:
+        specifier: ^4.1.7
+        version: 4.1.7(@types/node@25.9.1)(vite@8.0.14(@types/node@25.9.1)(yaml@2.9.0))
+
   packages/opencode-oauth2:
     dependencies:
       '@opencode-ai/plugin':

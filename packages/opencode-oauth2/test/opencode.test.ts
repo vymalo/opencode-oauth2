@@ -151,6 +151,106 @@ describe("OpenCode plugin hooks", () => {
     expect(output.headers.Authorization).toBe("Bearer cached-access");
   });
 
+  it("propagates the cached bearer into provider.options.headers for downstream config-time consumers", async () => {
+    // The composition contract for @vymalo/opencode-models-info: by the time
+    // a later `config` hook walks `config.provider[*]`, every managed
+    // provider already carries a usable `Authorization` header so an
+    // OAuth2-protected `meta.modelsInfoUrl` fetch inherits the token without
+    // depending on this plugin.
+    const cacheDir = await mkdtemp(join(tmpdir(), "opencode-hook-propagate-"));
+    const cache = new FileCacheStore(cacheDir);
+    await cache.ensureReady();
+
+    await cache.saveServerState({
+      serverId: "example-ai",
+      updatedAt: Date.now(),
+      lastSyncAt: Date.now(),
+      token: {
+        accessToken: "cached-access",
+        tokenType: "Bearer",
+        refreshToken: "cached-refresh",
+        expiresAt: Date.now() + 60_000
+      },
+      rawModels: [{ id: "glm-5" }],
+      models: [{ id: "glm-5", displayName: "GLM 5" }]
+    });
+
+    const hooks = await createHooks(cacheDir);
+
+    const config: Record<string, unknown> = {
+      provider: {
+        "example-ai": {
+          options: {
+            baseURL: "https://api.example.com/v1",
+            oauth2: {
+              issuer: "https://auth.example.com",
+              clientId: "opencode-client",
+              scopes: ["openid", "offline_access"]
+            }
+          }
+        }
+      }
+    };
+
+    await hooks.config?.(config as never);
+
+    const providerOptions = (config.provider as Record<string, Record<string, unknown>>)[
+      "example-ai"
+    ].options as Record<string, unknown>;
+    const headers = providerOptions.headers as Record<string, string> | undefined;
+    expect(headers?.Authorization).toBe("Bearer cached-access");
+  });
+
+  it("does not overwrite a user-set Authorization header during propagation", async () => {
+    const cacheDir = await mkdtemp(join(tmpdir(), "opencode-hook-userauth-"));
+    const cache = new FileCacheStore(cacheDir);
+    await cache.ensureReady();
+
+    await cache.saveServerState({
+      serverId: "example-ai",
+      updatedAt: Date.now(),
+      lastSyncAt: Date.now(),
+      token: {
+        accessToken: "cached-access",
+        tokenType: "Bearer",
+        refreshToken: "cached-refresh",
+        expiresAt: Date.now() + 60_000
+      },
+      rawModels: [{ id: "glm-5" }],
+      models: [{ id: "glm-5", displayName: "GLM 5" }]
+    });
+
+    const hooks = await createHooks(cacheDir);
+
+    const config: Record<string, unknown> = {
+      provider: {
+        "example-ai": {
+          options: {
+            baseURL: "https://api.example.com/v1",
+            // Lowercase to also exercise the case-insensitive guard.
+            headers: { authorization: "Bearer user-override" },
+            oauth2: {
+              issuer: "https://auth.example.com",
+              clientId: "opencode-client",
+              scopes: ["openid", "offline_access"]
+            }
+          }
+        }
+      }
+    };
+
+    await hooks.config?.(config as never);
+
+    const headers = (
+      (config.provider as Record<string, Record<string, unknown>>)["example-ai"].options as Record<
+        string,
+        unknown
+      >
+    ).headers as Record<string, string>;
+    expect(headers.authorization).toBe("Bearer user-override");
+    expect(headers.Authorization).toBeUndefined();
+  });
+
   it("rejects invalid redirectPort in provider.options.oauth2", async () => {
     const cacheDir = await mkdtemp(join(tmpdir(), "opencode-hook-badport-"));
     const hooks = await createHooks(cacheDir);

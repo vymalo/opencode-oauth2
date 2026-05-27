@@ -76,55 +76,73 @@ jobs:
       - name: Format check
         run: pnpm format:check
 
-      - name: Build plugin (tsc → packages/opencode-oauth2/dist)
+      - name: Build oauth2 plugin (tsc → packages/opencode-oauth2/dist)
         run: pnpm --filter @vymalo/opencode-oauth2 build
 
-      - name: Build release bundle (Rolldown)
+      - name: Build oauth2 release bundle (Rolldown)
         # Not what we publish to npm (that's the tsc output), but we still
         # build it on every publish so a broken bundler is caught here.
         run: pnpm --filter @vymalo/opencode-oauth2-bundle build
 
-      - name: Pack tarball (for inspection and as a release asset)
+      - name: Build models-info plugin (tsc → packages/opencode-models-info/dist)
+        run: pnpm --filter @vymalo/opencode-models-info build
+
+      - name: Pack oauth2 tarball (for inspection and as a release asset)
         run: |
-          mkdir -p dist-tarball
+          mkdir -p dist-tarball/oauth2
           pnpm --filter @vymalo/opencode-oauth2 pack \
-            --pack-destination "$PWD/dist-tarball"
-          ls -la dist-tarball/
+            --pack-destination "$PWD/dist-tarball/oauth2"
+          ls -la dist-tarball/oauth2/
+
+      - name: Pack models-info tarball
+        run: |
+          mkdir -p dist-tarball/models-info
+          pnpm --filter @vymalo/opencode-models-info pack \
+            --pack-destination "$PWD/dist-tarball/models-info"
+          ls -la dist-tarball/models-info/
 
       - name: Verify tarball contents
-        # Defense-in-depth: confirms we're shipping the dist/, NOT shipping
-        # source or tests, and that the package isn't accidentally empty.
+        # Defense-in-depth: confirms each package is shipping its dist/, NOT
+        # shipping source or tests, and that the package isn't accidentally
+        # empty. Runs against both tarballs.
         run: |
           set -euo pipefail
-          tarball=$(ls dist-tarball/*.tgz | head -1)
-          echo "=== Tarball: $tarball ==="
-          # List once into a variable. We then match against the variable with
-          # bash pattern matching — no pipes, no SIGPIPE, immune to the
-          # `grep -q | pipefail` trap regardless of listing size.
-          entries=$(tar -tzf "$tarball")
-          printf '%s\n' "$entries"
-          echo
-          echo "=== Validation ==="
-          # Wrap with newlines so a literal full-line match becomes a simple
-          # substring search.
-          haystack=$'\n'"$entries"$'\n'
-          if [[ "$haystack" != *$'\n'"package/dist/index.js"$'\n'* ]]; then
-            echo "FAIL: package/dist/index.js missing from tarball"
-            exit 1
-          fi
-          if [[ "$haystack" =~ $'\n'package/(test|src|node_modules)/ ]]; then
-            echo "FAIL: tarball contains forbidden directories (test/src/node_modules)"
-            echo "Offending entries:"
-            printf '%s\n' "$entries" | grep -E '^package/(test|src|node_modules)/' || true
-            exit 1
-          fi
-          if [[ "$haystack" != *$'\n'"package/LICENSE"$'\n'* ]]; then
-            echo "FAIL: LICENSE missing from tarball"
-            exit 1
-          fi
-          echo "OK"
+          verify_tarball() {
+            local tarball="$1"
+            echo "=== Tarball: $tarball ==="
+            # List once into a variable. We then match against the variable
+            # with bash pattern matching — no pipes, no SIGPIPE, immune to
+            # the `grep -q | pipefail` trap regardless of listing size.
+            local entries
+            entries=$(tar -tzf "$tarball")
+            printf '%s\n' "$entries"
+            echo
+            echo "=== Validation: $tarball ==="
+            # Wrap with newlines so a literal full-line match becomes a
+            # simple substring search.
+            local haystack=$'\n'"$entries"$'\n'
+            if [[ "$haystack" != *$'\n'"package/dist/index.js"$'\n'* ]]; then
+              echo "FAIL: package/dist/index.js missing from $tarball"
+              exit 1
+            fi
+            if [[ "$haystack" =~ $'\n'package/(test|src|node_modules)/ ]]; then
+              echo "FAIL: $tarball contains forbidden directories (test/src/node_modules)"
+              echo "Offending entries:"
+              printf '%s\n' "$entries" | grep -E '^package/(test|src|node_modules)/' || true
+              exit 1
+            fi
+            if [[ "$haystack" != *$'\n'"package/LICENSE"$'\n'* ]]; then
+              echo "FAIL: LICENSE missing from $tarball"
+              exit 1
+            fi
+            echo "OK: $tarball"
+          }
 
-      - name: Publish to npm (with provenance)
+          for tarball in dist-tarball/oauth2/*.tgz dist-tarball/models-info/*.tgz; do
+            verify_tarball "$tarball"
+          done
+
+      - name: Publish oauth2 to npm (with provenance)
         if: ${{ inputs.dry_run != true }}
         # --provenance:    generates a signed SLSA L2 attestation linking the
         #                  tarball to this workflow run + commit SHA. npm
@@ -135,7 +153,15 @@ jobs:
         #                  guard. Release events check out a detached HEAD on
         #                  the tag SHA, which would otherwise trip the check.
         # --access public: required for first publish under a new scope.
+        # Skips publish if the version is already on the registry — so a
+        # release that only bumps one package's version doesn't fail.
         run: |
+          set -e
+          version=$(node -p "require('./packages/opencode-oauth2/package.json').version")
+          if npm view "@vymalo/opencode-oauth2@${version}" version >/dev/null 2>&1; then
+            echo "::notice::@vymalo/opencode-oauth2@${version} already on npm — skipping."
+            exit 0
+          fi
           pnpm --filter @vymalo/opencode-oauth2 publish \
             --access public \
             --no-git-checks \
@@ -144,6 +170,23 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.MCP_NPM_AUTH_TOKEN }}
           # Belt and braces — also enables provenance for any underlying npm
           # CLI invocation that pnpm delegates to.
+          NPM_CONFIG_PROVENANCE: "true"
+
+      - name: Publish models-info to npm (with provenance)
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          set -e
+          version=$(node -p "require('./packages/opencode-models-info/package.json').version")
+          if npm view "@vymalo/opencode-models-info@${version}" version >/dev/null 2>&1; then
+            echo "::notice::@vymalo/opencode-models-info@${version} already on npm — skipping."
+            exit 0
+          fi
+          pnpm --filter @vymalo/opencode-models-info publish \
+            --access public \
+            --no-git-checks \
+            --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.MCP_NPM_AUTH_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
 
       - name: Dry-run notice
@@ -158,4 +201,4 @@ jobs:
         with:
           # The tarball alongside the release page makes downstream
           # verification trivial (no need to fetch from npm just to inspect).
-          files: dist-tarball/*.tgz
+          files: dist-tarball/**/*.tgz

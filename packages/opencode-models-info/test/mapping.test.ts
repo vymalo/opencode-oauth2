@@ -1,0 +1,85 @@
+import { describe, expect, it } from "vitest";
+
+import { mapOpenRouterEntry, mergeIntoModel } from "../src/mapping.js";
+import type { OpenRouterModel } from "../src/types.js";
+
+describe("mapOpenRouterEntry", () => {
+  it("converts pricing strings to per-1M USD numbers", () => {
+    const entry: OpenRouterModel = {
+      id: "x",
+      pricing: { prompt: "0.000003", completion: "0.000015", input_cache_read: "0.0000003" }
+    };
+    const out = mapOpenRouterEntry(entry);
+    expect(out.cost).toEqual({ input: 3, output: 15, cache_read: 0.3 });
+  });
+
+  it("requires both prompt and completion pricing to emit a cost block", () => {
+    const out = mapOpenRouterEntry({ id: "x", pricing: { prompt: "0.001" } });
+    expect(out.cost).toBeUndefined();
+  });
+
+  it("sets limit only when both context and output are known", () => {
+    const both = mapOpenRouterEntry({
+      id: "x",
+      context_length: 128000,
+      top_provider: { max_completion_tokens: 4096 }
+    });
+    expect(both.limit).toEqual({ context: 128000, output: 4096 });
+
+    const contextOnly = mapOpenRouterEntry({ id: "x", context_length: 128000 });
+    expect(contextOnly.limit).toBeUndefined();
+  });
+
+  it("derives capability flags from supported_parameters", () => {
+    const out = mapOpenRouterEntry({
+      id: "x",
+      supported_parameters: ["tools", "temperature", "reasoning"]
+    });
+    expect(out.tool_call).toBe(true);
+    expect(out.temperature).toBe(true);
+    expect(out.reasoning).toBe(true);
+  });
+
+  it("filters modalities to OpenCode's enum and marks attachment when non-text", () => {
+    const out = mapOpenRouterEntry({
+      id: "x",
+      architecture: {
+        input_modalities: ["text", "image", "file"],
+        output_modalities: ["text"]
+      }
+    });
+    expect(out.modalities).toEqual({ input: ["text", "image"], output: ["text"] });
+    expect(out.attachment).toBe(true);
+  });
+
+  it("does not set attachment for text-only models", () => {
+    const out = mapOpenRouterEntry({
+      id: "x",
+      architecture: { input_modalities: ["text"], output_modalities: ["text"] }
+    });
+    expect(out.attachment).toBeUndefined();
+  });
+});
+
+describe("mergeIntoModel", () => {
+  it("only writes fields that are undefined upstream", () => {
+    const existing: Record<string, unknown> = { name: "Pre-named", tool_call: true };
+    mergeIntoModel(existing, {
+      name: "From OpenRouter",
+      tool_call: false,
+      reasoning: true,
+      cost: { input: 1, output: 2 }
+    });
+    expect(existing.name).toBe("Pre-named");
+    expect(existing.tool_call).toBe(true);
+    expect(existing.reasoning).toBe(true);
+    expect(existing.cost).toEqual({ input: 1, output: 2 });
+  });
+
+  it("is idempotent", () => {
+    const existing: Record<string, unknown> = {};
+    mergeIntoModel(existing, { reasoning: true });
+    mergeIntoModel(existing, { reasoning: false });
+    expect(existing.reasoning).toBe(true);
+  });
+});

@@ -1,0 +1,74 @@
+{
+  "mappings": [
+    {
+      "name": "openrouter-models-200",
+      "priority": 5,
+      "request": {
+        "method": "GET",
+        "urlPath": "/v1/models"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json",
+          "ETag": "\"openrouter-v1\""
+        },
+        "bodyFileName": "openrouter-catalog.json"
+      }
+    },
+    {
+      "name": "openrouter-models-304",
+      "priority": 1,
+      "request": {
+        "method": "GET",
+        "urlPath": "/v1/models",
+        "headers": {
+          "If-None-Match": { "equalTo": "\"openrouter-v1\"" }
+        }
+      },
+      "response": {
+        "status": 304,
+        "headers": {
+          "ETag": "\"openrouter-v1\""
+        }
+      }
+    },
+    {
+      "name": "openrouter-models-tenant-auth-required",
+      "priority": 3,
+      "request": {
+        "method": "GET",
+        "urlPath": "/v1/models",
+        "queryParameters": {
+          "auth": { "equalTo": "required" }
+        }
+      },
+      "response": {
+        "status": 401,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": { "error": "missing bearer token" }
+      }
+    },
+    {
+      "name": "openrouter-models-tenant-auth-ok",
+      "priority": 2,
+      "request": {
+        "method": "GET",
+        "urlPath": "/v1/models",
+        "queryParameters": {
+          "auth": { "equalTo": "required" }
+        },
+        "headers": {
+          "Authorization": { "matches": "Bearer .+" }
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "bodyFileName": "openrouter-catalog.json"
+      }
+    }
+  ]
+}

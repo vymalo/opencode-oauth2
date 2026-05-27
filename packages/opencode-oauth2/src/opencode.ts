@@ -15,6 +15,7 @@ import {
   type LogLevel
 } from "./logging.js";
 import { OAuth2ModelSyncPlugin } from "./plugin.js";
+import type { TokenSet } from "./types.js";
 
 /**
  * Map OpenCode's host-level `config.logLevel` (uppercase `"DEBUG" | "INFO" |
@@ -386,6 +387,52 @@ function mergeDiscoveredModels(
   providerConfig.models = merged;
 }
 
+/** Skew (ms) used when deciding whether a cached token is "still usable" for
+ * config-time propagation. Smaller than the OAuth client's own skew because a
+ * stale config-time Authorization header has limited blast radius — at worst,
+ * a sibling plugin's metadata fetch returns 401 and falls back to no
+ * enrichment. The chat-time path is unaffected.
+ */
+const CONFIG_TIME_TOKEN_SKEW_MS = 30_000;
+
+function isCachedTokenUsableForConfigTime(token: TokenSet | undefined): token is TokenSet {
+  if (!token?.accessToken) {
+    return false;
+  }
+  if (!token.expiresAt) {
+    // No declared lifetime → optimistically usable; this matches the
+    // user-flow assumption in `OAuthClient.isTokenValid`.
+    return true;
+  }
+  return token.expiresAt > Date.now() + CONFIG_TIME_TOKEN_SKEW_MS;
+}
+
+function propagateCachedBearer(
+  providerConfig: OpenCodeProviderConfig,
+  providerId: string,
+  runtime: OAuth2ModelSyncPlugin,
+  logger: Logger
+): void {
+  const cached = runtime.getCachedToken(providerId);
+  if (!isCachedTokenUsableForConfigTime(cached)) {
+    return;
+  }
+
+  const options = (providerConfig.options ??= {} as NonNullable<OpenCodeProviderConfig["options"]>);
+  const headers = ((options as { headers?: Record<string, string> }).headers ??= {});
+  // Case-insensitive scan so a user-set `authorization:` lowercase entry
+  // also wins — HTTP header names are case-insensitive but most plugins use
+  // PascalCase.
+  const hasUserAuth = Object.keys(headers).some((k) => k.toLowerCase() === "authorization");
+  if (hasUserAuth) {
+    logger.debug("oauth2_bearer_propagation_skipped_user_set", { providerId });
+    return;
+  }
+
+  headers.Authorization = `${cached.tokenType || "Bearer"} ${cached.accessToken}`;
+  logger.debug("oauth2_bearer_propagated_to_provider_headers", { providerId });
+}
+
 function createOpenCodeLogger(client: PluginInput["client"], getMinLevel: () => LogLevel): Logger {
   // Bypass createJsonConsoleLogger's own filter so the gate stays driven by
   // the current value of getMinLevel() — the level can change once the plugin
@@ -495,11 +542,18 @@ export function createOpencodeOauth2Plugin(
           }
 
           const models = state.runtime.getServerModels(providerId);
-          if (models.length === 0) {
-            continue;
+          if (models.length > 0) {
+            mergeDiscoveredModels(providerConfig, models);
           }
 
-          mergeDiscoveredModels(providerConfig, models);
+          // Stamp the cached bearer onto `options.headers.Authorization` so
+          // subsequent `config` hooks (e.g. @vymalo/opencode-models-info
+          // fetching a metadata endpoint) can inherit it without depending
+          // on this plugin. `chat.headers` still overwrites per-request with
+          // a freshly-ensured token, so a stale value here can only ever
+          // affect other config-time consumers — never the actual inference
+          // call. We never clobber a user-set Authorization header.
+          propagateCachedBearer(providerConfig, providerId, state.runtime, logger);
         }
       },
       "chat.headers": async (input, output) => {
