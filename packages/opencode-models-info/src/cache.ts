@@ -19,8 +19,30 @@ export function resolveCacheDir(namespace = "opencode-models-info"): string {
   return join(resolveDefaultCacheRoot(), namespace);
 }
 
-export function cacheKey(providerId: string, url: string): string {
-  return createHash("sha256").update(`${providerId}::${url}`).digest("hex");
+/**
+ * Cache key = sha256(providerId :: url :: stableJSON(headers)).
+ *
+ * Only the **caller-specified** headers (i.e. `meta.modelsInfoHeaders`) go
+ * into the key — NOT the provider's other request headers. Rationale: if a
+ * rotating bearer (e.g. from `@vymalo/opencode-oauth2`) were keyed in, the
+ * cache would thrash on every token refresh. Headers the user explicitly
+ * configures for the metadata fetch (tenant selectors, static auth, etc.)
+ * are exactly the ones that should bust the cache when they change.
+ */
+export function cacheKey(
+  providerId: string,
+  url: string,
+  headers?: Record<string, string>
+): string {
+  const headerPart = headers ? stableStringify(headers) : "";
+  return createHash("sha256").update(`${providerId}::${url}::${headerPart}`).digest("hex");
+}
+
+function stableStringify(headers: Record<string, string>): string {
+  const sorted = Object.keys(headers)
+    .sort()
+    .map((k) => [k.toLowerCase(), headers[k]] as const);
+  return JSON.stringify(sorted);
 }
 
 export interface CacheStore {

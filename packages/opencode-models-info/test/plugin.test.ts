@@ -77,7 +77,7 @@ describe("enrichConfig", () => {
     const config = withProvider("custom", {
       options: {
         baseURL: "https://x.test/v1",
-        meta: { modelsInfoUrl: "/models/info" }
+        meta: { modelsInfoUrl: "models/info" }
       },
       models: { "model-a": {}, unmatched: { name: "Untouched" } }
     });
@@ -189,5 +189,186 @@ describe("enrichConfig", () => {
       output: 4096
     });
     expect(seed.get(key)?.fetchedAt).toBe(9_000_000);
+  });
+
+  it("forwards provider.options.headers into the fetch (auth-agnostic composition)", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ data: [openRouterEntry] }), { status: 200 })
+      );
+    const config = withProvider("custom", {
+      options: {
+        headers: { Authorization: "Bearer from-provider", "x-tenant": "t1" },
+        meta: { modelsInfoUrl: "https://x.test/m" }
+      },
+      models: { "model-a": {} }
+    });
+
+    await enrichConfig(config, {
+      cache: memoryCache(),
+      logger: silentLogger(),
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    });
+
+    const init = fetchImpl.mock.calls[0][1] as RequestInit;
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer from-provider");
+    expect(headers["x-tenant"]).toBe("t1");
+  });
+
+  it("lets meta.modelsInfoHeaders override provider.options.headers on conflict", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ data: [openRouterEntry] }), { status: 200 })
+      );
+    const config = withProvider("custom", {
+      options: {
+        headers: { Authorization: "Bearer provider" },
+        meta: {
+          modelsInfoUrl: "https://x.test/m",
+          modelsInfoHeaders: { Authorization: "Bearer meta-wins" }
+        }
+      },
+      models: { "model-a": {} }
+    });
+
+    await enrichConfig(config, {
+      cache: memoryCache(),
+      logger: silentLogger(),
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    });
+
+    const init = fetchImpl.mock.calls[0][1] as RequestInit;
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer meta-wins");
+  });
+
+  it("logs models_info_enrichment_failed instead of silently swallowing an unexpected error", async () => {
+    const logger = silentLogger();
+    const explodingCache: CacheStore = {
+      get: async () => {
+        throw new Error("disk on fire");
+      },
+      put: async () => undefined
+    };
+    const config = withProvider("custom", {
+      options: { meta: { modelsInfoUrl: "https://x.test/m" } },
+      models: { "model-a": {} }
+    });
+
+    await enrichConfig(config, {
+      cache: explodingCache,
+      logger,
+      fetchImpl: vi.fn() as unknown as typeof fetch
+    });
+
+    expect(logger.error).toHaveBeenCalledWith(
+      "models_info_enrichment_failed",
+      expect.objectContaining({ providerId: "custom", error: "disk on fire" })
+    );
+  });
+
+  it("treats a fully-filtered response as a parse error and serves stale cache", async () => {
+    const seed = new Map<string, CachedModelsRecord>();
+    const { cacheKey } = await import("../src/cache.js");
+    seed.set(cacheKey("custom", "https://x.test/m"), {
+      fetchedAt: 0,
+      ttlSeconds: 1,
+      models: [openRouterEntry]
+    });
+
+    // Response has entries, but none have a string `id` — looks like a
+    // schema mismatch (e.g. provider changed its catalog format). Plugin
+    // should keep the previous snapshot rather than overwriting with [].
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ data: [{ name: "no-id" }, { id: 42 }] }), { status: 200 })
+      );
+    const logger = silentLogger();
+    const config = withProvider("custom", {
+      options: { meta: { modelsInfoUrl: "https://x.test/m" } },
+      models: { "model-a": {} }
+    });
+
+    await enrichConfig(config, {
+      cache: memoryCache(seed),
+      logger,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      now: () => 1_000_000
+    });
+
+    expect(getModel(config, "custom", "model-a").cost).toEqual({ input: 3, output: 15 });
+    expect(logger.warn).toHaveBeenCalledWith(
+      "models_info_fetch_failed_using_stale",
+      expect.objectContaining({ providerId: "custom" })
+    );
+  });
+
+  it("logs a warning but still enriches when cache.put fails", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ data: [openRouterEntry] }), { status: 200 })
+      );
+    const logger = silentLogger();
+    const flakyCache: CacheStore = {
+      get: async () => undefined,
+      put: async () => {
+        throw new Error("read-only filesystem");
+      }
+    };
+
+    const config = withProvider("custom", {
+      options: { meta: { modelsInfoUrl: "https://x.test/m" } },
+      models: { "model-a": {} }
+    });
+
+    await enrichConfig(config, {
+      cache: flakyCache,
+      logger,
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    });
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      "models_info_cache_write_failed",
+      expect.objectContaining({ providerId: "custom", error: "read-only filesystem" })
+    );
+    // Crucially, the model was enriched even though the disk write failed.
+    expect(getModel(config, "custom", "model-a").cost).toEqual({ input: 3, output: 15 });
+  });
+
+  it("applies the current TTL when refreshing a 304 response", async () => {
+    const seed = new Map<string, CachedModelsRecord>();
+    const { cacheKey } = await import("../src/cache.js");
+    const key = cacheKey("custom", "https://x.test/m");
+    seed.set(key, {
+      fetchedAt: 0,
+      ttlSeconds: 1, // old TTL stored on disk
+      etag: "v1",
+      models: [openRouterEntry]
+    });
+
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 304 }));
+    const config = withProvider("custom", {
+      options: {
+        meta: {
+          modelsInfoUrl: "https://x.test/m",
+          modelsInfoTtlSeconds: 7200 // bumped in config
+        }
+      },
+      models: { "model-a": {} }
+    });
+
+    await enrichConfig(config, {
+      cache: memoryCache(seed),
+      logger: silentLogger(),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      now: () => 1_000_000
+    });
+
+    expect(seed.get(key)?.ttlSeconds).toBe(7200);
   });
 });

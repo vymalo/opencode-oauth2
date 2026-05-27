@@ -63,20 +63,46 @@ describe("parseMetaOptions", () => {
     expect(out?.modelsInfoHeaders).toBeUndefined();
   });
 
-  it("resolves relative URLs against baseURL with or without trailing slash", () => {
+  it("resolves a path-relative modelsInfoUrl under the baseURL's path", () => {
+    // No leading slash + baseURL with or without trailing slash → joins under
+    // baseURL's path. baseURL is always treated as a directory.
+    expect(
+      parseMetaOptions({
+        baseURL: "https://x.test/v1",
+        meta: { modelsInfoUrl: "models/info" }
+      })?.modelsInfoUrl
+    ).toBe("https://x.test/v1/models/info");
+
+    expect(
+      parseMetaOptions({
+        baseURL: "https://x.test/v1/",
+        meta: { modelsInfoUrl: "models/info" }
+      })?.modelsInfoUrl
+    ).toBe("https://x.test/v1/models/info");
+  });
+
+  it("resolves a leading-slash modelsInfoUrl from the origin of baseURL", () => {
+    // Standard WHATWG semantics: `/path` is origin-rooted. This is the
+    // escape hatch for users whose metadata endpoint sits at a different
+    // path than the inference API.
     expect(
       parseMetaOptions({
         baseURL: "https://x.test/v1",
         meta: { modelsInfoUrl: "/models" }
       })?.modelsInfoUrl
-    ).toBe("https://x.test/v1/models");
+    ).toBe("https://x.test/models");
+  });
 
+  it("avoids path duplication when the modelsInfoUrl includes the same prefix as baseURL", () => {
+    // Regression: previously stripping the leading slash before resolving
+    // produced `https://x.test/v1/v1/models`. Standard semantics give the
+    // intuitive result.
     expect(
       parseMetaOptions({
-        baseURL: "https://x.test/v1/",
-        meta: { modelsInfoUrl: "models" }
+        baseURL: "https://x.test/v1",
+        meta: { modelsInfoUrl: "/v1/models/info" }
       })?.modelsInfoUrl
-    ).toBe("https://x.test/v1/models");
+    ).toBe("https://x.test/v1/models/info");
   });
 
   it("leaves absolute URLs untouched even when baseURL is present", () => {

@@ -107,6 +107,33 @@ describe("fetchOpenRouterModels", () => {
     expect(headers["x-tenant"]).toBe("t1");
   });
 
+  it("treats a non-empty input that filters down to empty as a parse error", async () => {
+    // Catalog with two malformed entries — no `id: string` anywhere. We
+    // should NOT report this as a successful empty fetch (that would
+    // overwrite a previously good cache).
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ data: [{ id: 42 }, { name: "no id" }] }));
+    const result = await fetchOpenRouterModels({
+      url: "https://x.test/models",
+      timeoutMs: 5000,
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    });
+    expect(result.status).toBe("error");
+    expect(result.error).toMatch(/unexpected response shape/);
+  });
+
+  it("accepts a legitimately empty catalog as a successful (empty) response", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ data: [] }));
+    const result = await fetchOpenRouterModels({
+      url: "https://x.test/models",
+      timeoutMs: 5000,
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    });
+    expect(result.status).toBe("ok");
+    expect(result.models).toEqual([]);
+  });
+
   it("returns an error result instead of throwing on malformed JSON shape", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ unexpected: true }));
     const result = await fetchOpenRouterModels({

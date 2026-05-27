@@ -41,8 +41,24 @@ function asPositiveInt(value: unknown, fallback: number): number {
  * Parse a provider's `options.meta` for opt-in model-info fields. Returns
  * `null` if the provider has not opted in (no `meta.modelsInfoUrl`).
  *
- * Resolves `modelsInfoUrl` against `baseURL` when it is a relative path so
- * config authors can write `"meta": { "modelsInfoUrl": "/v1/models/info" }`.
+ * URL resolution follows the WHATWG URL spec when `modelsInfoUrl` is not
+ * absolute:
+ *   - Absolute URL (`https://…`)            → used as-is.
+ *   - Path starting with `/`                → resolves from the **origin**
+ *                                             of `baseURL`. So with
+ *                                             `baseURL: "https://x.test/v1"`
+ *                                             and `modelsInfoUrl: "/models"`,
+ *                                             you get `https://x.test/models`.
+ *                                             Useful when your metadata
+ *                                             endpoint sits at a different
+ *                                             path than the inference API.
+ *   - Path without leading `/`              → resolves **relative to**
+ *                                             `baseURL`. So with
+ *                                             `baseURL: "https://x.test/v1"`
+ *                                             and `modelsInfoUrl: "models"`,
+ *                                             you get `https://x.test/v1/models`.
+ *                                             Useful when metadata sits under
+ *                                             the same path as inference.
  */
 export function parseMetaOptions(
   providerOptions: Record<string, unknown> | undefined
@@ -80,10 +96,14 @@ function resolveUrl(candidate: string, baseURL: string | undefined): string {
   if (!baseURL) {
     return candidate;
   }
+  // Always treat the baseURL as a directory by appending a trailing slash if
+  // it's missing. This way a path-relative `modelsInfoUrl` ("models/info")
+  // resolves under the baseURL's path instead of replacing its last segment
+  // (the WHATWG default). A leading-slash candidate ("/models/info") still
+  // resolves from the origin per spec.
   const base = baseURL.endsWith("/") ? baseURL : `${baseURL}/`;
-  const rel = candidate.startsWith("/") ? candidate.slice(1) : candidate;
   try {
-    return new URL(rel, base).toString();
+    return new URL(candidate, base).toString();
   } catch {
     return candidate;
   }

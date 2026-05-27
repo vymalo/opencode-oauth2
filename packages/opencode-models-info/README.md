@@ -35,7 +35,7 @@ For every provider you want enriched, add `options.meta.modelsInfoUrl`:
       "options": {
         "baseURL": "https://gateway.example.com/v1",
         "meta": {
-          "modelsInfoUrl": "/models/info",
+          "modelsInfoUrl": "models/info",
           "modelsInfoTtlSeconds": 86400,
           "modelsInfoTimeoutMs": 5000
         }
@@ -51,19 +51,41 @@ For every provider you want enriched, add `options.meta.modelsInfoUrl`:
 That's it. After OpenCode starts:
 
 1. The hook picks up every provider with a `meta.modelsInfoUrl`.
-2. It `GET`s that URL once (relative paths resolve against `baseURL`), reusing whatever auth headers the provider's other plugins/config already set.
+2. It `GET`s that URL once, sending whatever `options.headers` the provider already has (so it composes with any auth plugin — see [Auth composition](#auth-composition)).
 3. Each model entry whose `id` matches an entry in the response gets `limit`, `cost`, `modalities`, `tool_call`, `reasoning`, `attachment`, etc. filled in — **only where they were not already set** (upstream wins).
-4. The response is cached on disk for `modelsInfoTtlSeconds` (default 24h), keyed by `(providerId, url)`. ETags are honored.
+4. The response is cached on disk for `modelsInfoTtlSeconds` (default 24h), keyed by `(providerId, url, modelsInfoHeaders)`. ETags are honored.
 5. On fetch error with a valid cache, the stale snapshot is served — the plugin never blocks OpenCode startup on a network failure.
+
+### URL resolution
+
+`meta.modelsInfoUrl` resolves against `options.baseURL` using standard WHATWG URL semantics:
+
+| `baseURL`                  | `modelsInfoUrl`        | Resolved URL                          |
+| -------------------------- | ---------------------- | ------------------------------------- |
+| `https://x.test/v1`        | `models/info`          | `https://x.test/v1/models/info`       |
+| `https://x.test/v1`        | `/models/info`         | `https://x.test/models/info`          |
+| `https://x.test/v1`        | `https://o.test/m`     | `https://o.test/m`                    |
+
+Two practical rules: drop the leading `/` to keep the metadata path under your inference API path; keep the leading `/` to escape to a different path under the same host.
 
 ### Options
 
 | Option                          | Default            | Notes                                                                 |
 | ------------------------------- | ------------------ | --------------------------------------------------------------------- |
-| `meta.modelsInfoUrl`            | _(required)_       | Absolute URL or path relative to `options.baseURL`.                   |
+| `meta.modelsInfoUrl`            | _(required)_       | Absolute URL or path resolved against `options.baseURL` (see above). |
 | `meta.modelsInfoTtlSeconds`     | `86400` (24h)      | Cache TTL.                                                            |
 | `meta.modelsInfoTimeoutMs`      | `5000`             | Per-fetch HTTP timeout.                                               |
-| `meta.modelsInfoHeaders`        | _(none)_           | Extra headers merged onto the request (rare — most users won't need). |
+| `meta.modelsInfoHeaders`        | _(none)_           | Extra request headers. Override `options.headers` on conflict. Included in the cache key, so a tenant switch busts the cache. |
+
+### Auth composition
+
+The plugin sends the union of `options.headers` and `meta.modelsInfoHeaders` (meta wins on conflict). This makes three common setups work without configuration:
+
+1. **Public metadata endpoint** (e.g. OpenRouter's `/models`) — no auth needed.
+2. **Static API key** — drop a `Bearer` into `options.headers` once, both inference and metadata use it.
+3. **OAuth2 via [`@vymalo/opencode-oauth2`](../opencode-oauth2/README.md) ≥ 0.4.0** — that plugin stamps the cached bearer into `options.headers.Authorization` at config time so the metadata fetch inherits it automatically. The chat-time path still uses freshly-refreshed tokens.
+
+If you need a different token for the metadata endpoint than for inference (e.g. a service-account bearer), set it explicitly under `meta.modelsInfoHeaders.Authorization` — it'll override whatever the provider has set.
 
 ### Expected response shape (OpenRouter)
 

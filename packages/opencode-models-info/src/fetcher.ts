@@ -64,15 +64,30 @@ export async function fetchOpenRouterModels(opts: FetchOptions): Promise<FetchMo
 
 function normalizeResponse(body: unknown): OpenRouterModel[] | undefined {
   if (Array.isArray(body)) {
-    return body.filter(isOpenRouterModel);
+    return validateFiltered(body);
   }
   if (body && typeof body === "object") {
     const data = (body as OpenRouterModelsResponse).data;
     if (Array.isArray(data)) {
-      return data.filter(isOpenRouterModel);
+      return validateFiltered(data);
     }
   }
   return undefined;
+}
+
+/**
+ * Filter to entries with a string `id`, but reject the whole response if a
+ * non-empty input came in and every entry was filtered out — that's a parse
+ * error, not a legitimate empty catalog, and we don't want to overwrite a
+ * previously-good cache with []. An input that was empty to begin with is
+ * still a valid (if unusual) response.
+ */
+function validateFiltered(input: unknown[]): OpenRouterModel[] | undefined {
+  const filtered = input.filter(isOpenRouterModel);
+  if (input.length > 0 && filtered.length === 0) {
+    return undefined;
+  }
+  return filtered;
 }
 
 function isOpenRouterModel(value: unknown): value is OpenRouterModel {

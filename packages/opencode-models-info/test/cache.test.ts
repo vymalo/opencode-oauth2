@@ -81,4 +81,22 @@ describe("cacheKey", () => {
     expect(cacheKey("a", "u")).not.toBe(cacheKey("b", "u"));
     expect(cacheKey("a", "u")).not.toBe(cacheKey("a", "u2"));
   });
+
+  it("partitions the cache by caller-supplied headers", () => {
+    const noHeaders = cacheKey("a", "u");
+    const tenant1 = cacheKey("a", "u", { "x-tenant": "t1" });
+    const tenant2 = cacheKey("a", "u", { "x-tenant": "t2" });
+    expect(tenant1).not.toBe(noHeaders);
+    expect(tenant1).not.toBe(tenant2);
+  });
+
+  it("ignores header key order and case", () => {
+    const a = cacheKey("a", "u", { "X-Tenant": "t1", Accept: "json" });
+    const b = cacheKey("a", "u", { accept: "json", "x-tenant": "t1" });
+    expect(a).toBe(b);
+  });
+
+  it("treats undefined and empty header maps the same", () => {
+    expect(cacheKey("a", "u", undefined)).toBe(cacheKey("a", "u"));
+  });
 });

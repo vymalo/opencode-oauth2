@@ -47,52 +47,70 @@ async function enrichProvider(
   providerConfig: ProviderConfigLike | undefined,
   deps: EnrichDeps
 ): Promise<void> {
-  if (!providerConfig) {
-    return;
-  }
-  const opts = parseMetaOptions(providerConfig.options);
-  if (!opts) {
-    return;
-  }
-  const models = providerConfig.models;
-  if (!models || Object.keys(models).length === 0) {
-    deps.logger.debug("models_info_provider_skipped_no_models", { providerId });
-    return;
-  }
-
-  const record = await loadRecord(providerId, opts, deps);
-  if (!record) {
-    return;
-  }
-
-  const byId = new Map<string, OpenRouterModel>(record.models.map((m) => [m.id, m]));
-
-  let enrichedCount = 0;
-  for (const [modelId, modelConfig] of Object.entries(models)) {
-    const declaredId = typeof modelConfig.id === "string" ? modelConfig.id : undefined;
-    const match = byId.get(modelId) ?? (declaredId ? byId.get(declaredId) : undefined);
-    if (!match) {
-      continue;
+  try {
+    if (!providerConfig) {
+      return;
     }
-    const derived = mapOpenRouterEntry(match);
-    mergeIntoModel(modelConfig, derived);
-    enrichedCount += 1;
-  }
+    const opts = parseMetaOptions(providerConfig.options);
+    if (!opts) {
+      return;
+    }
+    const models = providerConfig.models;
+    if (!models || Object.keys(models).length === 0) {
+      deps.logger.debug("models_info_provider_skipped_no_models", { providerId });
+      return;
+    }
 
-  deps.logger.info("models_info_enriched", {
-    providerId,
-    enrichedCount,
-    totalModels: Object.keys(models).length,
-    sourceModels: record.models.length
-  });
+    // Pull whatever headers the upstream config (oauth2 plugin, static API
+    // key, etc.) has already attached to the provider; the meta-specific
+    // `modelsInfoHeaders` win on conflict. This is what makes the plugin
+    // truly auth-agnostic — we never need to know how the token was acquired.
+    const providerHeaders = asHeaderMap(providerConfig.options?.headers);
+    const record = await loadRecord(providerId, opts, providerHeaders, deps);
+    if (!record) {
+      return;
+    }
+
+    const byId = new Map<string, OpenRouterModel>(record.models.map((m) => [m.id, m]));
+
+    let enrichedCount = 0;
+    for (const [modelId, modelConfig] of Object.entries(models)) {
+      const declaredId = typeof modelConfig.id === "string" ? modelConfig.id : undefined;
+      const match = byId.get(modelId) ?? (declaredId ? byId.get(declaredId) : undefined);
+      if (!match) {
+        continue;
+      }
+      const derived = mapOpenRouterEntry(match);
+      mergeIntoModel(modelConfig, derived);
+      enrichedCount += 1;
+    }
+
+    deps.logger.info("models_info_enriched", {
+      providerId,
+      enrichedCount,
+      totalModels: Object.keys(models).length,
+      sourceModels: record.models.length
+    });
+  } catch (error) {
+    // Promise.allSettled would otherwise swallow this — surface it loudly so
+    // a broken cache disk or mapping bug isn't silently no-op'd per provider.
+    deps.logger.error("models_info_enrichment_failed", {
+      providerId,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
 }
 
 async function loadRecord(
   providerId: string,
   opts: MetaProviderOptions,
+  providerHeaders: Record<string, string> | undefined,
   deps: EnrichDeps
 ): Promise<CachedModelsRecord | undefined> {
-  const key = cacheKey(providerId, opts.modelsInfoUrl);
+  // Cache key is keyed on the user-specified `modelsInfoHeaders` (NOT the
+  // provider's rotating auth header) — so switching tenants busts the cache,
+  // but an OAuth2 token rotation does not thrash it. See cacheKey() docstring.
+  const key = cacheKey(providerId, opts.modelsInfoUrl, opts.modelsInfoHeaders);
   const now = deps.now ? deps.now() : Date.now();
   const cached = await deps.cache.get(key);
 
@@ -105,7 +123,7 @@ async function loadRecord(
     return cached;
   }
 
-  const headers = buildFetchHeaders(opts);
+  const headers = buildFetchHeaders(opts, providerHeaders);
   const result = await fetchOpenRouterModels({
     url: opts.modelsInfoUrl,
     headers,
@@ -121,7 +139,9 @@ async function loadRecord(
       etag: result.etag,
       models: result.models
     };
-    await deps.cache.put(key, next);
+    // Disk write is best-effort — a read-only $HOME / cache dir shouldn't
+    // make us throw away a perfectly good fresh response.
+    await safePut(deps, key, next, providerId, opts.modelsInfoUrl);
     deps.logger.info("models_info_fetched", {
       providerId,
       url: opts.modelsInfoUrl,
@@ -131,8 +151,15 @@ async function loadRecord(
   }
 
   if (result.status === "not-modified" && cached) {
-    const refreshed: CachedModelsRecord = { ...cached, fetchedAt: now };
-    await deps.cache.put(key, refreshed);
+    // Apply the CURRENT TTL from config — a tightened TTL in opencode.json
+    // should take effect on the next revalidation, not on the next full
+    // 200 fetch (which might be 24h away).
+    const refreshed: CachedModelsRecord = {
+      ...cached,
+      fetchedAt: now,
+      ttlSeconds: opts.modelsInfoTtlSeconds
+    };
+    await safePut(deps, key, refreshed, providerId, opts.modelsInfoUrl);
     deps.logger.debug("models_info_not_modified", {
       providerId,
       url: opts.modelsInfoUrl
@@ -158,8 +185,53 @@ async function loadRecord(
   return undefined;
 }
 
-function buildFetchHeaders(opts: MetaProviderOptions): Record<string, string> | undefined {
-  return opts.modelsInfoHeaders;
+/**
+ * Merge the provider's resolved request headers with the meta-specific
+ * `modelsInfoHeaders`. Meta wins on conflict so a user can override e.g. a
+ * dynamic `Authorization` header for the metadata endpoint specifically.
+ */
+function buildFetchHeaders(
+  opts: MetaProviderOptions,
+  providerHeaders: Record<string, string> | undefined
+): Record<string, string> | undefined {
+  if (!providerHeaders && !opts.modelsInfoHeaders) {
+    return undefined;
+  }
+  return {
+    ...(providerHeaders ?? {}),
+    ...(opts.modelsInfoHeaders ?? {})
+  };
+}
+
+async function safePut(
+  deps: EnrichDeps,
+  key: string,
+  record: CachedModelsRecord,
+  providerId: string,
+  url: string
+): Promise<void> {
+  try {
+    await deps.cache.put(key, record);
+  } catch (error) {
+    deps.logger.warn("models_info_cache_write_failed", {
+      providerId,
+      url,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+}
+
+function asHeaderMap(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof v === "string" && v.length > 0) {
+      out[k] = v;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 export { FileCacheStore };
