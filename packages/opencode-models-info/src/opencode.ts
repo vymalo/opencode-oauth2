@@ -28,10 +28,7 @@ export interface OpenCodePluginFactoryOptions {
  * host's structured log stream, with the JSON console as a reliable fallback.
  * Mirrors the pattern used by `@vymalo/opencode-oauth2`.
  */
-function createOpenCodeLogger(
-  client: PluginInput["client"],
-  getMinLevel: () => LogLevel
-): Logger {
+function createOpenCodeLogger(client: PluginInput["client"], getMinLevel: () => LogLevel): Logger {
   const fallback = createJsonConsoleLogger("debug");
 
   const write = (level: LogLevel, event: string, fields?: LogFields) => {

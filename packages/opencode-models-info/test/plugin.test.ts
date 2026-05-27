@@ -37,10 +37,7 @@ function getModel(
   return model;
 }
 
-function withProvider(
-  providerId: string,
-  provider: ProviderConfigLike
-): EnrichConfigInput {
+function withProvider(providerId: string, provider: ProviderConfigLike): EnrichConfigInput {
   return { provider: { [providerId]: provider } };
 }
 

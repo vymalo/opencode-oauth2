@@ -29,10 +29,7 @@ export interface EnrichDeps {
  * metadata onto each matching model entry. Runs providers in parallel; one
  * failure never blocks others.
  */
-export async function enrichConfig(
-  input: EnrichConfigInput,
-  deps: EnrichDeps
-): Promise<void> {
+export async function enrichConfig(input: EnrichConfigInput, deps: EnrichDeps): Promise<void> {
   const providers = input.provider;
   if (!providers) {
     return;

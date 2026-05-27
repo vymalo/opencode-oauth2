@@ -14,12 +14,11 @@ function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
 
 describe("fetchOpenRouterModels", () => {
   it("returns parsed models from a `{data: []}` envelope and captures ETag", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(
-      jsonResponse(
-        { data: [{ id: "a" }, { id: "b" }] },
-        { status: 200, headers: { etag: "v1" } }
-      )
-    );
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ data: [{ id: "a" }, { id: "b" }] }, { status: 200, headers: { etag: "v1" } })
+      );
 
     const result = await fetchOpenRouterModels({
       url: "https://x.test/models",
@@ -33,9 +32,7 @@ describe("fetchOpenRouterModels", () => {
   });
 
   it("accepts a bare top-level array response", async () => {
-    const fetchImpl = vi
-      .fn()
-      .mockResolvedValue(jsonResponse([{ id: "a" }], { status: 200 }));
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse([{ id: "a" }], { status: 200 }));
     const result = await fetchOpenRouterModels({
       url: "https://x.test/models",
       timeoutMs: 5000,
@@ -46,9 +43,11 @@ describe("fetchOpenRouterModels", () => {
   });
 
   it("filters out entries without a string `id`", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(
-      jsonResponse({ data: [{ id: "a" }, { id: 42 }, { name: "no id" }, { id: "b" }] })
-    );
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ data: [{ id: "a" }, { id: 42 }, { name: "no id" }, { id: "b" }] })
+      );
     const result = await fetchOpenRouterModels({
       url: "https://x.test/models",
       timeoutMs: 5000,

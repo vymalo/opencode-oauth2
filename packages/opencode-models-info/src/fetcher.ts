@@ -77,6 +77,8 @@ function normalizeResponse(body: unknown): OpenRouterModel[] | undefined {
 
 function isOpenRouterModel(value: unknown): value is OpenRouterModel {
   return (
-    Boolean(value) && typeof value === "object" && typeof (value as { id?: unknown }).id === "string"
+    Boolean(value) &&
+    typeof value === "object" &&
+    typeof (value as { id?: unknown }).id === "string"
   );
 }

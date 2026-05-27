@@ -122,7 +122,10 @@ function filterModalities(values: OpenRouterModality[] | undefined): OpenCodeMod
   }
   const out: OpenCodeModality[] = [];
   for (const value of values) {
-    if (OPENCODE_MODALITIES.has(value as OpenCodeModality) && !out.includes(value as OpenCodeModality)) {
+    if (
+      OPENCODE_MODALITIES.has(value as OpenCodeModality) &&
+      !out.includes(value as OpenCodeModality)
+    ) {
       out.push(value as OpenCodeModality);
     }
   }
