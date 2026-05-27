@@ -109,6 +109,27 @@ A bare top-level array (no `data` wrapper) is also accepted.
 
 Files are named by `sha256(providerId::url)`, `0o600`, atomic-rename-on-write.
 
+## Testing
+
+Unit tests run against mocked `fetch`:
+
+```sh
+pnpm --filter @vymalo/opencode-models-info test
+```
+
+Integration tests run against a real HTTP server (WireMock) from the workspace's shared [`test-env/`](../../test-env/) compose stack. They skip themselves when `INTEGRATION_MODELS_INFO_URL` is unset:
+
+```sh
+pnpm test:env:up                                                # from repo root
+pnpm --filter @vymalo/opencode-models-info test:integration
+pnpm test:env:down
+
+# Or one-shot from repo root: spin up, run all integration suites, tear down.
+pnpm test:integration
+```
+
+The integration suite exercises real network round-trips, ETag handling (`304 Not Modified`), `modelsInfoHeaders` propagation, and the disk cache — all against a fixed catalog fixture under [`test-env/wiremock/__files/openrouter-catalog.json`](../../test-env/wiremock/__files/openrouter-catalog.json).
+
 ## Library API
 
 For embedding the enrichment logic outside an OpenCode hook (e.g. tests or custom tooling), import from the `/lib` subpath:

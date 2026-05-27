@@ -1,0 +1,71 @@
+# Reusable integration-test backends for the workspace.
+#
+# Usage:
+#   docker compose -f test-env/docker-compose.yml up -d
+#   INTEGRATION_MODELS_INFO_URL=http://127.0.0.1:18080/v1/models \
+#     pnpm --filter @vymalo/opencode-models-info test:integration
+#   docker compose -f test-env/docker-compose.yml down -v
+#
+# Or run everything end-to-end via the root scripts:
+#   pnpm test:integration
+#
+# Designed so every package in this monorepo can layer its own service in
+# (e.g. Keycloak for @vymalo/opencode-oauth2 — see the commented block below)
+# without forking the compose file per package.
+
+services:
+  wiremock:
+    image: wiremock/wiremock:3.9.1
+    container_name: vymalo-test-wiremock
+    restart: unless-stopped
+    command:
+      - --verbose
+      - --disable-banner
+      - --global-response-templating
+    ports:
+      - "18080:8080"
+    volumes:
+      - ./wiremock/mappings:/home/wiremock/mappings:ro
+      - ./wiremock/__files:/home/wiremock/__files:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q -O - http://127.0.0.1:8080/__admin/health | grep -q healthy"
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 2s
+
+  # --- Future: drop-in Keycloak for @vymalo/opencode-oauth2 integration tests.
+  # Keep the realm export under test-env/keycloak/realm-export.json so the
+  # plugin's auth-code / device-code / refresh flows can run against a real
+  # OIDC server. Uncomment when you wire up the oauth2 integration suite.
+  #
+  # keycloak:
+  #   image: quay.io/keycloak/keycloak:25.0
+  #   container_name: vymalo-test-keycloak
+  #   restart: unless-stopped
+  #   command:
+  #     - start-dev
+  #     - --import-realm
+  #     - --health-enabled=true
+  #   environment:
+  #     KEYCLOAK_ADMIN: admin
+  #     KEYCLOAK_ADMIN_PASSWORD: admin
+  #     KC_HTTP_PORT: 8080
+  #   ports:
+  #     - "18081:8080"
+  #   volumes:
+  #     - ./keycloak:/opt/keycloak/data/import:ro
+  #   healthcheck:
+  #     test:
+  #       [
+  #         "CMD-SHELL",
+  #         "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nhost: localhost\\r\\n' >&3 && cat <&3 | grep -q UP"
+  #       ]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 30
+  #     start_period: 15s
