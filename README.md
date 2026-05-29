@@ -92,7 +92,7 @@ See [packages/opencode-oauth2/README.md](packages/opencode-oauth2/README.md) for
 
 This workspace also ships [`@vymalo/opencode-models-info`](packages/opencode-models-info) — a separate, **auth-agnostic** plugin that enriches your model entries with full metadata (context length, output limit, USD/M-token cost, modalities, and `tool_call` / `reasoning` / `attachment` flags).
 
-`meta.modelsInfoUrl` is **the HTTP(S) endpoint that returns the metadata JSON** — `{ "data": [ { "id", "context_length", "pricing", … } ] }`. Point it at your provider's metadata endpoint (absolute, or a path resolved against `baseURL`):
+`meta.modelsInfoUrl` is **the HTTP(S) endpoint that returns the metadata JSON** — `{ "data": [ { "id", "context_length", "pricing", … } ] }`. Point it at your provider's metadata endpoint (an absolute URL, or a path resolved against `baseURL`):
 
 ```jsonc
 {
@@ -102,7 +102,7 @@ This workspace also ships [`@vymalo/opencode-models-info`](packages/opencode-mod
       "npm": "@ai-sdk/openai-compatible",
       "options": {
         "baseURL": "https://api.example.com/v1",
-        "meta": { "modelsInfoUrl": "models" }
+        "meta": { "modelsInfoUrl": "https://api.example.com/v1/models" }
       },
       "models": { "my-model-large": {} }
     }

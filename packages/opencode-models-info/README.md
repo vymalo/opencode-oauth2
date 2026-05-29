@@ -35,7 +35,7 @@ Add it to your `opencode.json` plugin list:
       "options": {
         "baseURL": "https://api.example.com/v1",
         "meta": {
-          "modelsInfoUrl": "models",
+          "modelsInfoUrl": "https://api.example.com/v1/models",
           "modelsInfoTtlSeconds": 86400,
           "modelsInfoTimeoutMs": 5000
         }
@@ -46,7 +46,7 @@ Add it to your `opencode.json` plugin list:
 }
 ```
 
-Here `"models"` resolves against `baseURL` to `https://api.example.com/v1/models`; an absolute URL works too.
+An absolute URL is clearest. A relative path is also accepted — it resolves against `baseURL` (e.g. `"models"` → `https://api.example.com/v1/models`); see [URL resolution](#url-resolution).
 
 > **What shape must that endpoint return?** The JSON described in [Expected response shape](#expected-response-shape-openrouter) below — commonly called the **OpenRouter shape** because OpenRouter's `/models` endpoint returns it, but the plugin has no dependency on OpenRouter and never contacts it. The compatibility bar is low: a **bare top-level array** (no `data` wrapper) is accepted, and the mapping is **partial**, so your endpoint only needs to emit the fields you want enriched (e.g. just `id` + `context_length` + `pricing`). **But note:** a vanilla OpenAI-compatible `/v1/models` returns only `id` / `object` / `owned_by` — *none* of the fields this plugin maps — so pointing `modelsInfoUrl` there fetches successfully and enriches nothing. The endpoint has to actually carry the richer data.
 
