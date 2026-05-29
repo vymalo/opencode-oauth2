@@ -82,10 +82,34 @@ See [packages/opencode-oauth2/README.md](packages/opencode-oauth2/README.md) for
 | Page | When you need it |
 | --- | --- |
 | [`docs/architecture.md`](docs/architecture.md) | Understand the hooks, token lifecycle per flow, cache layout, sync scheduler, logging |
+| [`docs/models-info.md`](docs/models-info.md) | The companion metadata-enrichment plugin — how it composes with any auth scheme, caching, failure modes |
 | [`docs/github-actions.md`](docs/github-actions.md) | CI without stored secrets — Keycloak/Auth0/Okta setup, reusable workflow, matrix, fork-PR limits |
 | [`docs/kubernetes.md`](docs/kubernetes.md) | `CronJob` / `Job` / `Deployment` with projected SA tokens, multi-provider pods, RBAC |
 | [`docs/local-development.md`](docs/local-development.md) | Sandbox setup, plugin re-export trick, forcing re-auth, dev-only `env` subject token |
 | [`docs/troubleshooting.md`](docs/troubleshooting.md) | Symptom-keyed fixes — `redirect_uri_mismatch`, model discovery 403, `invalid_client`, projected-token rotation |
+
+## Companion plugin: model metadata
+
+This workspace also ships [`@vymalo/opencode-models-info`](packages/opencode-models-info) — a separate, **auth-agnostic** plugin that enriches your model entries with full metadata (context length, output limit, USD/M-token cost, modalities, and `tool_call` / `reasoning` / `attachment` flags) by fetching from an OpenRouter-shaped `/models` endpoint.
+
+It doesn't depend on this plugin: it runs as a `config` hook *after* other plugins, so it composes with oauth2, static API keys, or no auth at all. When paired with `@vymalo/opencode-oauth2` ≥ 0.4.0, OAuth2-protected metadata endpoints work with zero extra config — this plugin stamps the cached bearer onto the provider's headers at config time, and the metadata fetch inherits it.
+
+```jsonc
+{
+  "plugin": ["@vymalo/opencode-oauth2", "@vymalo/opencode-models-info"],
+  "provider": {
+    "example-ai": {
+      "options": {
+        "baseURL": "https://api.example.com/v1",
+        "oauth2": { "issuer": "https://auth.example.com", "clientId": "opencode-client", "scopes": ["openid", "offline_access"] },
+        "meta": { "modelsInfoUrl": "models" }
+      }
+    }
+  }
+}
+```
+
+Full reference: [`packages/opencode-models-info/README.md`](packages/opencode-models-info/README.md). Behavior, caching, and composition details: [`docs/models-info.md`](docs/models-info.md).
 
 ## Federated identity (CI / Kubernetes)
 
@@ -109,7 +133,8 @@ This is a [pnpm](https://pnpm.io) monorepo.
 
 | Package | Purpose |
 | --- | --- |
-| [`packages/opencode-oauth2`](packages/opencode-oauth2) | The runtime plugin — published as `@vymalo/opencode-oauth2` |
+| [`packages/opencode-oauth2`](packages/opencode-oauth2) | OAuth2/OIDC auth + model discovery — published as `@vymalo/opencode-oauth2` |
+| [`packages/opencode-models-info`](packages/opencode-models-info) | Auth-agnostic model **metadata enrichment** — published as `@vymalo/opencode-models-info` |
 | [`packages/plugin-bundle`](packages/plugin-bundle) | Rolldown-based bundling for distribution |
 | [`plans/prd.md`](plans/prd.md) | Product requirements and phased roadmap |
 
