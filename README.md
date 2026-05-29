@@ -92,7 +92,7 @@ See [packages/opencode-oauth2/README.md](packages/opencode-oauth2/README.md) for
 
 This workspace also ships [`@vymalo/opencode-models-info`](packages/opencode-models-info) — a separate, **auth-agnostic** plugin that enriches your model entries with full metadata (context length, output limit, USD/M-token cost, modalities, and `tool_call` / `reasoning` / `attachment` flags).
 
-`meta.modelsInfoUrl` is **the HTTP(S) endpoint that returns OpenRouter-shaped models JSON** — `{ "data": [ { "id", "context_length", "pricing", … } ] }`. Point it at a real endpoint that serves that shape; the canonical example is OpenRouter's own catalog:
+`meta.modelsInfoUrl` is **the HTTP(S) endpoint that returns OpenRouter-shaped models JSON** — `{ "data": [ { "id", "context_length", "pricing", … } ] }`. It's the *shape* that matters, not the service: **any OpenRouter-compatible endpoint** works — your own gateway, a LiteLLM proxy, or OpenRouter itself. The example below uses OpenRouter's public catalog because it's a concrete endpoint you can try immediately:
 
 ```jsonc
 {
