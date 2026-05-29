@@ -8,6 +8,10 @@ For the copy-paste config reference (every option, the full OpenRouter→OpenCod
 
 OpenCode supports rich per-model metadata — context window, output limit, USD-per-1M-token cost, and `tool_call` / `reasoning` / `attachment` capability flags — but you normally hand-write it in `opencode.json`. If your provider exposes an OpenRouter-shaped `/models` endpoint, this plugin fetches it once, merges the metadata onto your model entries, caches the result, and stays out of the way.
 
+You point the plugin at that endpoint with `options.meta.modelsInfoUrl` — **the HTTP(S) URL (absolute, or a path resolved against `options.baseURL`) that returns OpenRouter-shaped models JSON**: `{ "data": [ { "id", "context_length", "pricing", … } ] }`. The obvious candidate is OpenRouter itself (`https://openrouter.ai/api/v1/models`), but any gateway that mirrors that shape, or a dedicated metadata route, works.
+
+> **Not the vanilla `/v1/models`.** A standard OpenAI-compatible `/v1/models` returns only `id` / `object` / `owned_by` — none of the fields this plugin maps. Pointing `modelsInfoUrl` at it fetches successfully and enriches nothing. The URL must return the richer OpenRouter shape.
+
 It is **auth-agnostic** and does **not** depend on `@vymalo/opencode-oauth2`. It only mutates the already-assembled OpenCode config, so it works with static API keys, oauth2, or no auth at all.
 
 ## The one hook

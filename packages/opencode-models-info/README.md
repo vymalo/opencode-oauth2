@@ -24,29 +24,31 @@ Add it to your `opencode.json` plugin list:
 
 ## Usage
 
-For every provider you want enriched, add `options.meta.modelsInfoUrl`:
+`meta.modelsInfoUrl` is **the HTTP(S) endpoint that returns OpenRouter-shaped models JSON** (see [Expected response shape](#expected-response-shape-openrouter)). It can be an absolute URL or a path resolved against `options.baseURL`. The clearest setup uses an absolute URL — here, OpenRouter's own public catalog:
 
 ```json
 {
   "plugin": ["@vymalo/opencode-models-info"],
   "provider": {
-    "my-gateway": {
+    "openrouter": {
       "npm": "@ai-sdk/openai-compatible",
       "options": {
-        "baseURL": "https://gateway.example.com/v1",
+        "baseURL": "https://openrouter.ai/api/v1",
         "meta": {
-          "modelsInfoUrl": "models/info",
+          "modelsInfoUrl": "https://openrouter.ai/api/v1/models",
           "modelsInfoTtlSeconds": 86400,
           "modelsInfoTimeoutMs": 5000
         }
       },
       "models": {
-        "gpt-x-large": {}
+        "anthropic/claude-3.5-sonnet": {}
       }
     }
   }
 }
 ```
+
+> **What endpoint do I point at?** Whatever serves the OpenRouter shape — OpenRouter itself, a gateway that mirrors its `/models`, or a dedicated metadata route your provider exposes. **Note:** a vanilla OpenAI-compatible `/v1/models` returns only `id` / `object` / `owned_by` — *not* `context_length` or `pricing` — so pointing `modelsInfoUrl` there enriches nothing. The endpoint must return the richer shape.
 
 That's it. After OpenCode starts:
 
