@@ -114,6 +114,32 @@ The expected JSON is commonly called the **OpenRouter shape** (it's what OpenRou
 
 It doesn't depend on the oauth2 plugin — it runs as a `config` hook *after* other plugins, composing with oauth2, static API keys, or no auth. When paired with `@vymalo/opencode-oauth2` ≥ 0.4.0, an OAuth2-protected metadata endpoint works with zero extra config: the oauth2 plugin stamps the cached bearer onto the provider's headers at config time and the metadata fetch inherits it.
 
+### Both plugins together
+
+One provider, authenticated by oauth2 and enriched by models-info. List `@vymalo/opencode-oauth2` **first** so its `config` hook runs before models-info and the bearer is already in place when the metadata fetch happens:
+
+```jsonc
+{
+  "plugin": ["@vymalo/opencode-oauth2", "@vymalo/opencode-models-info"],
+  "provider": {
+    "my-provider": {
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "https://api.example.com/v1",
+        "oauth2": {
+          "issuer": "https://auth.example.com",
+          "clientId": "opencode-client",
+          "scopes": ["openid", "profile", "offline_access"]
+        },
+        "meta": { "modelsInfoUrl": "https://api.example.com/v1/models" }
+      }
+    }
+  }
+}
+```
+
+What happens on boot: oauth2 authenticates, discovers models from `/v1/models`, and stamps the access token onto the provider's headers; models-info then fetches `modelsInfoUrl` with that token and merges the richer metadata onto the discovered models. No `models` block needed — oauth2 populates it. No `Authorization` header to manage — it's automatic.
+
 Full reference: [`packages/opencode-models-info/README.md`](packages/opencode-models-info/README.md). Behavior, caching, and composition details: [`docs/models-info.md`](docs/models-info.md).
 
 ## Federated identity (CI / Kubernetes)
