@@ -90,24 +90,29 @@ See [packages/opencode-oauth2/README.md](packages/opencode-oauth2/README.md) for
 
 ## Companion plugin: model metadata
 
-This workspace also ships [`@vymalo/opencode-models-info`](packages/opencode-models-info) — a separate, **auth-agnostic** plugin that enriches your model entries with full metadata (context length, output limit, USD/M-token cost, modalities, and `tool_call` / `reasoning` / `attachment` flags) by fetching from an OpenRouter-shaped `/models` endpoint.
+This workspace also ships [`@vymalo/opencode-models-info`](packages/opencode-models-info) — a separate, **auth-agnostic** plugin that enriches your model entries with full metadata (context length, output limit, USD/M-token cost, modalities, and `tool_call` / `reasoning` / `attachment` flags).
 
-It doesn't depend on this plugin: it runs as a `config` hook *after* other plugins, so it composes with oauth2, static API keys, or no auth at all. When paired with `@vymalo/opencode-oauth2` ≥ 0.4.0, OAuth2-protected metadata endpoints work with zero extra config — this plugin stamps the cached bearer onto the provider's headers at config time, and the metadata fetch inherits it.
+`meta.modelsInfoUrl` is **the HTTP(S) endpoint that returns the metadata JSON** — `{ "data": [ { "id", "context_length", "pricing", … } ] }`. Point it at your provider's metadata endpoint (an absolute URL, or a path resolved against `baseURL`):
 
 ```jsonc
 {
-  "plugin": ["@vymalo/opencode-oauth2", "@vymalo/opencode-models-info"],
+  "plugin": ["@vymalo/opencode-models-info"],
   "provider": {
-    "example-ai": {
+    "my-provider": {
+      "npm": "@ai-sdk/openai-compatible",
       "options": {
         "baseURL": "https://api.example.com/v1",
-        "oauth2": { "issuer": "https://auth.example.com", "clientId": "opencode-client", "scopes": ["openid", "offline_access"] },
-        "meta": { "modelsInfoUrl": "models" }
-      }
+        "meta": { "modelsInfoUrl": "https://api.example.com/v1/models" }
+      },
+      "models": { "my-model-large": {} }
     }
   }
 }
 ```
+
+The expected JSON is commonly called the **OpenRouter shape** (it's what OpenRouter's `/models` returns), but the plugin has no dependency on OpenRouter — any endpoint serving that shape works. A plain OpenAI-compatible `/v1/models` returns sparse data (`id`, `object`, `owned_by`) — *not* `context_length` / `pricing` — so the endpoint must actually carry the richer fields.
+
+It doesn't depend on the oauth2 plugin — it runs as a `config` hook *after* other plugins, composing with oauth2, static API keys, or no auth. When paired with `@vymalo/opencode-oauth2` ≥ 0.4.0, an OAuth2-protected metadata endpoint works with zero extra config: the oauth2 plugin stamps the cached bearer onto the provider's headers at config time and the metadata fetch inherits it.
 
 Full reference: [`packages/opencode-models-info/README.md`](packages/opencode-models-info/README.md). Behavior, caching, and composition details: [`docs/models-info.md`](docs/models-info.md).
 
