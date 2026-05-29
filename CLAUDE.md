@@ -110,7 +110,7 @@ When changing the mapping in [`packages/opencode-models-info/src/mapping.ts`](pa
 
 - **Default shell is zsh** on this laptop. `bash -c` scripts in tooling should stay POSIX-portable or be invoked under zsh explicitly.
 - **`gh` auth** lives in the interactive zsh profile. If `gh` looks unauthenticated under a plain non-interactive shell, retry under `zsh -i -c '…'` — `GITHUB_TOKEN` is loaded from `.zshrc`.
-- **Biome ignores `**/.claude`** in `biome.json`. The Claude Code worktree path lives under `.claude/worktrees/<id>/`, which means running `pnpm lint` from a worktree silently lints zero files. Lint per-package (`pnpm --filter <pkg> exec biome lint .`) from a worktree, or run the workspace lint from the main checkout.
+- **Biome and the `.claude` worktree path.** `biome.json` excludes `**/.claude`, and Claude Code worktrees live under `.claude/worktrees/<id>/`. A bare `biome … .` therefore self-excludes (the `.` arg resolves under `.claude`) and silently processes **zero** files. To avoid that trap, the root `lint` / `format` / `format:check` scripts pass **explicit paths** (`packages test-env *.json`) instead of `.` — Biome evaluates `includes` relative to `biome.json`, so those relative paths never hit the `.claude` exclusion and the scripts work identically from a worktree or the main checkout. If you add a new top-level lintable directory, add it to those three scripts (otherwise it won't be checked).
 
 ## Design docs and plans
 
