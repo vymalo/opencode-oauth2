@@ -89,6 +89,32 @@ The plugin sends the union of `options.headers` and `meta.modelsInfoHeaders` (me
 
 If you need a different token for the metadata endpoint than for inference (e.g. a service-account bearer), set it explicitly under `meta.modelsInfoHeaders.Authorization` — it'll override whatever the provider has set.
 
+#### Example: with `@vymalo/opencode-oauth2`
+
+List the oauth2 plugin **first** so its `config` hook runs before this one — that's what puts the bearer on `options.headers` in time for the metadata fetch:
+
+```jsonc
+{
+  "plugin": ["@vymalo/opencode-oauth2", "@vymalo/opencode-models-info"],
+  "provider": {
+    "my-provider": {
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "https://api.example.com/v1",
+        "oauth2": {
+          "issuer": "https://auth.example.com",
+          "clientId": "opencode-client",
+          "scopes": ["openid", "profile", "offline_access"]
+        },
+        "meta": { "modelsInfoUrl": "https://api.example.com/v1/models" }
+      }
+    }
+  }
+}
+```
+
+oauth2 authenticates the provider and discovers its models; this plugin then fetches `modelsInfoUrl` using the token oauth2 stamped onto the provider headers, and enriches those discovered models. No `models` block and no `Authorization` header to manage — both are handled for you.
+
 ### Expected response shape (OpenRouter)
 
 ```json
