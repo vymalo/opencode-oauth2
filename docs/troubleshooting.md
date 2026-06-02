@@ -109,6 +109,32 @@ Compare:
 
 The cache TTL is already 24h by default (`meta.modelsInfoTtlSeconds`); once the fetch 200s once, reboots stay offline for the day. There's no way to pre-seed a placeholder cache for an endpoint that has never succeeded — see [models-info.md → "There's no cache yet"](./models-info.md#theres-no-cache-yet--can-i-get-a-1-day-ttl-entry).
 
+## Cost / limits don't appear in the OpenCode UI despite `models_info_enriched`
+
+**What's happening.** Enrichment worked — `models_info_enriched` reports `enrichedCount > 0` and the `cost` is present in OpenCode's resolved config — but the TUI shows no price or context window. The usual cause is a **missing `limit`**: your metadata endpoint returns `pricing` but no `context_length` / `top_provider`, so the plugin emits no `limit` (it never fakes one), and OpenCode backfills the runtime model's required `limit` to `{ context: 0, output: 0 }`. OpenCode's model UI is built around its `models.dev` catalog where every model has a real limit, so a `0/0` model is treated as incomplete and may suppress the cost line along with the limit.
+
+**Confirm.** Start the headless server (`opencode serve` — it prints a base URL) and inspect the resolved config:
+
+```sh
+curl -s http://127.0.0.1:<port>/config/providers \
+  | jq '.providers[] | select(.id=="<provider-id>") | .models["<model-id>"] | {cost, limit}'
+```
+
+`cost` populated + `limit: { context: 0, output: 0 }` is the signature of this case — proof the plugin did its job and the gap is the source data.
+
+**Fix (server-side).** This is **not** a plugin issue — the metadata endpoint must include the size fields the mapper reads ([`mapping.ts`](../packages/opencode-models-info/src/mapping.ts) — `context` ← `top_provider.context_length ?? context_length`, `output` ← `top_provider.max_completion_tokens`):
+
+```jsonc
+{
+  "id": "your-model",
+  "pricing": { "prompt": "0.0000006", "completion": "0.0000021" },
+  "context_length": 128000,
+  "top_provider": { "context_length": 128000, "max_completion_tokens": 8192 }
+}
+```
+
+Once both `context` and `output` are known, the plugin emits a real `limit`, and the cost/limit render in the UI. (`cost` was already correct — adding the limit is what makes both visible.)
+
 ## `oauth_client_credentials_failed` 401 with `invalid_client`
 
 **What's happening.** The IdP rejected the `client_id` + `client_secret` combination. Three common root causes for Keycloak; similar elsewhere.

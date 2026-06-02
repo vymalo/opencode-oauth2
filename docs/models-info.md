@@ -102,6 +102,6 @@ All structured, `snake_case`, emitted through both the JSON console and OpenCode
 The exact conversions live in [`packages/opencode-models-info/src/mapping.ts`](../packages/opencode-models-info/src/mapping.ts) and the full table is in the package README. Highlights worth knowing:
 
 - OpenRouter `pricing.prompt` / `.completion` are **USD per token** strings; OpenCode `cost.input` / `.output` are **USD per 1M tokens** numbers — converted (`× 1_000_000`, rounded to 6 dp).
-- `limit` is only emitted when **both** `context` and `output` are known (OpenCode rejects a partial `limit`).
+- `limit` is only emitted when **both** `context` and `output` are known (OpenCode rejects a partial `limit`). `context` comes from `top_provider.context_length ?? context_length`, `output` from `top_provider.max_completion_tokens`. **If your endpoint omits these, no `limit` is set — and OpenCode then backfills the runtime model's required `limit` to `{ context: 0, output: 0 }`, which its UI treats as incomplete and may render with no cost/limit shown even though `cost` is present.** See [the troubleshooting note](./troubleshooting.md#cost--limits-dont-appear-in-the-opencode-ui-despite-models_info_enriched).
 - Modalities are filtered to OpenCode's enum (`text | audio | image | video | pdf`); a non-text input modality also sets `attachment: true`.
 - `tool_call` / `reasoning` / `temperature` are derived from `supported_parameters`.
