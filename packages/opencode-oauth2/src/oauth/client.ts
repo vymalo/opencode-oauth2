@@ -442,7 +442,8 @@ export class OAuthClient {
       serverId: this.server.id,
       logger: this.logger,
       fetchImpl: this.fetchImpl,
-      timeoutMs: this.timeoutMs
+      timeoutMs: this.timeoutMs,
+      pkce: this.server.pkce
     });
   }
 
@@ -461,7 +462,9 @@ export class OAuthClient {
     );
 
     try {
-      const { verifier, challenge } = generatePkcePair();
+      // PKCE on by default; opt out via the `pkce` server option for
+      // non-compliant IdPs. Compliant servers ignore the extra parameters.
+      const pkce = this.server.pkce !== false ? generatePkcePair() : undefined;
       const state = generateStateToken();
       const authorizeUrl = new URL(endpoints.authorizationEndpoint);
 
@@ -469,8 +472,10 @@ export class OAuthClient {
       authorizeUrl.searchParams.set("client_id", this.server.clientId);
       authorizeUrl.searchParams.set("redirect_uri", callbackServer.redirectUri);
       authorizeUrl.searchParams.set("scope", this.server.scopes.join(" "));
-      authorizeUrl.searchParams.set("code_challenge", challenge);
-      authorizeUrl.searchParams.set("code_challenge_method", "S256");
+      if (pkce) {
+        authorizeUrl.searchParams.set("code_challenge", pkce.challenge);
+        authorizeUrl.searchParams.set("code_challenge_method", "S256");
+      }
       authorizeUrl.searchParams.set("state", state);
 
       this.logger.info("oauth_login_started", {
@@ -508,9 +513,12 @@ export class OAuthClient {
         grant_type: "authorization_code",
         code: callback.code,
         client_id: this.server.clientId,
-        redirect_uri: callbackServer.redirectUri,
-        code_verifier: verifier
+        redirect_uri: callbackServer.redirectUri
       });
+
+      if (pkce) {
+        tokenBody.set("code_verifier", pkce.verifier);
+      }
 
       if (this.server.clientSecret) {
         tokenBody.set("client_secret", this.server.clientSecret);

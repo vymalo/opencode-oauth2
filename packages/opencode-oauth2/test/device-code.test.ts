@@ -87,12 +87,18 @@ describe("acquireTokenViaDeviceCode", () => {
     expect(calls[0].url).toBe("https://auth.example.com/device/authorize");
     expect(calls[0].body.get("client_id")).toBe("device-client");
     expect(calls[0].body.get("scope")).toBe("openid offline_access");
+    // PKCE is sent on the device-authorization request (Keycloak enforces it).
+    const challenge = calls[0].body.get("code_challenge");
+    expect(calls[0].body.get("code_challenge_method")).toBe("S256");
+    expect(challenge).toMatch(/^[A-Za-z0-9_-]+$/);
 
     // Second call: poll #1 (authorization_pending)
     expect(calls[1].url).toBe("https://auth.example.com/oauth/token");
     expect(calls[1].body.get("grant_type")).toBe("urn:ietf:params:oauth:grant-type:device_code");
     expect(calls[1].body.get("device_code")).toBe("dev-code-abc");
     expect(calls[1].body.get("client_id")).toBe("device-client");
+    // The matching verifier is replayed on the token poll.
+    expect(calls[1].body.get("code_verifier")).toMatch(/^[A-Za-z0-9_-]+$/);
 
     // Third call: poll #2 (success)
     expect(calls[2].url).toBe("https://auth.example.com/oauth/token");
@@ -100,6 +106,51 @@ describe("acquireTokenViaDeviceCode", () => {
     // Sleeps respect the server-provided interval of 2s
     expect(sleeps[0]).toBe(2000);
     expect(sleeps[1]).toBe(2000);
+  });
+
+  it("omits PKCE parameters when pkce is disabled", async () => {
+    const { fetch: fetchImpl, calls } = recordingFetch([
+      () =>
+        new Response(
+          JSON.stringify({
+            device_code: "dev-code-abc",
+            user_code: "WDJB-MJHT",
+            verification_uri: "https://auth.example.com/device",
+            expires_in: 600,
+            interval: 1
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        ),
+      () =>
+        new Response(
+          JSON.stringify({
+            access_token: "device-access",
+            refresh_token: "device-refresh",
+            token_type: "Bearer",
+            expires_in: 3600
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+    ]);
+
+    await acquireTokenViaDeviceCode({
+      deviceAuthorizationEndpoint: "https://auth.example.com/device/authorize",
+      tokenEndpoint: "https://auth.example.com/oauth/token",
+      clientId: "device-client",
+      scopes: ["openid"],
+      serverId: "example-ai",
+      logger: createSilentLogger(),
+      fetchImpl,
+      timeoutMs: 5000,
+      pkce: false,
+      sleep: async () => {}
+    });
+
+    // Device-authorization request carries no challenge…
+    expect(calls[0].body.get("code_challenge")).toBeNull();
+    expect(calls[0].body.get("code_challenge_method")).toBeNull();
+    // …and the token poll carries no verifier.
+    expect(calls[1].body.get("code_verifier")).toBeNull();
   });
 
   it("increases polling interval by 5s on slow_down", async () => {

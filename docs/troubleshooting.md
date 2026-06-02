@@ -42,6 +42,19 @@ The plugin's callback path is hard-coded as `/oauth2/callback`. The host is alwa
 
 See [local-development.md → Fixed redirectPort vs random](./local-development.md#fixed-redirectport-vs-random) for the tradeoffs.
 
+## `Missing parameter: code_challenge_method` (HTTP 400) on login
+
+**What's happening.** The IdP requires PKCE on the flow you're using, and the request reached it without a `code_challenge`. Most common on **Keycloak** clients where *Advanced → Proof Key for Code Exchange Code Challenge Method* is set to `S256` — Keycloak then enforces PKCE on **both** the authorize endpoint (`authorization_code`) and the device-authorization endpoint (`device_code`).
+
+**Look for.**
+
+- `oauth_device_authorization_failed` with `status: 400` and `bodyPreview` containing `"error":"invalid_request","error_description":"Missing parameter: code_challenge_method"`, followed by `sync_failed` (`device authorization request failed (400)`).
+- The equivalent on `authorization_code` surfaces in the browser at the authorize step.
+
+**Fix.** The plugin sends PKCE on both interactive flows **by default**, so on a current version this just works — upgrade if you're on an older build that omitted it. The `code_verifier` is generated per login and replayed on the token exchange/poll automatically; no configuration is needed.
+
+If you're hitting the *opposite* problem — a non-compliant IdP that rejects the extra `code_challenge` / `code_verifier` parameters — set `pkce: false` on that server's `oauth2` options to opt out. Leave it on (the default) for everything else; compliant servers that don't require PKCE simply ignore it.
+
 ## `model discovery failed (403)` after auth succeeded
 
 **What's happening.** OAuth succeeded — you have a valid access token — but the upstream `/v1/models` endpoint returned 403. The access token is missing the scope or audience the gateway expects.
@@ -77,6 +90,24 @@ Compare:
 
 - **`scope`** (or `scp` — depends on IdP) against what your gateway requires. Adjust `scopes:` in `opencode.json` and force re-auth (see [local-development.md → Force re-auth](./local-development.md#force-reauth)).
 - **`aud`** against what your gateway validates. For `token_exchange`, set `tokenExchangeAudience` to match.
+
+## `models_info_fetch_failed_no_cache` (HTTP 401) — metadata not enriched
+
+**What's happening.** `@vymalo/opencode-models-info` tried to fetch `meta.modelsInfoUrl`, the endpoint returned 401, and there was no previously-cached catalog to fall back to — so model metadata (context window, cost, modalities) is left un-enriched. The metadata endpoint is auth-protected and no `Authorization` header reached it.
+
+**Look for.**
+
+- `models_info_fetch_failed_no_cache` with the `url` and `error: "HTTP 401"`.
+- For an oauth2-backed provider: `sync_success` for the provider *did* fire (so inference auth works), but the metadata fetch still 401'd.
+
+**Fix.**
+
+1. **List `@vymalo/opencode-oauth2` before `@vymalo/opencode-models-info`** in your `plugin` array. oauth2's `config` hook stamps the bearer onto `options.headers` and must run first. The bearer is now produced by a refresh-backed ensure, so a freshly-minted (even short-lived) token is propagated rather than skipped.
+2. **On a one-off first-login 401, just re-run the command.** The token is on disk after the first login, so the next run stamps it before models-info's hook runs.
+3. **Different credential for metadata?** Set `meta.modelsInfoHeaders.Authorization` — it overrides the inherited provider header.
+4. **Endpoint not actually OpenRouter-shaped?** A vanilla `/v1/models` returns no mappable fields; point `modelsInfoUrl` at the richer metadata route. See [models-info.md → URL resolution](./models-info.md#url-resolution).
+
+The cache TTL is already 24h by default (`meta.modelsInfoTtlSeconds`); once the fetch 200s once, reboots stay offline for the day. There's no way to pre-seed a placeholder cache for an endpoint that has never succeeded — see [models-info.md → "There's no cache yet"](./models-info.md#theres-no-cache-yet--can-i-get-a-1-day-ttl-entry).
 
 ## `oauth_client_credentials_failed` 401 with `invalid_client`
 

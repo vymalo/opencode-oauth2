@@ -64,8 +64,19 @@ interface OAuthProviderExtension {
   jwksUri?: string;
   redirectPort?: number;
   authFlow?: OAuthAuthFlow;
+  pkce?: boolean;
   subjectTokenSource?: SubjectTokenSource;
   tokenExchangeAudience?: string;
+}
+
+function asBoolean(value: unknown, source: string): boolean | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "boolean") {
+    throw new Error(`${source} must be a boolean (received ${JSON.stringify(value)})`);
+  }
+  return value;
 }
 
 function asAuthFlow(value: unknown, source: string): OAuthAuthFlow | undefined {
@@ -223,6 +234,7 @@ function parseOAuthExtension(provider: OpenCodeProviderConfig): OAuthProviderExt
     jwksUri: asString(raw.jwksUri),
     redirectPort: asRedirectPort(raw.redirectPort, "provider.options.oauth2"),
     authFlow: asAuthFlow(raw.authFlow, "provider.options.oauth2"),
+    pkce: asBoolean(raw.pkce, "provider.options.oauth2.pkce"),
     // Deep validation of subjectTokenSource happens in validateConfig — this
     // layer just passes the raw value through so error messages reference
     // the canonical config path.
@@ -289,6 +301,7 @@ function parsePluginConfigServers(
       jwksUri: asString(entry.jwksUri),
       redirectPort: asRedirectPort(entry.redirectPort, sourceLabel),
       authFlow: asAuthFlow(entry.authFlow, sourceLabel),
+      pkce: asBoolean(entry.pkce, `${sourceLabel}.pkce`),
       subjectTokenSource: entry.subjectTokenSource as SubjectTokenSource | undefined,
       tokenExchangeAudience: asString(entry.tokenExchangeAudience)
     });
@@ -355,6 +368,7 @@ function collectManagedProviders(config: OpenCodeConfig, logger: Logger): Manage
       jwksUri: extension.jwksUri,
       redirectPort: extension.redirectPort,
       authFlow: extension.authFlow,
+      pkce: extension.pkce,
       subjectTokenSource: extension.subjectTokenSource,
       tokenExchangeAudience: extension.tokenExchangeAudience
     });
@@ -387,37 +401,12 @@ function mergeDiscoveredModels(
   providerConfig.models = merged;
 }
 
-/** Skew (ms) used when deciding whether a cached token is "still usable" for
- * config-time propagation. Smaller than the OAuth client's own skew because a
- * stale config-time Authorization header has limited blast radius — at worst,
- * a sibling plugin's metadata fetch returns 401 and falls back to no
- * enrichment. The chat-time path is unaffected.
- */
-const CONFIG_TIME_TOKEN_SKEW_MS = 30_000;
-
-function isCachedTokenUsableForConfigTime(token: TokenSet | undefined): token is TokenSet {
-  if (!token?.accessToken) {
-    return false;
-  }
-  if (!token.expiresAt) {
-    // No declared lifetime → optimistically usable; this matches the
-    // user-flow assumption in `OAuthClient.isTokenValid`.
-    return true;
-  }
-  return token.expiresAt > Date.now() + CONFIG_TIME_TOKEN_SKEW_MS;
-}
-
-function propagateCachedBearer(
+async function propagateCachedBearer(
   providerConfig: OpenCodeProviderConfig,
   providerId: string,
   runtime: OAuth2ModelSyncPlugin,
   logger: Logger
-): void {
-  const cached = runtime.getCachedToken(providerId);
-  if (!isCachedTokenUsableForConfigTime(cached)) {
-    return;
-  }
-
+): Promise<void> {
   const options = (providerConfig.options ??= {} as NonNullable<OpenCodeProviderConfig["options"]>);
   const headers = ((options as { headers?: Record<string, string> }).headers ??= {});
   // Case-insensitive scan so a user-set `authorization:` lowercase entry
@@ -429,7 +418,30 @@ function propagateCachedBearer(
     return;
   }
 
-  headers.Authorization = `${cached.tokenType || "Bearer"} ${cached.accessToken}`;
+  // Refresh-only ensure: returns the warmed-up token, transparently refreshing
+  // one that's near expiry, and throws rather than opening a second browser /
+  // device-code prompt if a fresh login would be required. This is stricter
+  // than reading the raw cache (the previous behavior) — a token minted moments
+  // ago for a short-lived realm no longer fails a fixed expiry-skew gate, which
+  // is exactly the case that left `@vymalo/opencode-models-info` fetching an
+  // OAuth2-protected `meta.modelsInfoUrl` without a bearer (HTTP 401). A stale
+  // value here is still harmless: `chat.headers` overwrites per request.
+  let token: TokenSet;
+  try {
+    token = await runtime.ensureAccessToken(providerId, { interactive: false });
+  } catch (error) {
+    logger.debug("oauth2_bearer_propagation_skipped_no_token", {
+      providerId,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return;
+  }
+
+  if (!token.accessToken) {
+    return;
+  }
+
+  headers.Authorization = `${token.tokenType || "Bearer"} ${token.accessToken}`;
   logger.debug("oauth2_bearer_propagated_to_provider_headers", { providerId });
 }
 
@@ -553,7 +565,7 @@ export function createOpencodeOauth2Plugin(
           // a freshly-ensured token, so a stale value here can only ever
           // affect other config-time consumers — never the actual inference
           // call. We never clobber a user-set Authorization header.
-          propagateCachedBearer(providerConfig, providerId, state.runtime, logger);
+          await propagateCachedBearer(providerConfig, providerId, state.runtime, logger);
         }
       },
       "chat.headers": async (input, output) => {

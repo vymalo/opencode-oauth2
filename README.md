@@ -83,6 +83,7 @@ See [packages/opencode-oauth2/README.md](packages/opencode-oauth2/README.md) for
 | --- | --- |
 | [`docs/architecture.md`](docs/architecture.md) | Understand the hooks, token lifecycle per flow, cache layout, sync scheduler, logging |
 | [`docs/models-info.md`](docs/models-info.md) | The companion metadata-enrichment plugin — how it composes with any auth scheme, caching, failure modes |
+| [`docs/well-known.md`](docs/well-known.md) | How `.well-known/opencode` distributes a provider + plugin setup to clients — `auth login`, the placeholder-key pattern, where config and tokens actually live |
 | [`docs/github-actions.md`](docs/github-actions.md) | CI without stored secrets — Keycloak/Auth0/Okta setup, reusable workflow, matrix, fork-PR limits |
 | [`docs/kubernetes.md`](docs/kubernetes.md) | `CronJob` / `Job` / `Deployment` with projected SA tokens, multi-provider pods, RBAC |
 | [`docs/local-development.md`](docs/local-development.md) | Sandbox setup, plugin re-export trick, forcing re-auth, dev-only `env` subject token |

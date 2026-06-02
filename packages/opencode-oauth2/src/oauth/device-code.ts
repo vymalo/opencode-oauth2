@@ -5,6 +5,7 @@ import {
   readResponseBodyPreview as readResponsePreviewShared,
   scrubSecrets
 } from "./http-utils.js";
+import { generatePkcePair } from "./pkce.js";
 
 const DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
 const DEFAULT_POLL_INTERVAL_SECONDS = 5;
@@ -27,6 +28,12 @@ export interface AcquireTokenViaDeviceCodeOptions {
   logger: Logger;
   fetchImpl?: typeof fetch;
   timeoutMs: number;
+  /**
+   * Send PKCE (`code_challenge` on the device-authorization request,
+   * `code_verifier` on the token poll). Defaults to `true`. Set `false` only
+   * for non-compliant IdPs that reject the extra parameters.
+   */
+  pkce?: boolean;
   /**
    * Sleep function used between polls. Overridable for tests.
    */
@@ -114,11 +121,26 @@ export async function acquireTokenViaDeviceCode(
   const now = options.now ?? Date.now;
   const { logger, serverId } = options;
 
+  // PKCE for the device flow (RFC 8628 + RFC 7636). Keycloak enforces this when
+  // the client's "Proof Key for Code Exchange Code Challenge Method" is set, and
+  // rejects the device-authorization request with
+  // `invalid_request: Missing parameter: code_challenge_method` otherwise. On by
+  // default — providers that don't require PKCE ignore it — and opt-out via the
+  // `pkce` server option for non-compliant IdPs. Mirrors the authorization_code
+  // flow.
+  const usePkce = options.pkce !== false;
+  const pkce = usePkce ? generatePkcePair() : undefined;
+
   // Step 1: request a device code.
   const deviceAuthBody = new URLSearchParams({
     client_id: options.clientId,
     scope: options.scopes.join(" ")
   });
+
+  if (pkce) {
+    deviceAuthBody.set("code_challenge", pkce.challenge);
+    deviceAuthBody.set("code_challenge_method", "S256");
+  }
 
   if (options.clientSecret) {
     deviceAuthBody.set("client_secret", options.clientSecret);
@@ -195,6 +217,10 @@ export async function acquireTokenViaDeviceCode(
       device_code: deviceAuth.device_code,
       client_id: options.clientId
     });
+
+    if (pkce) {
+      pollBody.set("code_verifier", pkce.verifier);
+    }
 
     if (options.clientSecret) {
       pollBody.set("client_secret", options.clientSecret);

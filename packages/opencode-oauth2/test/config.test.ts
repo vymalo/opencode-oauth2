@@ -250,6 +250,49 @@ describe("validateConfig", () => {
     expect(result.servers[0]?.authFlow).toBe("device_code");
   });
 
+  it("defaults pkce to true and accepts an explicit false", () => {
+    const result = validateConfig({
+      servers: [
+        {
+          id: "server-1",
+          issuer: "https://auth.example.com",
+          baseURL: "https://api.example.com/v1",
+          clientId: "client-id",
+          scopes: ["openid"]
+        },
+        {
+          id: "server-2",
+          issuer: "https://auth.example.com",
+          baseURL: "https://api.example.com/v1",
+          clientId: "client-id",
+          scopes: ["openid"],
+          pkce: false
+        }
+      ]
+    });
+
+    expect(result.servers[0]?.pkce).toBe(true);
+    expect(result.servers[1]?.pkce).toBe(false);
+  });
+
+  it("rejects a non-boolean pkce", () => {
+    expect(() =>
+      validateConfig({
+        servers: [
+          {
+            id: "server-1",
+            issuer: "https://auth.example.com",
+            baseURL: "https://api.example.com/v1",
+            clientId: "client-id",
+            scopes: ["openid"],
+            // biome-ignore lint/suspicious/noExplicitAny: testing invalid input
+            pkce: "yes" as any
+          }
+        ]
+      })
+    ).toThrow(/pkce/);
+  });
+
   it("rejects an unknown authFlow value", () => {
     expect(() =>
       validateConfig({
