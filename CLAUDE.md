@@ -8,7 +8,7 @@ A **pnpm workspace** of OpenCode plugins under the `@vymalo` npm scope. There ar
 
 | Package | Purpose |
 | --- | --- |
-| `packages/opencode-oauth2` → `@vymalo/opencode-oauth2` | OAuth2 / OIDC auth + dynamic model discovery for OpenAI-compatible providers. The mature plugin; five auth flows, persistent token cache, periodic sync scheduler. |
+| `packages/opencode-oauth2` → `@vymalo/opencode-oauth2` | OAuth2 / OIDC auth + dynamic model discovery for OpenAI-compatible providers. The mature plugin; five auth flows (`authorization_code`, `device_code`, `client_credentials`, `jwt_bearer`, `token_exchange`), persistent token cache, periodic sync scheduler. PKCE is on by default for the two interactive flows (`pkce: false` opts out per server). |
 | `packages/opencode-models-info` → `@vymalo/opencode-models-info` | **Auth-agnostic** metadata enrichment plugin: fetches OpenRouter-shaped `/models` JSON and merges `limit` / `cost` / `modalities` / capability flags onto existing provider model entries. Runs as a `Hooks.config` hook *after* other plugins. |
 | `packages/plugin-bundle` → `@vymalo/opencode-oauth2-bundle` (private) | Rolldown build that ships a single-file distribution of the oauth2 plugin. |
 
@@ -23,7 +23,10 @@ pnpm -r typecheck            # tsc --noEmit across packages
 pnpm -r test                 # vitest run in each package that has tests
 pnpm lint                    # biome lint (full repo)
 pnpm format                  # biome format --write
+pnpm format:check            # biome format (no write) — part of the pre-push gate
 ```
+
+Pre-push gate (run all five before opening a PR): `pnpm -r build && pnpm -r typecheck && pnpm -r test && pnpm lint && pnpm format:check`.
 
 Per-package iteration (much faster):
 
@@ -65,6 +68,10 @@ OpenCode plugins implement a `Hooks` object (see `@opencode-ai/plugin`'s `index.
 
 The whole picture sits in [`docs/architecture.md`](docs/architecture.md). If you're modifying hook behavior, read it first — it documents token lifecycle per flow, cache layout, the TTY-aware warmup logic, and which events you should expect in the log stream.
 
+### Distribution via `.well-known/opencode`
+
+The primary way these plugins reach users: a server publishes a `.well-known/opencode` document (an `auth` block + a `config` block listing `plugin` + `provider`), and `opencode auth login <url>` adopts it — no local `opencode.json` needed. OpenCode re-fetches and merges that `config` on every launch, so the provider definition is **not** stored on the client (only a `wellknown` pointer lands in `auth.json`; the real OAuth token lives in the oauth2 plugin's own cache). When debugging "where is this provider configured?", the answer is usually "served from the well-known URL, fetched fresh each boot." Full mechanics + gotchas in [`docs/well-known.md`](docs/well-known.md).
+
 ### Per-package file layout convention
 
 Both plugins follow the same shape:
@@ -91,11 +98,14 @@ packages/<plugin>/
 
 `@vymalo/opencode-models-info` runs after other `config` hooks have populated `input.provider`. It opts in per provider via `options.meta.modelsInfoUrl` and the merge is **upstream-wins**: a field already present on a model entry is never overwritten. This is deliberate — it means the plugin is safe to enable globally and lets handwritten `opencode.json` config take precedence.
 
+**The one cross-plugin coupling.** Despite being decoupled at the import level, the two plugins meet at the shared config object: oauth2's `config` hook stamps a freshly-ensured bearer onto `provider.options.headers.Authorization`, and models-info forwards `options.headers` when it fetches `modelsInfoUrl`. So an OAuth2-protected metadata endpoint works automatically — **but only if `@vymalo/opencode-oauth2` is listed before `@vymalo/opencode-models-info` in `plugin`** (config hooks run in registration order). The bearer comes from a refresh-only ensure (`ensureAccessToken(id, { interactive: false })`) so a near-expiry token is refreshed rather than skipped; `chat.headers` re-injects a fresh token per request, so a stale config-time header can only ever affect the metadata fetch, never inference. Symptom of getting this wrong: `models_info_fetch_failed_no_cache` (HTTP 401).
+
 When changing the mapping in [`packages/opencode-models-info/src/mapping.ts`](packages/opencode-models-info/src/mapping.ts):
 
 - OpenRouter's `pricing.prompt` / `.completion` are USD-per-token strings; OpenCode's `cost.input` / `cost.output` are USD-per-1M-tokens numbers. The conversion (`* 1_000_000` then round to 6 decimals) lives in `mapping.ts`. Don't move it.
-- `limit` only emits if **both** `context` and `output` are known — partial `limit` blocks are invalid in OpenCode's schema.
+- `limit` only emits if **both** `context` (`top_provider.context_length ?? context_length`) and `output` (`top_provider.max_completion_tokens`) are known — partial `limit` blocks are invalid in OpenCode's schema. Consequence worth knowing: if the source endpoint omits these, OpenCode backfills the runtime model's required `limit` to `{0,0}` and its UI treats the model as incomplete, hiding `cost` too even though it enriched fine. This is a *source-data* gap, not a plugin bug — see [`docs/troubleshooting.md`](docs/troubleshooting.md).
 - Modalities are filtered to OpenCode's enum (`text | audio | image | video | pdf`) — `"file"` and other OpenRouter values are dropped.
+- `tool_call` / `reasoning` / `temperature` are derived from the entry's `supported_parameters` array (`tools`/`tool_choice` → `tool_call`; `reasoning`/`reasoning_effort`/`thinking` → `reasoning`). The mapper only ever sets these to `true`; a capability the UI shows as disabled usually means the field is absent from the endpoint payload.
 
 ## Conventions worth knowing
 
@@ -112,8 +122,12 @@ When changing the mapping in [`packages/opencode-models-info/src/mapping.ts`](pa
 - **`gh` auth** lives in the interactive zsh profile. If `gh` looks unauthenticated under a plain non-interactive shell, retry under `zsh -i -c '…'` — `GITHUB_TOKEN` is loaded from `.zshrc`.
 - **Biome and the `.claude` worktree path.** `biome.json` excludes `**/.claude`, and Claude Code worktrees live under `.claude/worktrees/<id>/`. A bare `biome … .` therefore self-excludes (the `.` arg resolves under `.claude`) and silently processes **zero** files. To avoid that trap, the root `lint` / `format` / `format:check` scripts pass **explicit paths** (`packages test-env *.json`) instead of `.` — Biome evaluates `includes` relative to `biome.json`, so those relative paths never hit the `.claude` exclusion and the scripts work identically from a worktree or the main checkout. If you add a new top-level lintable directory, add it to those three scripts (otherwise it won't be checked).
 
+## Releasing
+
+Versions are bumped **manually** — there are no changesets and no release scripts. `@vymalo/opencode-oauth2` and `@vymalo/opencode-models-info` are the two published packages; the workspace root and `@vymalo/opencode-oauth2-bundle` are `private`. The bundle depends on oauth2 via `workspace:*`, so a version bump touches only `package.json` `version` fields (no lockfile change). The two published packages are currently kept on the same version line (both `0.4.0`). The user runs the actual `npm publish` after the bump PR merges.
+
 ## Design docs and plans
 
 - [`plans/prd.md`](plans/prd.md) — original oauth2 PRD with the phased roadmap.
 - [`plans/models-info-plan.md`](plans/models-info-plan.md) — design doc for the metadata plugin, including the OpenRouter→OpenCode field mapping table.
-- [`docs/`](docs/) — architecture, GitHub Actions / Kubernetes cookbooks, local-dev setup, troubleshooting. The architecture doc is canonical for hook behavior.
+- [`docs/`](docs/) — the architecture doc is canonical for hook behavior. Also: [`well-known.md`](docs/well-known.md) (`.well-known/opencode` distribution), [`models-info.md`](docs/models-info.md) (enrichment composition + caching), [`troubleshooting.md`](docs/troubleshooting.md) (symptom-keyed fixes), plus GitHub Actions / Kubernetes cookbooks and local-dev setup.
