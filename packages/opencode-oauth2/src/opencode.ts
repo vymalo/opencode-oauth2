@@ -438,6 +438,9 @@ async function propagateCachedBearer(
   }
 
   if (!token.accessToken) {
+    // ensureAccessToken resolved but with no usable token — surface it so a
+    // downstream 401 (e.g. models-info) isn't a silent mystery.
+    logger.debug("oauth2_bearer_propagation_skipped_empty_token", { providerId });
     return;
   }
 
@@ -547,26 +550,34 @@ export function createOpencodeOauth2Plugin(
         state.managedProviderIds = new Set<string>(managed.servers.map((server) => server.id));
 
         const providers = (config.provider ??= {});
-        for (const providerId of state.managedProviderIds) {
-          const providerConfig = providers[providerId];
-          if (!providerConfig) {
-            continue;
-          }
+        const runtime = state.runtime;
+        // Each provider is independent (distinct config object, distinct
+        // runtime state), and propagation can do a token-refresh round trip
+        // (up to httpTimeoutMs). Fan out so one slow IdP doesn't serialize
+        // startup behind the others. propagateCachedBearer swallows its own
+        // errors, so this never rejects.
+        await Promise.all(
+          [...state.managedProviderIds].map((providerId) => {
+            const providerConfig = providers[providerId];
+            if (!providerConfig) {
+              return undefined;
+            }
 
-          const models = state.runtime.getServerModels(providerId);
-          if (models.length > 0) {
-            mergeDiscoveredModels(providerConfig, models);
-          }
+            const models = runtime.getServerModels(providerId);
+            if (models.length > 0) {
+              mergeDiscoveredModels(providerConfig, models);
+            }
 
-          // Stamp the cached bearer onto `options.headers.Authorization` so
-          // subsequent `config` hooks (e.g. @vymalo/opencode-models-info
-          // fetching a metadata endpoint) can inherit it without depending
-          // on this plugin. `chat.headers` still overwrites per-request with
-          // a freshly-ensured token, so a stale value here can only ever
-          // affect other config-time consumers — never the actual inference
-          // call. We never clobber a user-set Authorization header.
-          await propagateCachedBearer(providerConfig, providerId, state.runtime, logger);
-        }
+            // Stamp the cached bearer onto `options.headers.Authorization` so
+            // subsequent `config` hooks (e.g. @vymalo/opencode-models-info
+            // fetching a metadata endpoint) can inherit it without depending
+            // on this plugin. `chat.headers` still overwrites per-request with
+            // a freshly-ensured token, so a stale value here can only ever
+            // affect other config-time consumers — never the actual inference
+            // call. We never clobber a user-set Authorization header.
+            return propagateCachedBearer(providerConfig, providerId, runtime, logger);
+          })
+        );
       },
       "chat.headers": async (input, output) => {
         const providerId = input.model?.providerID ?? input.provider?.info?.id;

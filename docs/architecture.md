@@ -274,6 +274,7 @@ Anywhere the plugin logs a URL it ran (`tokenEndpoint`, `modelsUrl`), it goes th
 | `oauth2_bearer_propagated_to_provider_headers` | bearer stamped onto `options.headers` (config step 6) | `providerId` |
 | `oauth2_bearer_propagation_skipped_user_set` | skipped — user already set `Authorization` | `providerId` |
 | `oauth2_bearer_propagation_skipped_no_token` | skipped — refresh-only ensure couldn't produce a token without a fresh prompt | `providerId`, `error` |
+| `oauth2_bearer_propagation_skipped_empty_token` | skipped — ensure resolved but returned no access token | `providerId` |
 
 When OpenCode is the host, the plugin pipes everything through `client.app.log()` *in addition* to stderr (best-effort, non-blocking). Stderr is the reliable channel.
 
