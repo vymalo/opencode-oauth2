@@ -213,7 +213,10 @@ export class OAuth2ModelSyncPlugin {
     }
   }
 
-  async ensureAccessToken(serverId: string): Promise<TokenSet> {
+  async ensureAccessToken(
+    serverId: string,
+    options: { interactive?: boolean } = {}
+  ): Promise<TokenSet> {
     const server = this.requireServerConfig(serverId);
     const runtime = this.runtimeByServer.get(serverId);
     if (!runtime) {
@@ -228,7 +231,14 @@ export class OAuth2ModelSyncPlugin {
       tokenExpirySkewMs: this.config.tokenExpirySkewMs
     });
 
-    const token = await oauth.ensureToken(runtime.state.token);
+    // `interactive` is forwarded so config-time callers can ask for a
+    // refresh-only ensure (`interactive: false`): a valid cached token is
+    // returned as-is, a stale-but-refreshable one is refreshed, and anything
+    // that would need a browser / device-code prompt throws instead of
+    // blocking. The per-chat path leaves it unset so a real login can proceed.
+    const token = await oauth.ensureToken(runtime.state.token, {
+      interactive: options.interactive
+    });
     if (token.accessToken !== runtime.state.token?.accessToken) {
       const nextState: CachedServerState = {
         ...runtime.state,

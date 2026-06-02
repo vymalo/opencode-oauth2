@@ -23,7 +23,9 @@ Runs once when OpenCode boots the plugin. Source: [`packages/opencode-oauth2/src
 3. **Build the runtime** (`OAuth2ModelSyncPlugin`), `initialize()` (load cache), then `start({ warmup: true })`.
 4. **Warmup** iterates servers, attempts `syncServer(id, { interactive: <TTY-detected> })`, and starts a per-server scheduler (`syncIntervalMinutes`, default 60).
 5. **Merge discovered models** into each provider's `models` map. If a server has no cached models yet (cold start, non-interactive warmup, refresh-token expired), it stays empty in OpenCode — the user sees no models for that provider until a chat request triggers on-demand auth.
-6. **Propagate the cached bearer.** For each managed provider, if a still-valid cached token exists (30s expiry skew), stamp `options.headers.Authorization = "<tokenType> <accessToken>"` — unless the user already set an `Authorization` header (case-insensitive), which always wins. This makes the token visible to *subsequent* `config` hooks, most notably [`@vymalo/opencode-models-info`](./models-info.md) fetching an OAuth2-protected `meta.modelsInfoUrl`. It's the only coupling point between the two plugins, and it's one-directional and via the shared config object — neither plugin imports the other. A stale value here is harmless: `chat.headers` (below) overwrites per-request with a freshly-ensured token, so the inference call is never affected. Emits `oauth2_bearer_propagated_to_provider_headers` (or `oauth2_bearer_propagation_skipped_user_set`).
+6. **Propagate the bearer.** For each managed provider, stamp `options.headers.Authorization = "<tokenType> <accessToken>"` — unless the user already set an `Authorization` header (case-insensitive), which always wins. The token comes from a **refresh-only ensure** (`ensureAccessToken(id, { interactive: false })`): a valid warmed-up token is returned as-is, a near-expiry one is transparently refreshed, and anything that would need a fresh browser / device-code prompt is skipped (`oauth2_bearer_propagation_skipped_no_token`) rather than blocking startup on a second login. This makes the token visible to *subsequent* `config` hooks, most notably [`@vymalo/opencode-models-info`](./models-info.md) fetching an OAuth2-protected `meta.modelsInfoUrl`. It's the only coupling point between the two plugins, and it's one-directional and via the shared config object — neither plugin imports the other. A stale value here is harmless: `chat.headers` (below) overwrites per-request with a freshly-ensured token, so the inference call is never affected. Emits `oauth2_bearer_propagated_to_provider_headers` (or `oauth2_bearer_propagation_skipped_user_set` / `..._skipped_no_token`).
+
+   > **Why refresh-only, not a raw cache read.** An earlier version stamped only if the *cached* token cleared a fixed 30s expiry skew. On a first interactive device-code login against a short-lived realm, the just-minted token could already be inside that window, so the header was never stamped and models-info fetched the metadata endpoint with no `Authorization` → HTTP 401 (`models_info_fetch_failed_no_cache`). Going through `ensureAccessToken` refreshes instead of giving up, so the downstream fetch reliably carries a usable token.
 
 The runtime is **rebuilt** if the config signature changes between hook invocations (OpenCode re-runs `config` on certain config edits). Old schedulers are stopped first.
 
@@ -106,6 +108,10 @@ What each flow re-acquires:
 | `token_exchange` | Resolve subject JWT → POST `grant_type=urn:ietf:params:oauth:grant-type:token-exchange` (+ optional `audience`) | no | no |
 
 The machine flows (`client_credentials`, `jwt_bearer`, `token_exchange`) dispatch **before** the refresh branch — re-presenting the platform identity is the canonical way to renew, so a stale refresh token from a different IdP run is never tried.
+
+#### PKCE on the user flows
+
+Both interactive flows send PKCE (RFC 7636) by default: a per-login `code_verifier` is generated, its `S256` `code_challenge` goes on the authorization request (`authorization_code`) or the device-authorization request (`device_code`), and the `code_verifier` is replayed on the token exchange / poll. This is mandatory for some IdPs — a Keycloak client with *Proof Key for Code Exchange Code Challenge Method* set rejects the request with `invalid_request: Missing parameter: code_challenge_method` if the challenge is absent, **including on the device endpoint**. Compliant servers that don't require PKCE simply ignore the extra parameters, so it's on unconditionally unless you set `pkce: false` per server (escape hatch for non-compliant IdPs that 400 on unknown parameters). The machine flows never use PKCE.
 
 ### `isTokenValid` policy
 
@@ -265,8 +271,10 @@ Anywhere the plugin logs a URL it ran (`tokenEndpoint`, `modelsUrl`), it goes th
 | `oauth_open_browser_failed` | `xdg-open`/`open`/`start` failed | `error` (URL goes to stderr separately) |
 | `model_discovery_error_body` | `/v1/models` returned non-2xx | `modelsUrl`, `status`, `bodyPreview` |
 | `model_discovery_empty` | `/v1/models` returned 0 models | `modelsUrl` |
-| `oauth2_bearer_propagated_to_provider_headers` | cached bearer stamped onto `options.headers` (config step 6) | `providerId` |
+| `oauth2_bearer_propagated_to_provider_headers` | bearer stamped onto `options.headers` (config step 6) | `providerId` |
 | `oauth2_bearer_propagation_skipped_user_set` | skipped — user already set `Authorization` | `providerId` |
+| `oauth2_bearer_propagation_skipped_no_token` | skipped — refresh-only ensure couldn't produce a token without a fresh prompt | `providerId`, `error` |
+| `oauth2_bearer_propagation_skipped_empty_token` | skipped — ensure resolved but returned no access token | `providerId` |
 
 When OpenCode is the host, the plugin pipes everything through `client.app.log()` *in addition* to stderr (best-effort, non-blocking). Stderr is the reliable channel.
 

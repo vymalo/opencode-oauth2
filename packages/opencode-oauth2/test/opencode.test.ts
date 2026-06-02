@@ -201,6 +201,90 @@ describe("OpenCode plugin hooks", () => {
     expect(headers?.Authorization).toBe("Bearer cached-access");
   });
 
+  it("refreshes a near-expiry token during propagation instead of skipping it", async () => {
+    // Regression guard: a token minted moments ago for a short-lived realm used
+    // to fail the fixed config-time expiry-skew gate and never get stamped,
+    // leaving @vymalo/opencode-models-info to fetch an OAuth2-protected
+    // `meta.modelsInfoUrl` with no Authorization (HTTP 401). Propagation now
+    // goes through a refresh-only ensure, so the header carries a *fresh* token.
+    const cacheDir = await mkdtemp(join(tmpdir(), "opencode-hook-refresh-"));
+    const cache = new FileCacheStore(cacheDir);
+    await cache.ensureReady();
+
+    await cache.saveServerState({
+      serverId: "example-ai",
+      updatedAt: Date.now(),
+      lastSyncAt: Date.now(),
+      token: {
+        accessToken: "stale-access",
+        tokenType: "Bearer",
+        refreshToken: "cached-refresh",
+        // Inside the OAuth client's 30s validity skew → treated as expired.
+        expiresAt: Date.now() + 5_000
+      },
+      rawModels: [{ id: "glm-5" }],
+      models: [{ id: "glm-5", displayName: "GLM 5" }]
+    });
+
+    const plugin = createOpencodeOauth2Plugin({
+      cacheDir,
+      logger: createSilentLogger(),
+      fetchImpl: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const body = new URLSearchParams(String(init?.body ?? ""));
+        if (String(input) === "https://auth.example.com/token") {
+          expect(body.get("grant_type")).toBe("refresh_token");
+          return new Response(
+            JSON.stringify({
+              access_token: "refreshed-access",
+              refresh_token: "refreshed-refresh",
+              token_type: "Bearer",
+              expires_in: 3600
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        throw new Error(`unexpected fetch: ${String(input)}`);
+      }) as typeof fetch
+    });
+
+    const hooks = await plugin({
+      client: { app: { log: async () => ({ data: true }) } },
+      project: { id: "project-1" },
+      directory: process.cwd(),
+      worktree: process.cwd(),
+      serverUrl: new URL("http://127.0.0.1:3000"),
+      $: {} as never
+    } as never);
+
+    const config: Record<string, unknown> = {
+      provider: {
+        "example-ai": {
+          options: {
+            baseURL: "https://api.example.com/v1",
+            oauth2: {
+              issuer: "https://auth.example.com",
+              clientId: "opencode-client",
+              scopes: ["openid", "offline_access"],
+              // Explicit endpoints so refresh skips OIDC discovery (no network).
+              authorizationEndpoint: "https://auth.example.com/authorize",
+              tokenEndpoint: "https://auth.example.com/token"
+            }
+          }
+        }
+      }
+    };
+
+    await hooks.config?.(config as never);
+
+    const headers = (
+      (config.provider as Record<string, Record<string, unknown>>)["example-ai"].options as Record<
+        string,
+        unknown
+      >
+    ).headers as Record<string, string> | undefined;
+    expect(headers?.Authorization).toBe("Bearer refreshed-access");
+  });
+
   it("does not overwrite a user-set Authorization header during propagation", async () => {
     const cacheDir = await mkdtemp(join(tmpdir(), "opencode-hook-userauth-"));
     const cache = new FileCacheStore(cacheDir);

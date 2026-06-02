@@ -35,7 +35,7 @@ The fetch sends the union of the provider's `options.headers` and the meta-speci
 | --- | --- |
 | **Public metadata endpoint** (e.g. OpenRouter's `/models`) | Nothing — no auth needed. |
 | **Static API key** | Put the `Bearer` in `options.headers` once; both inference and the metadata fetch use it. |
-| **OAuth2 via `@vymalo/opencode-oauth2` ≥ 0.4.0** | Nothing — that plugin stamps the cached bearer onto `options.headers.Authorization` at config time (see [architecture.md](./architecture.md#config--plugin-load)), so this plugin inherits it automatically. |
+| **OAuth2 via `@vymalo/opencode-oauth2`** | Nothing — that plugin stamps a freshly-ensured (refresh-on-near-expiry) bearer onto `options.headers.Authorization` at config time, *before* this plugin's hook runs (list it **first** in `plugin`), so this plugin inherits it automatically. See [architecture.md](./architecture.md#config--plugin-load). |
 
 If the metadata endpoint needs a *different* credential than inference (e.g. a service-account token), set `meta.modelsInfoHeaders.Authorization` — it overrides whatever the provider carries.
 
@@ -68,10 +68,19 @@ Failure handling is deliberately non-fatal — the plugin must never block OpenC
 | --- | --- |
 | Fetch fails (network, timeout, non-2xx) **with** a cached snapshot | Serve the **stale** snapshot; log `models_info_fetch_failed_using_stale`. |
 | Fetch fails **without** any cache | Skip enrichment for that provider; log `models_info_fetch_failed_no_cache`. |
+| First boot, never fetched | No cache exists yet — that's normal. The first **successful** fetch writes the cache, and the default 24h TTL keeps subsequent boots offline. |
 | Response is malformed (non-empty body that filters down to zero valid entries) | Treated as a parse error → falls back to stale cache, **never** overwrites good data with `[]`. |
 | Disk cache write fails (read-only `$HOME`, etc.) | Best-effort: log `models_info_cache_write_failed` and still enrich from the freshly-fetched in-memory record. |
 
 Per-fetch timeout defaults to 5s (`meta.modelsInfoTimeoutMs`).
+
+### "There's no cache yet — can I get a 1-day-TTL entry?"
+
+The cache **is** 1-day-TTL by default (`meta.modelsInfoTtlSeconds`, `86400`). There is no separate "seed the cache" step and no negative cache for failures — `models_info_fetch_failed_no_cache` means the fetch itself failed (commonly HTTP 401: the metadata endpoint is auth-protected and no `Authorization` reached it) **and** there was no prior good copy to fall back to. The fix is to make the fetch succeed once; the cache then fills automatically and survives reboots for the TTL. In order of likelihood:
+
+1. **Auth-protected endpoint, no token reaching it.** Ensure `@vymalo/opencode-oauth2` is listed **before** this plugin so its bearer is stamped on `options.headers` first (see [Auth composition](#auth-composition)). On the very first interactive login this is now handled by the oauth2 plugin's refresh-backed propagation — if you hit a 401 *before* upgrading, just run the command again: the second run reads the token from cache before either hook runs.
+2. **A different credential is needed for metadata than for inference.** Set `meta.modelsInfoHeaders.Authorization` (or a static `x-tenant`, etc.) — these override the inherited provider headers and are part of the cache key.
+3. **The endpoint is genuinely unreachable.** Hand-write the metadata in `opencode.json`; the merge is upstream-wins, so your values stick and the plugin enriches nothing over them.
 
 ## Log events
 

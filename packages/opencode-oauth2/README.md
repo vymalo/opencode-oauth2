@@ -89,6 +89,7 @@ These apply to both config shapes above.
 | --- | --- | --- |
 | `clientSecret` | _(unset)_ | For confidential clients. Sent as `client_secret` on every token-endpoint POST. Never logged. Required for `authFlow: "client_credentials"`. Optional but commonly required for `jwt_bearer` / `token_exchange` with confidential clients. PKCE is still required for `authorization_code`. |
 | `authFlow` | `"authorization_code"` | One of `"authorization_code"`, `"device_code"`, `"client_credentials"`, `"jwt_bearer"`, `"token_exchange"`. |
+| `pkce` | `true` | Send PKCE (`code_challenge` + `code_challenge_method=S256`, replayed as `code_verifier`) on the `authorization_code` and `device_code` flows. Leave it on — compliant servers ignore it, and a Keycloak client with PKCE enforced **requires** it (otherwise the device/authorize request 400s with `Missing parameter: code_challenge_method`). Set `false` only for a non-compliant IdP that rejects the extra parameters. No effect on the machine flows. |
 | `subjectTokenSource` | _(required for `jwt_bearer` / `token_exchange`)_ | Where to read the platform JWT to present as the subject token. See [Federated identity](#federated-identity-no-long-lived-secrets-in-ci) below. |
 | `tokenExchangeAudience` | _(unset)_ | Optional `audience` parameter for the `token_exchange` grant. |
 | `deviceAuthorizationEndpoint` | discovered | Override for the device authorization endpoint. Otherwise discovered from `device_authorization_endpoint` in the OIDC metadata. Only used when `authFlow === "device_code"`. |

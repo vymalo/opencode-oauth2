@@ -56,6 +56,16 @@ export interface OAuthServerConfigInput {
   redirectPort?: number;
   authFlow?: OAuthAuthFlow;
   /**
+   * Send PKCE (RFC 7636) on the interactive `authorization_code` and
+   * `device_code` flows: `code_challenge` + `code_challenge_method=S256` on the
+   * authorization/device request, and the matching `code_verifier` on the token
+   * exchange. Defaults to `true` — PKCE is recommended for public clients and
+   * is silently ignored by servers that don't require it, so leave it on unless
+   * a non-compliant IdP rejects the extra parameters. Has no effect on the
+   * machine flows (`client_credentials`, `jwt_bearer`, `token_exchange`).
+   */
+  pkce?: boolean;
+  /**
    * Required for `jwt_bearer` and `token_exchange`. Tells the plugin where to
    * read the platform JWT it should present as the subject token.
    */
@@ -97,6 +107,7 @@ export interface OAuthServerConfig {
   jwksUri?: string;
   redirectPort?: number;
   authFlow: OAuthAuthFlow;
+  pkce: boolean;
   subjectTokenSource?: SubjectTokenSource;
   tokenExchangeAudience?: string;
 }
@@ -148,6 +159,16 @@ function validateLogLevel(value: unknown, path: string): LogLevel {
   throw new Error(
     `${path} must be one of "debug" | "info" | "warn" | "error" (received ${JSON.stringify(value)})`
   );
+}
+
+function validatePkce(value: unknown, path: string): boolean {
+  if (value === undefined || value === null) {
+    return true;
+  }
+  if (typeof value !== "boolean") {
+    throw new Error(`${path} must be a boolean (received ${JSON.stringify(value)})`);
+  }
+  return value;
 }
 
 function validateAuthFlow(value: unknown, path: string): OAuthAuthFlow {
@@ -239,6 +260,7 @@ function normalizeServerConfig(input: OAuthServerConfigInput, index: number): OA
 
   const redirectPort = validateRedirectPort(input.redirectPort, `${path}.redirectPort`);
   const authFlow = validateAuthFlow(input.authFlow, `${path}.authFlow`);
+  const pkce = validatePkce(input.pkce, `${path}.pkce`);
   const subjectTokenSource = validateSubjectTokenSource(
     input.subjectTokenSource,
     `${path}.subjectTokenSource`
@@ -289,6 +311,7 @@ function normalizeServerConfig(input: OAuthServerConfigInput, index: number): OA
     jwksUri: input.jwksUri,
     redirectPort,
     authFlow,
+    pkce,
     subjectTokenSource,
     tokenExchangeAudience
   };
