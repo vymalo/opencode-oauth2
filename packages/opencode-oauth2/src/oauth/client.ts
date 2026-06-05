@@ -163,7 +163,7 @@ export class OAuthClient {
     if (current?.refreshToken) {
       try {
         const refreshed = await this.refreshToken(current.refreshToken);
-        this.logger.info("oauth_refresh_success", { serverId: this.server.id });
+        this.logger.debug("oauth_refresh_success", { serverId: this.server.id });
         return refreshed;
       } catch (error) {
         this.logger.warn("oauth_refresh_failed", {
