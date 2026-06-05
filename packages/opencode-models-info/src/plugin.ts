@@ -85,7 +85,7 @@ async function enrichProvider(
       enrichedCount += 1;
     }
 
-    deps.logger.info("models_info_enriched", {
+    deps.logger.debug("models_info_enriched", {
       providerId,
       enrichedCount,
       totalModels: Object.keys(models).length,

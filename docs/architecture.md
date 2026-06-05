@@ -276,6 +276,8 @@ Anywhere the plugin logs a URL it ran (`tokenEndpoint`, `modelsUrl`), it goes th
 | `oauth2_bearer_propagation_skipped_no_token` | skipped — refresh-only ensure couldn't produce a token without a fresh prompt | `providerId`, `error` |
 | `oauth2_bearer_propagation_skipped_empty_token` | skipped — ensure resolved but returned no access token | `providerId` |
 
+**Log level of the happy path.** The lifecycle events you see on a *successful* boot — `plugin_initialized`, `sync_start`, `sync_success`, `oauth_refresh_success` (oauth2) and `models_info_enriched` (models-info) — are emitted at **`debug`**, not `info`. At the default `info` level a clean startup is therefore silent; you only see output when something goes wrong (`sync_failed` / `sync_startup_failed` / `oauth_refresh_failed` at `warn`/`error`, `models_info_enrichment_failed` at `error`). The **one exception** is `sync_success`: it stays at `debug` when the model set is unchanged, but is promoted to `info` when the diff is non-empty (`added`/`removed`/`renamed` > 0), so a model list shifting under you is still visible at the default level. To get the full per-tick lifecycle back when diagnosing, set the host `logLevel` to `DEBUG`.
+
 When OpenCode is the host, the plugin pipes everything through `client.app.log()` *in addition* to stderr (best-effort, non-blocking). Stderr is the reliable channel.
 
 ## Token policy (recap)

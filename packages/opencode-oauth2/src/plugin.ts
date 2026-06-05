@@ -69,7 +69,7 @@ export class OAuth2ModelSyncPlugin {
       this.runtimeByServer.set(server.id, { state: initialState });
     }
 
-    this.logger.info("plugin_initialized", {
+    this.logger.debug("plugin_initialized", {
       serverCount: this.config.servers.length
     });
 
@@ -149,7 +149,7 @@ export class OAuth2ModelSyncPlugin {
       throw new Error(`runtime not initialized for server: ${serverId}`);
     }
 
-    this.logger.info("sync_start", { serverId, interactive: options.interactive !== false });
+    this.logger.debug("sync_start", { serverId, interactive: options.interactive !== false });
     const oauth = new OAuthClient(server, {
       fetchImpl: this.options.fetchImpl,
       logger: this.logger,
@@ -185,7 +185,11 @@ export class OAuth2ModelSyncPlugin {
       await this.cacheStore.saveServerState(nextState);
       runtime.state = nextState;
 
-      this.logger.info("sync_success", {
+      // Stay quiet on the steady-state happy path (no model changes), but
+      // surface at `info` when the model set actually shifted so a clean
+      // startup is silent while a meaningful change is still visible.
+      const changed = diff.added.length + diff.removed.length + diff.renamed.length > 0;
+      this.logger[changed ? "info" : "debug"]("sync_success", {
         serverId,
         modelCount: normalizedModels.length,
         added: diff.added.length,
