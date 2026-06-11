@@ -4,15 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A **pnpm workspace** of OpenCode plugins under the `@vymalo` npm scope. There are two runtime plugins plus a Rolldown-based bundler — both plugins target OpenCode's plugin API (`@opencode-ai/plugin`) and ship to npm independently.
+A **pnpm workspace** of OpenCode plugins under the `@vymalo` npm scope. There are three runtime plugins plus a Rolldown-based bundler — all plugins target OpenCode's plugin API (`@opencode-ai/plugin`) and ship to npm independently.
 
 | Package | Purpose |
 | --- | --- |
 | `packages/opencode-oauth2` → `@vymalo/opencode-oauth2` | OAuth2 / OIDC auth + dynamic model discovery for OpenAI-compatible providers. The mature plugin; five auth flows (`authorization_code`, `device_code`, `client_credentials`, `jwt_bearer`, `token_exchange`), persistent token cache, periodic sync scheduler. PKCE is on by default for the two interactive flows (`pkce: false` opts out per server). |
 | `packages/opencode-models-info` → `@vymalo/opencode-models-info` | **Auth-agnostic** metadata enrichment plugin: fetches OpenRouter-shaped `/models` JSON and merges `limit` / `cost` / `modalities` / capability flags onto existing provider model entries. Runs as a `Hooks.config` hook *after* other plugins. |
+| `packages/opencode-ratelimit` → `@vymalo/opencode-ratelimit` | **Auth-agnostic** rate-limit awareness plugin: in its `Hooks.config` hook it injects a custom `fetch` onto opted-in providers (`options.meta.rateLimit`) that reads Envoy Gateway / IETF draft-03 rate-limit headers (`x-ratelimit-limit/remaining/reset`), proactively throttles when `remaining` hits 0, and backs off + retries on `429`. The only response-observing plugin — OpenCode has no post-response hook, so wrapping `options.fetch` is the sole interception point. In-memory state only (no `cache.ts`). See [`docs/ratelimit.md`](docs/ratelimit.md). |
 | `packages/plugin-bundle` → `@vymalo/opencode-oauth2-bundle` (private) | Rolldown build that ships a single-file distribution of the oauth2 plugin. |
 
-The two plugins are deliberately decoupled: `opencode-models-info` does not import from `opencode-oauth2` and works with any auth scheme (static API key, oauth2, none) because it only mutates the already-resolved OpenCode config.
+The plugins are deliberately decoupled: `opencode-models-info` and `opencode-ratelimit` do not import from `opencode-oauth2` (or each other) and work with any auth scheme (static API key, oauth2, none) because they only mutate the already-resolved OpenCode config. Soft ordering recommendation when stacking them in `plugin`: oauth2 → models-info → ratelimit (config hooks run in registration order; ratelimit's fetch wrapping is auth-independent so its position is cosmetic, but models-info genuinely needs the oauth2 bearer first — see the composition contract below).
 
 ## Common commands
 
@@ -74,7 +75,7 @@ The primary way these plugins reach users: a server publishes a `.well-known/ope
 
 ### Per-package file layout convention
 
-Both plugins follow the same shape:
+All plugins follow the same shape:
 
 ```
 packages/<plugin>/
@@ -88,6 +89,8 @@ packages/<plugin>/
 │   └── …
 └── test/               # vitest, *.test.ts
 ```
+
+`opencode-ratelimit` follows the same shape **minus `cache.ts`** (its rate-limit state is in-memory only — a reset window is seconds, so persisting it would only serve stale data) and **plus `headers.ts`** (a pure parser for the `x-ratelimit-*` triple). It is also the only plugin that injects a custom `fetch` into `provider.options.fetch` (the sole way to observe response status/headers, since OpenCode has no post-response hook) rather than only reading/merging config.
 
 **Important — two entry points per published package:**
 
@@ -124,7 +127,7 @@ When changing the mapping in [`packages/opencode-models-info/src/mapping.ts`](pa
 
 ## Releasing
 
-Versions are bumped **manually** — there are no changesets and no release scripts. `@vymalo/opencode-oauth2` and `@vymalo/opencode-models-info` are the two published packages; the workspace root and `@vymalo/opencode-oauth2-bundle` are `private`. The bundle depends on oauth2 via `workspace:*`, so a version bump touches only `package.json` `version` fields (no lockfile change). The two published packages are currently kept on the same version line (both `0.4.0`). The user runs the actual `npm publish` after the bump PR merges.
+Versions are bumped **manually** — there are no changesets and no release scripts. `@vymalo/opencode-oauth2`, `@vymalo/opencode-models-info`, and `@vymalo/opencode-ratelimit` are the three published packages; the workspace root and `@vymalo/opencode-oauth2-bundle` are `private`. The bundle depends on oauth2 via `workspace:*`, so a version bump touches only `package.json` `version` fields (no lockfile change). All five packages (the three published plus the two private) are kept on the **same version line** — currently `0.5.0` — and bumped together in one PR. The user runs the actual `npm publish` after the bump PR merges.
 
 ## Design docs and plans
 

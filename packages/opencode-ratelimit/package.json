@@ -1,14 +1,14 @@
 {
-  "name": "@vymalo/opencode-models-info",
+  "name": "@vymalo/opencode-ratelimit",
   "version": "0.5.0",
-  "description": "OpenCode plugin that enriches model entries with full metadata (context length, pricing, modalities, capability flags) fetched from a provider-supplied OpenRouter-shaped endpoint.",
+  "description": "OpenCode plugin that makes OpenAI-compatible providers rate-limit aware: it reads Envoy Gateway / IETF draft-03 rate-limit response headers (x-ratelimit-limit/remaining/reset), proactively throttles requests when the quota is exhausted, and backs off and retries on HTTP 429.",
   "license": "MIT",
   "author": "vymalo contributors",
   "homepage": "https://github.com/vymalo/opencode-oauth2#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/vymalo/opencode-oauth2.git",
-    "directory": "packages/opencode-models-info"
+    "directory": "packages/opencode-ratelimit"
   },
   "bugs": {
     "url": "https://github.com/vymalo/opencode-oauth2/issues"
@@ -16,9 +16,10 @@
   "keywords": [
     "opencode",
     "opencode-plugin",
-    "models",
-    "metadata",
-    "openrouter",
+    "rate-limit",
+    "throttle",
+    "429",
+    "envoy",
     "ai-sdk"
   ],
   "type": "module",
@@ -50,7 +51,6 @@
     "lint": "biome lint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:integration": "vitest run --config vitest.integration.config.ts",
     "format": "biome format --write .",
     "format:check": "biome format ."
   },
