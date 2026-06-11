@@ -83,6 +83,7 @@ See [packages/opencode-oauth2/README.md](packages/opencode-oauth2/README.md) for
 | --- | --- |
 | [`docs/architecture.md`](docs/architecture.md) | Understand the hooks, token lifecycle per flow, cache layout, sync scheduler, logging |
 | [`docs/models-info.md`](docs/models-info.md) | The companion metadata-enrichment plugin — how it composes with any auth scheme, caching, failure modes |
+| [`docs/ratelimit.md`](docs/ratelimit.md) | The companion rate-limit-aware plugin — reading Envoy `x-ratelimit-*` headers, the throttle/backoff state machine, the fetch-wrapping interception point, the timeout caveat |
 | [`docs/well-known.md`](docs/well-known.md) | How `.well-known/opencode` distributes a provider + plugin setup to clients — `auth login`, the placeholder-key pattern, where config and tokens actually live |
 | [`docs/github-actions.md`](docs/github-actions.md) | CI without stored secrets — Keycloak/Auth0/Okta setup, reusable workflow, matrix, fork-PR limits |
 | [`docs/kubernetes.md`](docs/kubernetes.md) | `CronJob` / `Job` / `Deployment` with projected SA tokens, multi-provider pods, RBAC |
@@ -143,6 +144,60 @@ What happens on boot: oauth2 authenticates, discovers models from `/v1/models`, 
 
 Full reference: [`packages/opencode-models-info/README.md`](packages/opencode-models-info/README.md). Behavior, caching, and composition details: [`docs/models-info.md`](docs/models-info.md).
 
+## Companion plugin: rate-limit awareness
+
+This workspace also ships [`@vymalo/opencode-ratelimit`](packages/opencode-ratelimit) — a separate, **auth-agnostic** plugin that makes a provider respect the rate-limit headers your gateway already sends. It reads the IETF draft-03 triple emitted by [Envoy Gateway](https://gateway.envoyproxy.io/docs/tasks/traffic/global-rate-limit/)'s global rate limiting (`x-ratelimit-limit` / `x-ratelimit-remaining` / `x-ratelimit-reset`), proactively pauses new requests once the window is exhausted, and backs off + retries on HTTP `429` — so a burst of requests cooperates with the gateway instead of earning a wall of `429`s.
+
+OpenCode has no post-response hook, so the only way to observe response status/headers is to wrap the provider's `fetch`. The plugin does exactly that during its `config` hook, for any provider that opts in via `options.meta.rateLimit`:
+
+```jsonc
+{
+  "plugin": ["@vymalo/opencode-ratelimit"],
+  "provider": {
+    "my-provider": {
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "https://api.example.com/v1",
+        "meta": { "rateLimit": { "maxWaitMs": 0, "maxRetries": 5 } }
+      }
+    }
+  }
+}
+```
+
+It never reads or sets `Authorization`, so it composes with oauth2, static keys, or no auth. Full reference: [`packages/opencode-ratelimit/README.md`](packages/opencode-ratelimit/README.md). Mechanism, concurrency model, and the timeout caveat: [`docs/ratelimit.md`](docs/ratelimit.md).
+
+### All three together
+
+The plugins stack cleanly on one provider. List them in this order so each `config` hook sees what it needs — oauth2 stamps the bearer first, models-info enriches with it, and ratelimit wraps the fetch (its position is cosmetic since it's auth-independent):
+
+```jsonc
+{
+  "plugin": [
+    "@vymalo/opencode-oauth2",
+    "@vymalo/opencode-models-info",
+    "@vymalo/opencode-ratelimit"
+  ],
+  "provider": {
+    "my-provider": {
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "https://api.example.com/v1",
+        "oauth2": {
+          "issuer": "https://auth.example.com",
+          "clientId": "opencode-client",
+          "scopes": ["openid", "profile", "offline_access"]
+        },
+        "meta": {
+          "modelsInfoUrl": "https://api.example.com/v1/models",
+          "rateLimit": { "maxWaitMs": 0, "maxRetries": 5 }
+        }
+      }
+    }
+  }
+}
+```
+
 ## Federated identity (CI / Kubernetes)
 
 For GitHub Actions and Kubernetes workloads, use `jwt_bearer` (or `token_exchange`) with the platform's own short-lived OIDC token as the subject. The plugin re-fetches it on every access-token expiry; nothing long-lived gets cached.
@@ -167,6 +222,7 @@ This is a [pnpm](https://pnpm.io) monorepo.
 | --- | --- |
 | [`packages/opencode-oauth2`](packages/opencode-oauth2) | OAuth2/OIDC auth + model discovery — published as `@vymalo/opencode-oauth2` |
 | [`packages/opencode-models-info`](packages/opencode-models-info) | Auth-agnostic model **metadata enrichment** — published as `@vymalo/opencode-models-info` |
+| [`packages/opencode-ratelimit`](packages/opencode-ratelimit) | Auth-agnostic **rate-limit awareness** (Envoy `x-ratelimit-*` throttle + 429 backoff) — published as `@vymalo/opencode-ratelimit` |
 | [`packages/plugin-bundle`](packages/plugin-bundle) | Rolldown-based bundling for distribution |
 | [`plans/prd.md`](plans/prd.md) | Product requirements and phased roadmap |
 
