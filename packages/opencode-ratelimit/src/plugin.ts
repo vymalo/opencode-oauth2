@@ -24,6 +24,12 @@ export interface ProviderRateState {
   cooldownUntilMs: number;
   /** A single in-flight wait shared by every caller during a cooldown window. */
   cooldownPromise?: Promise<void>;
+  /**
+   * Epoch ms at which {@link cooldownPromise} is scheduled to resolve. Lets a
+   * caller that needs a shorter wait detect a too-long shared timer and fall
+   * back to its own sleep, so it never waits past its required time / `maxWaitMs`.
+   */
+  cooldownPromiseUntilMs?: number;
 }
 
 export function createProviderState(): ProviderRateState {
@@ -230,7 +236,11 @@ function clampWait(ms: number, maxWaitMs: number): number {
  *    remainder instead of returning early and hammering the gateway.
  *
  * `maxWaitMs` (when > 0) bounds the TOTAL wait of a single call: once a caller
- * has waited that long it proceeds even if the window hasn't fully elapsed.
+ * has waited that long it proceeds even if the window hasn't fully elapsed. A
+ * caller that needs LESS than the in-flight shared timer (the window shrank, or
+ * the timer was created by a caller with a later deadline) falls back to its own
+ * private sleep so it is never held past its own required time — the shared
+ * timer is reserved for the common case where everyone is waiting the same span.
  */
 async function waitGate(
   state: ProviderRateState,
@@ -249,21 +259,41 @@ async function waitGate(
     if (remainingMs <= 0) {
       return;
     }
-    if (!state.cooldownPromise) {
-      state.cooldownPromise = sleep(remainingMs).finally(() => {
-        state.cooldownPromise = undefined;
-      });
+
+    // Reuse the shared timer only if it won't make us wait longer than we need.
+    let pending = state.cooldownPromise;
+    if (
+      pending &&
+      state.cooldownPromiseUntilMs !== undefined &&
+      state.cooldownPromiseUntilMs - now() > remainingMs
+    ) {
+      pending = undefined;
     }
+    if (!pending) {
+      const created = sleep(remainingMs).finally(() => {
+        if (state.cooldownPromise === created) {
+          state.cooldownPromise = undefined;
+          state.cooldownPromiseUntilMs = undefined;
+        }
+      });
+      // Publish as the shared timer only when there isn't already a (shorter)
+      // one in flight — never clobber it with our longer/private wait.
+      if (!state.cooldownPromise) {
+        state.cooldownPromise = created;
+        state.cooldownPromiseUntilMs = now() + remainingMs;
+      }
+      pending = created;
+    }
+
     try {
-      await raceWithAbort(state.cooldownPromise, signal);
+      await raceWithAbort(pending, signal);
     } catch (error) {
       if (isAbortError(error)) {
         logger.warn("ratelimit_wait_aborted", { providerId, phase });
       }
       throw error;
     }
-    // Loop: re-check in case the window was extended or the shared timer was
-    // sized for a shorter wait than this caller needs.
+    // Loop: re-check in case the window was extended while we waited.
   }
 }
 

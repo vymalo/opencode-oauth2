@@ -255,6 +255,48 @@ describe("makeRateLimitFetch", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it("does not hold a shorter-wait caller behind a longer in-flight shared timer", async () => {
+    const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const logger = silentLogger();
+    const clock = fakeClock();
+    const sleptMs: number[] = [];
+    const resolvers: Array<() => void> = [];
+    const sleep = vi.fn((ms: number) => {
+      sleptMs.push(ms);
+      return new Promise<void>((resolve) => {
+        resolvers.push(resolve);
+      });
+    });
+    const fetchImpl = vi.fn().mockResolvedValue(res(200, { "x-ratelimit-remaining": "5" }));
+    const state = createProviderState();
+    state.cooldownUntilMs = clock.now() + 100_000; // long window
+    const fetch = makeRateLimitFetch("p", makeOpts(), state, {
+      logger,
+      now: clock.now,
+      sleep,
+      fetchImpl
+    });
+
+    const longCaller = fetch("https://api.test"); // creates the 100s shared timer
+    await flush();
+    expect(sleptMs).toEqual([100_000]);
+
+    // The window shrinks; a caller that joins now only needs 2s and must NOT be
+    // forced to await the in-flight 100s shared timer.
+    state.cooldownUntilMs = clock.now() + 2_000;
+    const shortCaller = fetch("https://api.test");
+    await flush();
+    expect(sleptMs).toEqual([100_000, 2_000]); // its own 2s sleep, not the 100s one
+
+    clock.advance(2_000);
+    resolvers[1]?.(); // resolve the short caller's private timer
+    expect((await shortCaller).status).toBe(200); // completes without waiting 100s
+
+    clock.advance(98_000);
+    resolvers[0]?.();
+    await longCaller;
+  });
+
   it("aborts a wait cleanly when the request signal is already aborted", async () => {
     const h = harness();
     h.fetchImpl.mockResolvedValueOnce(
