@@ -146,7 +146,7 @@ Full reference: [`packages/opencode-models-info/README.md`](packages/opencode-mo
 
 ## Companion plugin: rate-limit awareness
 
-This workspace also ships [`@vymalo/opencode-ratelimit`](packages/opencode-ratelimit) — a separate, **auth-agnostic** plugin that makes a provider respect the rate-limit headers your gateway already sends. It reads the IETF draft-03 triple emitted by [Envoy Gateway](https://gateway.envoyproxy.io/docs/tasks/traffic/global-rate-limit/)'s global rate limiting (`x-ratelimit-limit` / `-remaining` / `-reset`), proactively pauses new requests once the window is exhausted, and backs off + retries on HTTP `429` — so a burst of requests cooperates with the gateway instead of earning a wall of `429`s.
+This workspace also ships [`@vymalo/opencode-ratelimit`](packages/opencode-ratelimit) — a separate, **auth-agnostic** plugin that makes a provider respect the rate-limit headers your gateway already sends. It reads the IETF draft-03 triple emitted by [Envoy Gateway](https://gateway.envoyproxy.io/docs/tasks/traffic/global-rate-limit/)'s global rate limiting (`x-ratelimit-limit` / `x-ratelimit-remaining` / `x-ratelimit-reset`), proactively pauses new requests once the window is exhausted, and backs off + retries on HTTP `429` — so a burst of requests cooperates with the gateway instead of earning a wall of `429`s.
 
 OpenCode has no post-response hook, so the only way to observe response status/headers is to wrap the provider's `fetch`. The plugin does exactly that during its `config` hook, for any provider that opts in via `options.meta.rateLimit`:
 
