@@ -44,6 +44,19 @@ importers:
         specifier: ^4.1.7
         version: 4.1.7(@types/node@25.9.1)(vite@8.0.14(@types/node@25.9.1)(yaml@2.9.0))
 
+  packages/opencode-ratelimit:
+    dependencies:
+      '@opencode-ai/plugin':
+        specifier: 1.15.10
+        version: 1.15.10
+    devDependencies:
+      vite:
+        specifier: ^8.0.14
+        version: 8.0.14(@types/node@25.9.1)(yaml@2.9.0)
+      vitest:
+        specifier: ^4.1.7
+        version: 4.1.7(@types/node@25.9.1)(vite@8.0.14(@types/node@25.9.1)(yaml@2.9.0))
+
   packages/plugin-bundle:
     devDependencies:
       '@vymalo/opencode-oauth2':
