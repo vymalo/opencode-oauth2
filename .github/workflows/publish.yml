@@ -87,6 +87,9 @@ jobs:
       - name: Build models-info plugin (tsc → packages/opencode-models-info/dist)
         run: pnpm --filter @vymalo/opencode-models-info build
 
+      - name: Build ratelimit plugin (tsc → packages/opencode-ratelimit/dist)
+        run: pnpm --filter @vymalo/opencode-ratelimit build
+
       - name: Pack oauth2 tarball (for inspection and as a release asset)
         run: |
           mkdir -p dist-tarball/oauth2
@@ -100,6 +103,13 @@ jobs:
           pnpm --filter @vymalo/opencode-models-info pack \
             --pack-destination "$PWD/dist-tarball/models-info"
           ls -la dist-tarball/models-info/
+
+      - name: Pack ratelimit tarball
+        run: |
+          mkdir -p dist-tarball/ratelimit
+          pnpm --filter @vymalo/opencode-ratelimit pack \
+            --pack-destination "$PWD/dist-tarball/ratelimit"
+          ls -la dist-tarball/ratelimit/
 
       - name: Verify tarball contents
         # Defense-in-depth: confirms each package is shipping its dist/, NOT
@@ -138,7 +148,7 @@ jobs:
             echo "OK: $tarball"
           }
 
-          for tarball in dist-tarball/oauth2/*.tgz dist-tarball/models-info/*.tgz; do
+          for tarball in dist-tarball/oauth2/*.tgz dist-tarball/models-info/*.tgz dist-tarball/ratelimit/*.tgz; do
             verify_tarball "$tarball"
           done
 
@@ -182,6 +192,23 @@ jobs:
             exit 0
           fi
           pnpm --filter @vymalo/opencode-models-info publish \
+            --access public \
+            --no-git-checks \
+            --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.MCP_NPM_AUTH_TOKEN }}
+          NPM_CONFIG_PROVENANCE: "true"
+
+      - name: Publish ratelimit to npm (with provenance)
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          set -e
+          version=$(node -p "require('./packages/opencode-ratelimit/package.json').version")
+          if npm view "@vymalo/opencode-ratelimit@${version}" version >/dev/null 2>&1; then
+            echo "::notice::@vymalo/opencode-ratelimit@${version} already on npm — skipping."
+            exit 0
+          fi
+          pnpm --filter @vymalo/opencode-ratelimit publish \
             --access public \
             --no-git-checks \
             --provenance
