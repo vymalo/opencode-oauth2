@@ -18,6 +18,11 @@ x-ratelimit-reset:     48
 
 `x-ratelimit-reset` is **seconds until the bucket resets** and is the primary backoff signal. Envoy Gateway does **not** currently emit `Retry-After` ([envoyproxy/gateway#9078](https://github.com/envoyproxy/gateway/issues/9078)), so `Retry-After` is only consulted as a fallback when some other gateway provides it.
 
+Two things observed against a real deployment, worth knowing when you debug:
+
+- **The headers ride the throttled route, usually `/v1/chat/completions` — not `/v1/models`.** Envoy attaches the `BackendTrafficPolicy` per route, so a `curl` of `/v1/models` can come back with no `x-ratelimit-*` even though the chat endpoint is fully instrumented. Probe the chat endpoint (with a valid bearer) when verifying the gateway side.
+- **`x-ratelimit-limit` is often multi-policy**, e.g. `200, 200;w=60, 200000;w=60, 50000000;w=2592000` (a per-window request cap, a token cap, a monthly cap…). The parser takes the first token as the displayed `limit`; `remaining` and `reset` are single values Envoy sets for whichever bucket is closest to its cap — which is exactly what the throttle decision keys on, so the multiple policies need no special handling.
+
 ## The one interception point
 
 OpenCode's plugin `Hooks` API has **no post-response hook** — nothing fires after an HTTP response, and nothing exposes response headers. The only place a plugin can observe a response's status and headers is a **custom `fetch`** on the provider.

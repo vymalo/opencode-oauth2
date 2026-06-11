@@ -30,6 +30,23 @@ describe("parseRateLimit", () => {
     expect(snap.limit).toBe(5);
   });
 
+  it("parses a multi-policy limit header (real Envoy Gateway output)", () => {
+    // Observed live: four stacked quota policies. We surface the first token as
+    // the limit; remaining/reset already track the closest bucket.
+    const snap = parseRateLimit(
+      headers({
+        "x-ratelimit-limit": "200, 200;w=60, 200000;w=60, 50000000;w=2592000",
+        "x-ratelimit-remaining": "199",
+        "x-ratelimit-reset": "3"
+      }),
+      "x-ratelimit",
+      NOW
+    );
+    expect(snap.limit).toBe(200);
+    expect(snap.remaining).toBe(199);
+    expect(snap.resetSeconds).toBe(3);
+  });
+
   it("treats remaining `0` as a real value, not missing", () => {
     const snap = parseRateLimit(headers({ "x-ratelimit-remaining": "0" }), "x-ratelimit", NOW);
     expect(snap.remaining).toBe(0);

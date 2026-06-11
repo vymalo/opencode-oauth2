@@ -19,6 +19,8 @@ OpenCode's plugin API has **no post-response hook**, so the only way to observe 
 
 The `Response` is returned untouched (no `.clone()`), so the streaming body reaches OpenCode intact.
 
+> **Where the headers live.** Envoy attaches its rate-limit `BackendTrafficPolicy` to a specific route — in practice `/v1/chat/completions`, **not** `/v1/models`. So the plugin sees the quota on the inference calls that matter, and a `curl` of `/v1/models` may show no `x-ratelimit-*` at all. The `limit` header is also commonly *multi-policy*, e.g. `x-ratelimit-limit: 200, 200;w=60, 200000;w=60, 50000000;w=2592000` — the parser takes the first token as `limit`, while `remaining`/`reset` already track whichever bucket is closest to its cap (which is all the throttle logic needs).
+
 ## Installation
 
 ```sh
