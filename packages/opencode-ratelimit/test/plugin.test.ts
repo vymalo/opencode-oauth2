@@ -68,7 +68,7 @@ function eventNames(spy: Logger[keyof Logger]): string[] {
 }
 
 describe("makeRateLimitFetch", () => {
-  it("tracks quota without waiting on a healthy response", async () => {
+  it("logs the parsed quota without waiting on a healthy response", async () => {
     const h = harness();
     h.fetchImpl.mockResolvedValueOnce(
       res(200, {
@@ -82,8 +82,11 @@ describe("makeRateLimitFetch", () => {
 
     expect(response.status).toBe(200);
     expect(h.clock.sleep).not.toHaveBeenCalled();
-    expect(h.state.remaining).toBe(2);
-    expect(h.state.limit).toBe(10);
+    expect(h.state.cooldownUntilMs).toBe(0); // healthy → gate not armed
+    expect(h.logger.debug).toHaveBeenCalledWith(
+      "ratelimit_quota",
+      expect.objectContaining({ remaining: 2, limit: 10, resetSeconds: 30 })
+    );
   });
 
   it("proactively throttles the next request after remaining hits 0", async () => {
@@ -199,13 +202,57 @@ describe("makeRateLimitFetch", () => {
     ]);
 
     expect(sleep).toHaveBeenCalledTimes(1); // ONE shared timer for all 5
+
+    clock.advance(48_000); // window elapses, so the re-check loop exits on resume
     release?.();
     const responses = await burst;
 
+    expect(sleep).toHaveBeenCalledTimes(1); // still one — no extra timer on re-check
     expect(responses).toHaveLength(5);
     for (const r of responses) {
       expect(r.status).toBe(200);
     }
+  });
+
+  it("re-waits when the cooldown window is extended mid-wait (longest wins)", async () => {
+    const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const logger = silentLogger();
+    const clock = fakeClock();
+    const sleptMs: number[] = [];
+    const resolvers: Array<() => void> = [];
+    const sleep = vi.fn((ms: number) => {
+      sleptMs.push(ms);
+      return new Promise<void>((resolve) => {
+        resolvers.push(resolve);
+      });
+    });
+    const fetchImpl = vi.fn().mockResolvedValue(res(200, { "x-ratelimit-remaining": "5" }));
+    const state = createProviderState();
+    state.cooldownUntilMs = clock.now() + 3_000; // armed for a short window
+    const fetch = makeRateLimitFetch("p", makeOpts(), state, {
+      logger,
+      now: clock.now,
+      sleep,
+      fetchImpl
+    });
+
+    const pending = fetch("https://api.test");
+    await flush();
+    expect(sleptMs).toEqual([3_000]); // first wait sized to the initial window
+
+    // While the caller is parked on the first timer, another response extends
+    // the window. The loop must re-check and wait the remainder, not return early.
+    state.cooldownUntilMs = clock.now() + 8_000;
+    clock.advance(3_000);
+    resolvers[0]?.();
+    await flush();
+    expect(sleptMs).toEqual([3_000, 5_000]); // re-checked → waited the extra 5s
+
+    clock.advance(5_000);
+    resolvers[1]?.();
+    const response = await pending;
+    expect(response.status).toBe(200);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("aborts a wait cleanly when the request signal is already aborted", async () => {
