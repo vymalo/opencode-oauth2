@@ -13,13 +13,23 @@ export const DEFAULT_BACKOFF_MS = 1000;
  * window is measured in seconds, so survival across process boots is pointless.
  */
 export interface ProviderRateState {
-  remaining?: number;
-  limit?: number;
-  resetAtMs?: number;
-  /** Epoch ms until which new requests should be held back. 0 = no cooldown. */
+  /**
+   * Epoch ms until which new requests should be held back. 0 = no cooldown.
+   * This is the ONLY field that drives the gate — it is set from a response's
+   * `x-ratelimit-reset` (when `remaining` hits 0) or from a 429 backoff. We
+   * deliberately do not retain the raw `remaining`/`limit`: out-of-order
+   * responses would race on it and nothing reads it (the `ratelimit_quota` log
+   * uses the per-response snapshot directly).
+   */
   cooldownUntilMs: number;
   /** A single in-flight wait shared by every caller during a cooldown window. */
   cooldownPromise?: Promise<void>;
+  /**
+   * Epoch ms at which {@link cooldownPromise} is scheduled to resolve. Lets a
+   * caller that needs a shorter wait detect a too-long shared timer and fall
+   * back to its own sleep, so it never waits past its required time / `maxWaitMs`.
+   */
+  cooldownPromiseUntilMs?: number;
 }
 
 export function createProviderState(): ProviderRateState {
@@ -91,7 +101,8 @@ export function installRateLimiter(input: InstallConfigInput, deps: RateLimitDep
  * Build the fetch wrapper for one provider. The wrapper:
  *  1. Pre-request gate: if a cooldown window is armed, waits until it clears.
  *  2. Sends the request via the underlying fetch.
- *  3. Reads the rate-limit headers from the response and updates state.
+ *  3. Reads the rate-limit headers; if the window is exhausted, arms the gate
+ *     (`cooldownUntilMs`) for the next callers.
  *  4. On a 429, waits the reset window and retries (up to `maxRetries`).
  *
  * The Response is returned untouched (no `.clone()`) — we only read `status`
@@ -117,7 +128,16 @@ export function makeRateLimitFetch(
       const waitMs = clampWait(state.cooldownUntilMs - now(), opts.maxWaitMs);
       if (waitMs > 0) {
         logger.info("ratelimit_throttle_wait", { providerId, waitMs, reason: "remaining_zero" });
-        await waitGate(state, sleep, waitMs, signal, logger, providerId, "pre_request");
+        await waitGate(
+          state,
+          sleep,
+          now,
+          opts.maxWaitMs,
+          signal,
+          logger,
+          providerId,
+          "pre_request"
+        );
       }
     }
 
@@ -126,7 +146,6 @@ export function makeRateLimitFetch(
     for (;;) {
       const response = await underlying(input, init);
       const snapshot = readSnapshot(response, opts, now(), logger, providerId);
-      updateState(state, snapshot);
       logger.debug("ratelimit_quota", {
         providerId,
         remaining: snapshot.remaining,
@@ -159,7 +178,7 @@ export function makeRateLimitFetch(
         waitMs,
         resetSeconds: snapshot.resetSeconds
       });
-      await waitGate(state, sleep, waitMs, signal, logger, providerId, "backoff");
+      await waitGate(state, sleep, now, opts.maxWaitMs, signal, logger, providerId, "backoff");
       attempt += 1;
     }
   };
@@ -185,18 +204,6 @@ function readSnapshot(
   }
 }
 
-function updateState(state: ProviderRateState, snapshot: RateLimitSnapshot): void {
-  if (snapshot.remaining !== undefined) {
-    state.remaining = snapshot.remaining;
-  }
-  if (snapshot.limit !== undefined) {
-    state.limit = snapshot.limit;
-  }
-  if (snapshot.resetAtMs !== undefined) {
-    state.resetAtMs = snapshot.resetAtMs;
-  }
-}
-
 function computeBackoff(snapshot: RateLimitSnapshot, nowMs: number): number {
   if (snapshot.resetAtMs !== undefined) {
     return Math.max(0, snapshot.resetAtMs - nowMs);
@@ -214,34 +221,79 @@ function clampWait(ms: number, maxWaitMs: number): number {
 }
 
 /**
- * Wait out a cooldown window. The first caller creates a single shared timer on
- * `state.cooldownPromise`; concurrent callers await that same timer rather than
- * each starting their own, so a burst during cooldown produces ONE wait, not N.
- * Each caller still races the shared timer against its own `signal`, so one
- * request's cancellation never aborts the others.
+ * Wait until `state.cooldownUntilMs` has elapsed. Two concurrency properties:
+ *
+ *  - **One shared timer.** The first caller to hit the gate creates the timer on
+ *    `state.cooldownPromise`; concurrent callers await that same timer rather
+ *    than each starting their own, so a burst during cooldown produces ONE wait,
+ *    not N. The shared timer is not tied to any single caller's `signal` — each
+ *    caller races it against its own signal (see `raceWithAbort`), so one
+ *    request's cancellation never aborts the others.
+ *  - **Honors the longest window.** After the shared timer resolves we re-check
+ *    `cooldownUntilMs`. If another caller extended the window (e.g. a 429 landed
+ *    with a further-out reset) while we were waiting — or the shared timer was
+ *    created for a shorter wait than we now require — we wait again for the
+ *    remainder instead of returning early and hammering the gateway.
+ *
+ * `maxWaitMs` (when > 0) bounds the TOTAL wait of a single call: once a caller
+ * has waited that long it proceeds even if the window hasn't fully elapsed. A
+ * caller that needs LESS than the in-flight shared timer (the window shrank, or
+ * the timer was created by a caller with a later deadline) falls back to its own
+ * private sleep so it is never held past its own required time — the shared
+ * timer is reserved for the common case where everyone is waiting the same span.
  */
 async function waitGate(
   state: ProviderRateState,
   sleep: (ms: number, signal?: AbortSignal) => Promise<void>,
-  waitMs: number,
+  now: () => number,
+  maxWaitMs: number,
   signal: AbortSignal | undefined,
   logger: Logger,
   providerId: string,
   phase: "pre_request" | "backoff"
 ): Promise<void> {
-  if (!state.cooldownPromise) {
-    // Shared timer is NOT tied to any single caller's signal — see raceWithAbort.
-    state.cooldownPromise = sleep(waitMs).finally(() => {
-      state.cooldownPromise = undefined;
-    });
-  }
-  try {
-    await raceWithAbort(state.cooldownPromise, signal);
-  } catch (error) {
-    if (isAbortError(error)) {
-      logger.warn("ratelimit_wait_aborted", { providerId, plannedMs: waitMs, phase });
+  const deadlineMs = maxWaitMs > 0 ? now() + maxWaitMs : Number.POSITIVE_INFINITY;
+  for (;;) {
+    const target = Math.min(state.cooldownUntilMs, deadlineMs);
+    const remainingMs = target - now();
+    if (remainingMs <= 0) {
+      return;
     }
-    throw error;
+
+    // Reuse the shared timer only if it won't make us wait longer than we need.
+    let pending = state.cooldownPromise;
+    if (
+      pending &&
+      state.cooldownPromiseUntilMs !== undefined &&
+      state.cooldownPromiseUntilMs - now() > remainingMs
+    ) {
+      pending = undefined;
+    }
+    if (!pending) {
+      const created = sleep(remainingMs).finally(() => {
+        if (state.cooldownPromise === created) {
+          state.cooldownPromise = undefined;
+          state.cooldownPromiseUntilMs = undefined;
+        }
+      });
+      // Publish as the shared timer only when there isn't already a (shorter)
+      // one in flight — never clobber it with our longer/private wait.
+      if (!state.cooldownPromise) {
+        state.cooldownPromise = created;
+        state.cooldownPromiseUntilMs = now() + remainingMs;
+      }
+      pending = created;
+    }
+
+    try {
+      await raceWithAbort(pending, signal);
+    } catch (error) {
+      if (isAbortError(error)) {
+        logger.warn("ratelimit_wait_aborted", { providerId, phase });
+      }
+      throw error;
+    }
+    // Loop: re-check in case the window was extended while we waited.
   }
 }
 
