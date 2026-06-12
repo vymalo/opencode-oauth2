@@ -4,7 +4,7 @@ This guide shows how to run the plugin locally with OpenCode.
 
 ## Prerequisites
 
-- Node.js `20+`
+- Node.js `22+`
 - `pnpm`
 - OpenCode CLI installed
 - An OAuth2/OIDC provider that:
@@ -104,4 +104,13 @@ pnpm --filter @vymalo/opencode-oauth2 typecheck
 pnpm --filter @vymalo/opencode-oauth2 test
 pnpm --filter @vymalo/opencode-oauth2 build
 ```
+
+## Companion plugins
+
+This workspace ships two more **auth-agnostic** plugins you can stack on the same provider (they compose with oauth2, static API keys, or no auth):
+
+- [`@vymalo/opencode-models-info`](packages/opencode-models-info/README.md) — enrich models with context length, pricing, modalities, and capability flags from a metadata endpoint.
+- [`@vymalo/opencode-ratelimit`](packages/opencode-ratelimit/README.md) — read the gateway's `x-ratelimit-*` headers and proactively throttle / back off on 429 (with reset-magnitude `tiers` and per-model `scope`).
+
+Recommended `plugin` order: `@vymalo/opencode-oauth2` → `@vymalo/opencode-models-info` → `@vymalo/opencode-ratelimit`. See the [root README](README.md#all-three-together) for a combined config example.
 

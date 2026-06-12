@@ -4,6 +4,8 @@ Symptom-keyed. Each entry covers what's happening internally, where to look in l
 
 The plugin emits structured JSON logs to stderr (and through `client.app.log()` when running under OpenCode). Anywhere this guide says "look for `<event>` in the logs", that's an event name in the `event` field of those entries — see [architecture.md → Logging](./architecture.md#logging) for the full table.
 
+> This page covers `@vymalo/opencode-oauth2`. For the companion plugins, see the failure-mode tables in [models-info.md](./models-info.md) (metadata enrichment) and [ratelimit.md](./ratelimit.md#failure-modes) (rate-limit throttling).
+
 ## `/models` doesn't list my provider after install
 
 **What's happening.** The plugin loaded fine, but warmup at config-hook time ran non-interactively (CI, no TTY, or `interactive: false`) and the cache was empty. `ensureToken` threw `interactive authentication required`; `syncServer` caught it, logged `sync_startup_failed`, and preserved the empty cache. The provider stays registered in OpenCode's config but with no models attached, so the model list is empty.

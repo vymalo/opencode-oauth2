@@ -5,7 +5,7 @@
 An [OpenCode](https://opencode.ai) plugin that lets you wire up **OpenAI-compatible model providers sitting behind OAuth2 / OIDC** — without baking long-lived API keys into your config. Discover models dynamically, refresh tokens automatically, and let OpenCode talk to your gateway as if it were any other provider.
 
 ![status: early](https://img.shields.io/badge/status-early-orange)
-![node: >=20](https://img.shields.io/badge/node-%3E%3D20-339933)
+![node: >=22](https://img.shields.io/badge/node-%3E%3D22-339933)
 ![license: MIT](https://img.shields.io/badge/license-MIT-blue)
 ![pnpm workspace](https://img.shields.io/badge/pnpm-workspace-F69220)
 
