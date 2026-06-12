@@ -56,11 +56,43 @@ A provider opts in via `options.meta.rateLimit`. All fields are optional:
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `enabled` | `true` | Set `false` to opt a provider out while keeping the block. Omitting the whole `rateLimit` block also opts out. |
+| `scope` | `model` | `model` keys cooldown state per `(provider, model)`; `provider` shares one cooldown across the whole provider. See [Per-model scope](#per-model-scope). |
 | `maxWaitMs` | `0` | Upper bound on any single wait, in ms. **`0` = unlimited** (wait the full reset window). |
 | `maxRetries` | `5` | How many times a `429` is retried before the response is handed back as-is. |
 | `headerPrefix` | `x-ratelimit` | Lowercased prefix of the draft-03 triple. Remap for gateways that use e.g. `ratelimit-*`. |
+| `tiers` | — | Optional array of policy bands keyed by reset magnitude. Replaces flat `maxWaitMs`/`maxRetries` with per-window behavior. See [Tiered policies](#tiered-policies). |
 
 If you also use `@vymalo/opencode-oauth2`, list it **before** this plugin in `plugin` (config hooks run in registration order). It is only a soft recommendation — this plugin's fetch wrapping is auth-independent.
+
+### Tiered policies
+
+A single `maxWaitMs` can't tell a **per-minute burst reset** (≤60s — worth waiting through) from a **monthly-budget reset** (days away — should error fast): both arrive as the same `x-ratelimit-reset`. The discriminator is the reset's *magnitude*, and `tiers` lets you act on it. Each tier matches resets up to `maxResetSeconds` (first match wins; ascending, catch-all last):
+
+```jsonc
+"meta": { "rateLimit": {
+  "scope": "model",
+  "tiers": [
+    { "maxResetSeconds": 120, "action": "wait", "maxWaitMs": 0, "maxRetries": 3 }, // ≤2min: wait it out
+    { "action": "error" }                                                          // longer: surface the 429 now
+  ]
+} }
+```
+
+| Tier field | Default | Meaning |
+| --- | --- | --- |
+| `maxResetSeconds` | `null` (catch-all) | Inclusive upper bound, in seconds, of the resets this tier matches. |
+| `action` | `wait` | `wait` throttles + backs off; `error` surfaces the `429` **immediately** (no wait, no retry). |
+| `maxWaitMs` | `0` | (`wait` only) cap on a single wait; `0` = unlimited. |
+| `maxRetries` | `5` | (`wait` only) `429` retries before surfacing. |
+
+Notes:
+- A catch-all tier (no `maxResetSeconds`) is auto-appended if you don't supply one; the implicit fallback is `wait` (the safe direction — never hammer the gateway). For "error on anything unexpectedly long," add an explicit `{ "action": "error" }` last.
+- The flat `maxWaitMs`/`maxRetries` form still works — it's normalized into a single catch-all `wait` tier.
+- An `error`-tier `remaining: 0` does **not** pre-arm the gate; the next request hits a real `429` and is surfaced immediately.
+
+### Per-model scope
+
+If your gateway buckets per model (e.g. Envoy `BackendTrafficPolicy` selectors that include the model), `scope: "model"` (the default) keys cooldown state per `(provider, model)` — so exhausting one model's bucket never blocks requests to a sibling model that still has quota. The model is read from the request body (`@ai-sdk/openai-compatible` sends a JSON body with `model`); when it can't be parsed the bucket falls back to provider-wide. Use `scope: "provider"` if your gateway buckets per provider/account.
 
 ## Caveats
 
@@ -93,7 +125,8 @@ Structured events flow through OpenCode's log stream (service `opencode-ratelimi
 | `ratelimit_provider_skipped` | debug | a provider did not opt in |
 | `ratelimit_quota` | debug | every response (`remaining`, `limit`, `resetSeconds`) |
 | `ratelimit_throttle_wait` | info | pre-request gate engaged |
-| `ratelimit_429_backoff` | warn | a `429` was retried |
+| `ratelimit_429_backoff` | warn | a `429` was retried (`wait` tier) |
+| `ratelimit_failfast` | warn | a `429` was surfaced immediately (`error` tier — reset too far out to wait) |
 | `ratelimit_wait_aborted` | warn | a wait was cancelled by the request signal |
 | `ratelimit_giveup` | error | `maxRetries` exhausted, `429` returned as-is |
 | `ratelimit_header_parse_failed` | debug | a response's headers could not be parsed |

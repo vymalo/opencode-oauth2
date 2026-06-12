@@ -165,7 +165,7 @@ OpenCode has no post-response hook, so the only way to observe response status/h
 }
 ```
 
-It never reads or sets `Authorization`, so it composes with oauth2, static keys, or no auth. Full reference: [`packages/opencode-ratelimit/README.md`](packages/opencode-ratelimit/README.md). Mechanism, concurrency model, and the timeout caveat: [`docs/ratelimit.md`](docs/ratelimit.md).
+It never reads or sets `Authorization`, so it composes with oauth2, static keys, or no auth. For gateways with multiple windows it supports `tiers` (wait through short burst resets, error fast on multi-day budget resets) and `scope: "model"` (per-model cooldown buckets). Full reference: [`packages/opencode-ratelimit/README.md`](packages/opencode-ratelimit/README.md). Mechanism, concurrency model, and the timeout caveat: [`docs/ratelimit.md`](docs/ratelimit.md).
 
 ### All three together
 

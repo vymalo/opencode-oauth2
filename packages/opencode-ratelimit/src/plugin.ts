@@ -1,4 +1,4 @@
-import { parseRateLimitOptions } from "./config.js";
+import { parseRateLimitOptions, selectTier } from "./config.js";
 import { parseRateLimit } from "./headers.js";
 import type { Logger } from "./logging.js";
 import type { RateLimitOptions, RateLimitSnapshot } from "./types.js";
@@ -7,21 +7,20 @@ import type { RateLimitOptions, RateLimitSnapshot } from "./types.js";
 export const DEFAULT_BACKOFF_MS = 1000;
 
 /**
- * Mutable, in-memory rate-limit state for a single provider. Created fresh per
- * {@link installRateLimiter} call and captured by the provider's fetch wrapper
- * closure, so it lives for the process lifetime. Never persisted — a reset
- * window is measured in seconds, so survival across process boots is pointless.
+ * Mutable, in-memory rate-limit state for a single bucket (a provider, or a
+ * `(provider, model)` pair when `scope: "model"`). Lives for the process
+ * lifetime in the provider's state store. Never persisted — a reset window is
+ * measured in seconds, so survival across process boots is pointless.
  */
 export interface ProviderRateState {
   /**
    * Epoch ms until which new requests should be held back. 0 = no cooldown.
-   * This is the ONLY field that drives the gate — it is set from a response's
-   * `x-ratelimit-reset` (when `remaining` hits 0) or from a 429 backoff. We
-   * deliberately do not retain the raw `remaining`/`limit`: out-of-order
-   * responses would race on it and nothing reads it (the `ratelimit_quota` log
-   * uses the per-response snapshot directly).
+   * The sole gate driver — set from a response's `x-ratelimit-reset` (when
+   * `remaining` hits 0, and the matched tier is `"wait"`) or from a 429 backoff.
    */
   cooldownUntilMs: number;
+  /** The `maxWaitMs` of the tier that armed the current cooldown (0 = unlimited). */
+  cooldownMaxWaitMs: number;
   /** A single in-flight wait shared by every caller during a cooldown window. */
   cooldownPromise?: Promise<void>;
   /**
@@ -33,7 +32,7 @@ export interface ProviderRateState {
 }
 
 export function createProviderState(): ProviderRateState {
-  return { cooldownUntilMs: 0 };
+  return { cooldownUntilMs: 0, cooldownMaxWaitMs: 0 };
 }
 
 export interface RateLimitDeps {
@@ -53,6 +52,9 @@ export interface ProviderConfigLike {
 export interface InstallConfigInput {
   provider?: Record<string, ProviderConfigLike | undefined>;
 }
+
+/** A per-bucket state store (key = provider id, or `${providerId}\0${model}`). */
+export type RateStateStore = Map<string, ProviderRateState>;
 
 /**
  * Walk every provider in the assembled OpenCode config; for each one that has
@@ -83,13 +85,13 @@ export function installRateLimiter(input: InstallConfigInput, deps: RateLimitDep
     // not at call time, so we delegate to the original — not to ourselves).
     const delegate =
       typeof options.fetch === "function" ? (options.fetch as typeof fetch) : undefined;
-    const state = createProviderState();
-    options.fetch = makeRateLimitFetch(providerId, opts, state, deps, delegate);
+    const store: RateStateStore = new Map();
+    options.fetch = makeRateLimitFetch(providerId, opts, store, deps, delegate);
     enabledCount += 1;
     deps.logger.info("ratelimit_provider_enabled", {
       providerId,
-      maxWaitMs: opts.maxWaitMs,
-      maxRetries: opts.maxRetries,
+      scope: opts.scope,
+      tiers: opts.tiers.length,
       headerPrefix: opts.headerPrefix
     });
   }
@@ -99,11 +101,14 @@ export function installRateLimiter(input: InstallConfigInput, deps: RateLimitDep
 
 /**
  * Build the fetch wrapper for one provider. The wrapper:
- *  1. Pre-request gate: if a cooldown window is armed, waits until it clears.
- *  2. Sends the request via the underlying fetch.
- *  3. Reads the rate-limit headers; if the window is exhausted, arms the gate
- *     (`cooldownUntilMs`) for the next callers.
- *  4. On a 429, waits the reset window and retries (up to `maxRetries`).
+ *  1. Resolves the bucket (provider, or `(provider, model)` under `scope: "model"`).
+ *  2. Pre-request gate: if that bucket's cooldown is armed, waits until it clears.
+ *  3. Sends the request via the underlying fetch.
+ *  4. Reads the rate-limit headers; selects the policy tier by reset magnitude.
+ *     On `remaining: 0` it arms the gate for the next callers (only when the
+ *     matched tier is `"wait"`).
+ *  5. On a 429: a `"wait"` tier waits the reset window and retries (up to the
+ *     tier's `maxRetries`); an `"error"` tier surfaces the 429 immediately.
  *
  * The Response is returned untouched (no `.clone()`) — we only read `status`
  * and `headers`, so the body stream is delivered to OpenCode intact.
@@ -111,7 +116,7 @@ export function installRateLimiter(input: InstallConfigInput, deps: RateLimitDep
 export function makeRateLimitFetch(
   providerId: string,
   opts: RateLimitOptions,
-  state: ProviderRateState,
+  store: RateStateStore,
   deps: RateLimitDeps,
   delegate?: typeof fetch
 ): typeof fetch {
@@ -120,70 +125,178 @@ export function makeRateLimitFetch(
   const underlying = delegate ?? deps.fetchImpl ?? globalThis.fetch;
   const { logger } = deps;
 
-  const wrapped: typeof fetch = async (input, init) => {
-    const signal = init?.signal ?? undefined;
+  const isRequest = (value: RequestInfo | URL): value is Request =>
+    typeof Request !== "undefined" && value instanceof Request;
 
-    // 1. Pre-request gate.
+  const wrapped: typeof fetch = async (input, init) => {
+    // Honor an abort signal whether it rides on `init` or on a `Request` input.
+    const signal = init?.signal ?? (isRequest(input) ? input.signal : undefined) ?? undefined;
+    const model = opts.scope === "model" ? await modelFromRequest(input, init) : undefined;
+    const key = model ? `${providerId}\u0000${model}` : providerId;
+    let state = store.get(key);
+    if (!state) {
+      state = createProviderState();
+      store.set(key, state);
+    }
+
+    // 2. Pre-request gate — wait out a cooldown a previous "wait" tier armed.
     if (state.cooldownUntilMs > now()) {
-      const waitMs = clampWait(state.cooldownUntilMs - now(), opts.maxWaitMs);
+      const waitMs = clampWait(state.cooldownUntilMs - now(), state.cooldownMaxWaitMs);
       if (waitMs > 0) {
-        logger.info("ratelimit_throttle_wait", { providerId, waitMs, reason: "remaining_zero" });
+        logger.info("ratelimit_throttle_wait", { providerId, model, waitMs });
         await waitGate(
           state,
           sleep,
           now,
-          opts.maxWaitMs,
+          state.cooldownMaxWaitMs,
           signal,
           logger,
           providerId,
+          model,
           "pre_request"
         );
       }
     }
 
-    // 2-4. Attempt loop.
+    // 3-5. Attempt loop.
     let attempt = 0;
     for (;;) {
-      const response = await underlying(input, init);
+      // A Request body is single-use; send a fresh clone each attempt so a
+      // wait-tier retry doesn't fail with "body already used". (The original is
+      // never sent directly, so each clone has an unconsumed body.)
+      const attemptInput = isRequest(input) ? input.clone() : input;
+      const response = await underlying(attemptInput, init);
       const snapshot = readSnapshot(response, opts, now(), logger, providerId);
       logger.debug("ratelimit_quota", {
         providerId,
+        model,
         remaining: snapshot.remaining,
         limit: snapshot.limit,
         resetSeconds: snapshot.resetSeconds
       });
 
       if (response.status !== 429) {
-        // Arm the gate for the NEXT callers when the window is exhausted.
+        // Arm the gate for the NEXT callers when the window is exhausted — but
+        // only under a "wait" tier. An "error" tier wants the next request to
+        // hit a real 429 and be surfaced, so we leave the gate unarmed.
         if (
           snapshot.remaining !== undefined &&
           snapshot.remaining <= 0 &&
           snapshot.resetAtMs !== undefined
         ) {
-          state.cooldownUntilMs = snapshot.resetAtMs;
+          const tier = selectTier(opts.tiers, effectiveResetSeconds(snapshot));
+          if (tier.action === "wait") {
+            state.cooldownUntilMs = snapshot.resetAtMs;
+            state.cooldownMaxWaitMs = tier.maxWaitMs;
+          } else {
+            // Error tier → don't arm, and drop any stale cooldown a prior
+            // "wait" window left so the next request hits a real 429 at once.
+            state.cooldownUntilMs = 0;
+            state.cooldownMaxWaitMs = 0;
+          }
         }
         return response;
       }
 
-      if (attempt >= opts.maxRetries) {
-        logger.error("ratelimit_giveup", { providerId, attempts: attempt });
+      const tier = selectTier(opts.tiers, effectiveResetSeconds(snapshot));
+      if (tier.action === "error") {
+        // Drop any cooldown a prior "wait" tier armed, so the fail-fast is
+        // actually fast — later requests must not sleep a stale window first.
+        state.cooldownUntilMs = 0;
+        state.cooldownMaxWaitMs = 0;
+        logger.warn("ratelimit_failfast", {
+          providerId,
+          model,
+          resetSeconds: snapshot.resetSeconds
+        });
         return response;
       }
 
-      const waitMs = clampWait(computeBackoff(snapshot, now()), opts.maxWaitMs);
+      if (attempt >= tier.maxRetries) {
+        logger.error("ratelimit_giveup", { providerId, model, attempts: attempt });
+        return response;
+      }
+
+      const waitMs = clampWait(computeBackoff(snapshot, now()), tier.maxWaitMs);
       state.cooldownUntilMs = now() + waitMs;
+      state.cooldownMaxWaitMs = tier.maxWaitMs;
       logger.warn("ratelimit_429_backoff", {
         providerId,
+        model,
         attempt: attempt + 1,
         waitMs,
         resetSeconds: snapshot.resetSeconds
       });
-      await waitGate(state, sleep, now, opts.maxWaitMs, signal, logger, providerId, "backoff");
+      await waitGate(
+        state,
+        sleep,
+        now,
+        tier.maxWaitMs,
+        signal,
+        logger,
+        providerId,
+        model,
+        "backoff"
+      );
       attempt += 1;
     }
   };
 
   return wrapped;
+}
+
+/**
+ * Best-effort extraction of the `model` from an OpenAI-compatible request.
+ * The AI SDK calls `fetch(url, { body: "<json>" })`, so the common path reads a
+ * JSON string body synchronously (non-destructive). It also supports the
+ * `fetch(new Request(...))` shape by reading a clone of the Request body, so a
+ * Request-style caller doesn't silently collapse to the provider-wide bucket.
+ * Anything unparseable → `undefined` → caller falls back to the provider bucket.
+ */
+async function modelFromRequest(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined
+): Promise<string | undefined> {
+  const fromInit = modelFromBody(init?.body);
+  if (fromInit !== undefined) {
+    return fromInit;
+  }
+  if (typeof Request !== "undefined" && input instanceof Request) {
+    try {
+      return modelFromBody(await input.clone().text());
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+function modelFromBody(body: BodyInit | null | undefined): string | undefined {
+  if (typeof body !== "string") {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(body) as { model?: unknown };
+    return typeof parsed.model === "string" && parsed.model.length > 0 ? parsed.model : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Reset magnitude (seconds) used for tier selection: prefer `x-ratelimit-reset`,
+ * else derive from a `Retry-After` fallback — so a `Retry-After`-only 429 with a
+ * multi-day delay still lands in a long-reset (`error`) tier instead of the
+ * smallest band.
+ */
+function effectiveResetSeconds(snapshot: RateLimitSnapshot): number | undefined {
+  if (snapshot.resetSeconds !== undefined) {
+    return snapshot.resetSeconds;
+  }
+  if (snapshot.retryAfterMs !== undefined) {
+    return Math.ceil(snapshot.retryAfterMs / 1000);
+  }
+  return undefined;
 }
 
 function readSnapshot(
@@ -231,16 +344,14 @@ function clampWait(ms: number, maxWaitMs: number): number {
  *    request's cancellation never aborts the others.
  *  - **Honors the longest window.** After the shared timer resolves we re-check
  *    `cooldownUntilMs`. If another caller extended the window (e.g. a 429 landed
- *    with a further-out reset) while we were waiting — or the shared timer was
- *    created for a shorter wait than we now require — we wait again for the
+ *    with a further-out reset) while we were waiting we wait again for the
  *    remainder instead of returning early and hammering the gateway.
  *
  * `maxWaitMs` (when > 0) bounds the TOTAL wait of a single call: once a caller
  * has waited that long it proceeds even if the window hasn't fully elapsed. A
  * caller that needs LESS than the in-flight shared timer (the window shrank, or
  * the timer was created by a caller with a later deadline) falls back to its own
- * private sleep so it is never held past its own required time — the shared
- * timer is reserved for the common case where everyone is waiting the same span.
+ * private sleep so it is never held past its own required time.
  */
 async function waitGate(
   state: ProviderRateState,
@@ -250,6 +361,7 @@ async function waitGate(
   signal: AbortSignal | undefined,
   logger: Logger,
   providerId: string,
+  model: string | undefined,
   phase: "pre_request" | "backoff"
 ): Promise<void> {
   const deadlineMs = maxWaitMs > 0 ? now() + maxWaitMs : Number.POSITIVE_INFINITY;
@@ -289,7 +401,7 @@ async function waitGate(
       await raceWithAbort(pending, signal);
     } catch (error) {
       if (isAbortError(error)) {
-        logger.warn("ratelimit_wait_aborted", { providerId, phase });
+        logger.warn("ratelimit_wait_aborted", { providerId, model, phase });
       }
       throw error;
     }
