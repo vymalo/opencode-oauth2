@@ -60,27 +60,37 @@ export async function setStatus(patch: Partial<Omit<Status, "id">>): Promise<voi
   await db.status.put(next);
 }
 
-export async function recordAction(record: Omit<ActionRecord, "id">): Promise<void> {
-  await db.actions.add(record);
-  const count = await db.actions.count();
-  if (count > MAX_ACTIONS) {
-    const stale = await db.actions
+/** Drop the oldest rows so a table stays at/under `cap` after one more insert. */
+async function pruneTo<T>(table: Table<T, number>, cap: number): Promise<void> {
+  const count = await table.count();
+  if (count >= cap) {
+    const stale = await table
       .orderBy("id")
-      .limit(count - MAX_ACTIONS)
+      .limit(count - cap + 1)
       .primaryKeys();
-    await db.actions.bulkDelete(stale);
+    await table.bulkDelete(stale);
+  }
+}
+
+// Both writes are a dashboard convenience, not the source of truth (the plugin
+// writes the PNG to disk). Prune *before* inserting so a near-quota gallery
+// can't throw QuotaExceededError, and swallow errors so recording never breaks
+// the actual browser command.
+export async function recordAction(record: Omit<ActionRecord, "id">): Promise<void> {
+  try {
+    await pruneTo(db.actions, MAX_ACTIONS);
+    await db.actions.add(record);
+  } catch {
+    /* best-effort */
   }
 }
 
 export async function recordScreenshot(record: Omit<ScreenshotRecord, "id">): Promise<void> {
-  await db.screenshots.add(record);
-  const count = await db.screenshots.count();
-  if (count > MAX_SCREENSHOTS) {
-    const stale = await db.screenshots
-      .orderBy("id")
-      .limit(count - MAX_SCREENSHOTS)
-      .primaryKeys();
-    await db.screenshots.bulkDelete(stale);
+  try {
+    await pruneTo(db.screenshots, MAX_SCREENSHOTS);
+    await db.screenshots.add(record);
+  } catch {
+    /* best-effort */
   }
 }
 

@@ -16,8 +16,10 @@ import {
 export class ContentExecutor implements Executor {
   readonly kind = "content" as const;
 
-  async click(tabId: number, target: Target, _button: "left" | "middle" | "right"): Promise<void> {
-    const ok = await runInPage(tabId, pageSyntheticPointer, [{ ...target, dblclick: false }]);
+  async click(tabId: number, target: Target, button: "left" | "middle" | "right"): Promise<void> {
+    const ok = await runInPage(tabId, pageSyntheticPointer, [
+      { ...target, button, dblclick: false }
+    ]);
     if (!ok) {
       throw new Error("could not locate the target element");
     }
@@ -43,7 +45,7 @@ export class ContentExecutor implements Executor {
     await runInPage(tabId, pageSyntheticKey, [{ key }]);
   }
 
-  async screenshot(tabId: number, _fullPage: boolean): Promise<ScreenshotData> {
+  async screenshot(tabId: number, fullPage: boolean): Promise<ScreenshotData> {
     const tab = await chrome.tabs.get(tabId);
     if (tab.windowId === undefined) {
       throw new Error("tab has no window");
@@ -61,7 +63,9 @@ export class ContentExecutor implements Executor {
       () => ({ w: window.innerWidth, h: window.innerHeight }),
       []
     );
-    return { base64, width: size?.w ?? 0, height: size?.h ?? 0 };
+    // captureVisibleTab can only grab the viewport — flag when a full-page
+    // capture was requested so the tool can tell the model it's partial.
+    return { base64, width: size?.w ?? 0, height: size?.h ?? 0, partial: fullPage };
   }
 
   async release(_tabId: number): Promise<void> {

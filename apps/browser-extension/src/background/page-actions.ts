@@ -126,6 +126,10 @@ export function pageScroll(opts: {
   ref?: string;
   selector?: string;
 }): boolean {
+  // A stale ref/selector must not silently fall back to scrolling the window.
+  if ((opts.ref || opts.selector) && !resolveEl(opts)) {
+    return false;
+  }
   const scroller: Element | (Window & typeof globalThis) =
     opts.ref || opts.selector ? (resolveEl(opts) ?? window) : window;
   if (opts.to === "top") {
@@ -183,11 +187,31 @@ export function pageSelect(args: {
     return false;
   }
   const wanted = new Set(args.values ?? (args.value !== undefined ? [args.value] : []));
+  let matched = 0;
   for (const opt of Array.from(el.options)) {
-    opt.selected = wanted.has(opt.value) || wanted.has(opt.label);
+    const sel = wanted.has(opt.value) || wanted.has(opt.label);
+    opt.selected = sel;
+    if (sel) {
+      matched += 1;
+    }
+  }
+  if (matched === 0) {
+    // Requested value(s) matched no option — report failure rather than
+    // silently clearing the control.
+    return false;
   }
   el.dispatchEvent(new Event("change", { bubbles: true }));
   return true;
+}
+
+/** Whether the page's currently-focused element can accept typed text. */
+export function pageActiveEditable(): boolean {
+  const el = document.activeElement;
+  return (
+    el instanceof HTMLInputElement ||
+    el instanceof HTMLTextAreaElement ||
+    (el instanceof HTMLElement && el.isContentEditable)
+  );
 }
 
 export async function pageWaitForSelector(args: {
@@ -223,6 +247,7 @@ export function pageSyntheticPointer(args: {
   x?: number;
   y?: number;
   dblclick?: boolean;
+  button?: "left" | "middle" | "right";
 }): boolean {
   const useCoords =
     typeof args.x === "number" && typeof args.y === "number" && !args.ref && !args.selector;
@@ -241,9 +266,16 @@ export function pageSyntheticPointer(args: {
     el.scrollIntoView({ block: "center" });
   }
   const rect = el.getBoundingClientRect();
+  // MouseEvent.button: left=0, middle=1, right=2. MouseEvent.buttons bitfield:
+  // left=1, right=2, middle=4.
+  const button = args.button ?? "left";
+  const buttonIndex = button === "middle" ? 1 : button === "right" ? 2 : 0;
+  const buttonsBit = button === "middle" ? 4 : button === "right" ? 2 : 1;
   const init: MouseEventInit = {
     bubbles: true,
     cancelable: true,
+    button: buttonIndex,
+    buttons: buttonsBit,
     clientX: useCoords ? (args.x as number) : rect.left + rect.width / 2,
     clientY: useCoords ? (args.y as number) : rect.top + rect.height / 2,
     view: window
@@ -253,9 +285,14 @@ export function pageSyntheticPointer(args: {
   el.dispatchEvent(new MouseEvent("mousedown", init));
   el.dispatchEvent(new PointerEvent("pointerup", init));
   el.dispatchEvent(new MouseEvent("mouseup", init));
-  el.dispatchEvent(new MouseEvent("click", init));
-  if (args.dblclick) {
-    el.dispatchEvent(new MouseEvent("dblclick", init));
+  if (button === "right") {
+    // Right-click fires contextmenu instead of click.
+    el.dispatchEvent(new MouseEvent("contextmenu", init));
+  } else {
+    el.dispatchEvent(new MouseEvent("click", init));
+    if (args.dblclick) {
+      el.dispatchEvent(new MouseEvent("dblclick", init));
+    }
   }
   return true;
 }

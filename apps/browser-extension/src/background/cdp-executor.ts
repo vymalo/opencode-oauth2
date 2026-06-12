@@ -1,6 +1,12 @@
 import { CdpSession, KEY_CODES } from "./cdp";
 import { cdpModifierMask, type Executor, parseChord, type ScreenshotData } from "./executor";
-import { type Center, pageGetCenter, type Target, runInPage } from "./page-actions";
+import {
+  type Center,
+  pageActiveEditable,
+  pageGetCenter,
+  type Target,
+  runInPage
+} from "./page-actions";
 
 interface LayoutMetrics {
   cssContentSize?: { width: number; height: number };
@@ -65,6 +71,11 @@ export class CdpExecutor implements Executor {
     if (target.ref || target.selector || (target.x !== undefined && target.y !== undefined)) {
       const { x, y } = await resolveCenter(tabId, target);
       await this.mouse(tabId, x, y, "left", 1); // focus the field
+    }
+    // insertText silently no-ops when nothing editable is focused — verify so
+    // browser_type doesn't claim success on a non-editable target.
+    if (!(await runInPage(tabId, pageActiveEditable, []))) {
+      throw new Error("target is not a text-editable element");
     }
     await this.cdp.send(tabId, "Input.insertText", { text });
     if (submit) {

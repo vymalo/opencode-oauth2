@@ -330,9 +330,19 @@ export function createBrowserTools(deps: ToolDeps): Record<string, ToolDefinitio
           shot: data
         });
         deps.logger.info("browser_screenshot_saved", { group: args.group, path });
+        const partialNote =
+          args.fullPage && data.partial
+            ? " Note: only the viewport was captured — this executor can't capture beyond it."
+            : "";
         return {
-          output: `Saved screenshot to ${path} (${data.width}×${data.height}). Use the read tool to view it.`,
-          metadata: { path, width: data.width, height: data.height, group: args.group }
+          output: `Saved screenshot to ${path} (${data.width}×${data.height}). Use the read tool to view it.${partialNote}`,
+          metadata: {
+            path,
+            width: data.width,
+            height: data.height,
+            group: args.group,
+            partial: Boolean(data.partial)
+          }
         };
       }
     }),

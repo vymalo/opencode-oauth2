@@ -5,6 +5,8 @@ export interface ScreenshotData {
   base64: string;
   width: number;
   height: number;
+  /** True when a full-page capture was requested but only the viewport was grabbed. */
+  partial?: boolean;
 }
 
 /**

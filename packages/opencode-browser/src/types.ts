@@ -60,4 +60,9 @@ export interface ScreenshotResult {
   base64: string;
   width: number;
   height: number;
+  /**
+   * True when `fullPage` was requested but the executor could only capture the
+   * viewport (the content-script backend / Firefox can't capture beyond it).
+   */
+  partial?: boolean;
 }
