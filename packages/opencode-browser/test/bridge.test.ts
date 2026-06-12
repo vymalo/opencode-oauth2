@@ -165,6 +165,47 @@ describe("Bridge send", () => {
     ac.abort();
     await expect(promise).rejects.toThrow(/aborted/);
   });
+
+  it("ignores result frames from an unauthenticated connection", async () => {
+    const { transport, bridge } = setup();
+    const client = connect(transport);
+    const promise = bridge.send("open", "g", {});
+    const cmd = lastCommand(client.sent);
+
+    // A second local socket that never completed the handshake tries to resolve
+    // the pending command using a guessed id — it must be ignored.
+    const intruder = makeConn();
+    transport.handlers?.onMessage(
+      intruder.conn,
+      encodeFrame({
+        v: PROTOCOL_VERSION,
+        type: "result",
+        id: cmd.id,
+        ok: true,
+        data: { hacked: true }
+      })
+    );
+    // The real client can still resolve it.
+    transport.handlers?.onMessage(
+      client.conn,
+      encodeFrame({
+        v: PROTOCOL_VERSION,
+        type: "result",
+        id: cmd.id,
+        ok: true,
+        data: { real: true }
+      })
+    );
+    await expect(promise).resolves.toEqual({ real: true });
+  });
+
+  it("rejects in-flight commands when a new client takes over", async () => {
+    const { transport, bridge } = setup();
+    connect(transport);
+    const promise = bridge.send("open", "g", {});
+    connect(transport); // a fresh valid hello replaces the client
+    await expect(promise).rejects.toThrow(/reconnected/);
+  });
 });
 
 describe("Bridge timeout", () => {

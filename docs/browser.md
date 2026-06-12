@@ -151,6 +151,12 @@ The trusted-input surface (click/type/key) and screenshots have two backends; ev
 **"being debugged" banner is a feature** — a visible indicator that automation is active. If
 the user dismisses it, the extension transparently re-attaches on the next action.
 
+**Precedence.** The executor is normally chosen in the extension's dashboard. If the operator
+sets the plugin's `executor` option, the plugin advertises it in the handshake and the
+extension adopts it **on each connect** (overriding the dashboard choice) — useful for
+`.well-known/opencode` server-shipped config. Leave the plugin option unset to let the
+dashboard be authoritative.
+
 ## Wire protocol
 
 Dependency-free JSON frames (canonical definition: `packages/opencode-browser/src/protocol.ts`;

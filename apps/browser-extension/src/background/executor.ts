@@ -53,6 +53,59 @@ export function resolveExecutorKind(mode: ExecutorMode, caps: BrowserCapabilitie
   return caps.hasDebugger ? "cdp" : "content";
 }
 
+export interface ChordModifiers {
+  ctrl: boolean;
+  alt: boolean;
+  shift: boolean;
+  meta: boolean;
+}
+
+export interface ParsedChord {
+  modifiers: ChordModifiers;
+  key: string;
+}
+
+/**
+ * Split a key chord like `"Control+a"` / `"Meta+Shift+p"` into its modifiers and
+ * the final key. A lone `"+"` (or any single char) is treated as the key itself.
+ * Pure and total — unit-tested.
+ */
+export function parseChord(input: string): ParsedChord {
+  const modifiers: ChordModifiers = { ctrl: false, alt: false, shift: false, meta: false };
+  if (input.length <= 1) {
+    return { modifiers, key: input };
+  }
+  const parts = input.split("+");
+  const key = parts.pop() ?? "";
+  for (const part of parts) {
+    switch (part.toLowerCase()) {
+      case "ctrl":
+      case "control":
+        modifiers.ctrl = true;
+        break;
+      case "alt":
+      case "option":
+        modifiers.alt = true;
+        break;
+      case "shift":
+        modifiers.shift = true;
+        break;
+      case "meta":
+      case "cmd":
+      case "command":
+      case "super":
+        modifiers.meta = true;
+        break;
+    }
+  }
+  return { modifiers, key };
+}
+
+/** CDP `Input.dispatchKeyEvent` modifier bitmask (Alt=1, Ctrl=2, Meta=4, Shift=8). */
+export function cdpModifierMask(m: ChordModifiers): number {
+  return (m.alt ? 1 : 0) | (m.ctrl ? 2 : 0) | (m.meta ? 4 : 0) | (m.shift ? 8 : 0);
+}
+
 /** Map a target to a CSS selector, or null for coordinate/active-element targeting. */
 export function targetToSelector(target: Target): string | null {
   if (target.ref) {

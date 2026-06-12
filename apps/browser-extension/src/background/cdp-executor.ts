@@ -1,5 +1,5 @@
 import { CdpSession, KEY_CODES } from "./cdp";
-import type { Executor, ScreenshotData } from "./executor";
+import { cdpModifierMask, type Executor, parseChord, type ScreenshotData } from "./executor";
 import { type Center, pageGetCenter, type Target, runInPage } from "./page-actions";
 
 interface LayoutMetrics {
@@ -71,15 +71,30 @@ export class CdpExecutor implements Executor {
 
   async pressKey(tabId: number, key: string): Promise<void> {
     await this.cdp.attach(tabId);
-    const descriptor = KEY_CODES[key];
+    const { modifiers, key: baseKey } = parseChord(key);
+    const mask = cdpModifierMask(modifiers);
+    const descriptor = KEY_CODES[baseKey];
+    const single = baseKey.length === 1;
     const common = descriptor
-      ? { key, code: descriptor.code, windowsVirtualKeyCode: descriptor.keyCode }
-      : { key, text: key.length === 1 ? key : undefined };
-    await this.cdp.send(tabId, "Input.dispatchKeyEvent", { type: "rawKeyDown", ...common });
-    if (!descriptor && key.length === 1) {
-      await this.cdp.send(tabId, "Input.dispatchKeyEvent", { type: "char", text: key });
+      ? { key: baseKey, code: descriptor.code, windowsVirtualKeyCode: descriptor.keyCode }
+      : {
+          key: baseKey,
+          windowsVirtualKeyCode: single ? baseKey.toUpperCase().charCodeAt(0) : undefined
+        };
+    await this.cdp.send(tabId, "Input.dispatchKeyEvent", {
+      type: "rawKeyDown",
+      modifiers: mask,
+      ...common
+    });
+    // Only emit a character when no modifier is held — Control+a must not type "a".
+    if (!descriptor && single && mask === 0) {
+      await this.cdp.send(tabId, "Input.dispatchKeyEvent", { type: "char", text: baseKey });
     }
-    await this.cdp.send(tabId, "Input.dispatchKeyEvent", { type: "keyUp", ...common });
+    await this.cdp.send(tabId, "Input.dispatchKeyEvent", {
+      type: "keyUp",
+      modifiers: mask,
+      ...common
+    });
   }
 
   async screenshot(tabId: number, fullPage: boolean): Promise<ScreenshotData> {

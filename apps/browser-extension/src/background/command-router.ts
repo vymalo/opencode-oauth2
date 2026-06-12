@@ -135,6 +135,9 @@ export class CommandRouter {
             values: params.values as string[] | undefined
           }
         ]);
+        if (!ok) {
+          throw new Error("select target not found or not a <select> element");
+        }
         return { data: { ok }, summary: "selected" };
       }
       case "scroll": {

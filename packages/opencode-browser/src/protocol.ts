@@ -71,6 +71,8 @@ export interface ReadyFrame {
   type: "ready";
   server: "opencode-browser";
   protocol: number;
+  /** Operator's executor preference, if configured plugin-side. */
+  executor?: "auto" | "cdp" | "content";
 }
 
 /** Server → extension: perform an action, expect a matching `result`. */

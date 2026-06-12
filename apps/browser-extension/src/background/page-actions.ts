@@ -266,14 +266,9 @@ export function pageSyntheticType(args: {
   }
   el.focus();
   if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-    const proto =
-      el instanceof HTMLTextAreaElement
-        ? HTMLTextAreaElement.prototype
-        : HTMLInputElement.prototype;
-    const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
-    const next = (el.value ?? "") + args.text;
-    setter ? setter.call(el, next) : (el.value = next);
-    el.dispatchEvent(new Event("input", { bubbles: true }));
+    // Reuse the native-setter helper so both `input` and `change` fire — many
+    // frameworks (React) only validate on `change`.
+    setNativeValue(el, (el.value ?? "") + args.text);
   } else if (el.isContentEditable) {
     el.textContent = (el.textContent ?? "") + args.text;
     el.dispatchEvent(new Event("input", { bubbles: true }));
@@ -294,11 +289,34 @@ export function pageSyntheticType(args: {
 
 export function pageSyntheticKey(args: { key: string }): boolean {
   const target = (document.activeElement as HTMLElement | null) ?? document.body;
+  // Parse chords (e.g. "Control+a") into modifier flags + the final key. Kept
+  // inline because this function is injected into the page and can't import.
+  let ctrlKey = false;
+  let altKey = false;
+  let shiftKey = false;
+  let metaKey = false;
+  let key = args.key;
+  if (args.key.length > 1) {
+    const parts = args.key.split("+");
+    key = parts.pop() ?? "";
+    for (const part of parts) {
+      const lower = part.toLowerCase();
+      if (lower === "ctrl" || lower === "control") ctrlKey = true;
+      else if (lower === "alt" || lower === "option") altKey = true;
+      else if (lower === "shift") shiftKey = true;
+      else if (lower === "meta" || lower === "cmd" || lower === "command" || lower === "super")
+        metaKey = true;
+    }
+  }
   const init: KeyboardEventInit = {
     bubbles: true,
     cancelable: true,
-    key: args.key,
-    code: args.key
+    key,
+    code: key,
+    ctrlKey,
+    altKey,
+    shiftKey,
+    metaKey
   };
   target.dispatchEvent(new KeyboardEvent("keydown", init));
   target.dispatchEvent(new KeyboardEvent("keyup", init));

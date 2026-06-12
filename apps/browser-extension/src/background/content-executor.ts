@@ -49,8 +49,10 @@ export class ContentExecutor implements Executor {
       throw new Error("tab has no window");
     }
     // captureVisibleTab grabs the active tab of the window — make sure it's ours.
+    // Activation + paint is async, so wait briefly or we'd capture the prior tab.
     if (!tab.active) {
       await chrome.tabs.update(tabId, { active: true });
+      await new Promise((resolve) => setTimeout(resolve, 150));
     }
     const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
     const base64 = dataUrl.replace(/^data:image\/png;base64,/, "");

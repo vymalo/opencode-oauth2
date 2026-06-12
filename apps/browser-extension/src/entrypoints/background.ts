@@ -6,9 +6,9 @@ import { CommandRouter } from "../background/command-router";
 import { ContentExecutor } from "../background/content-executor";
 import { detectCapabilities, type Executor, resolveExecutorKind } from "../background/executor";
 import { GroupRegistry } from "../background/group-registry";
-import { getSettings, getStatus } from "../shared/db";
+import { getSettings, getStatus, saveSettings, setStatus } from "../shared/db";
 import type { UiMessage, UiMessageResponse } from "../shared/messages";
-import type { ExecutorKind } from "../shared/types";
+import type { ExecutorKind, ExecutorMode } from "../shared/types";
 
 export default defineBackground(() => {
   let executor: Executor = new ContentExecutor();
@@ -24,6 +24,8 @@ export default defineBackground(() => {
     executor = executorKind === "cdp" ? new CdpExecutor() : new ContentExecutor();
     registry = new GroupRegistry(executor);
     router = new CommandRouter(registry, executor);
+    // Recover groups tracked before an MV3 worker suspend / rebuild.
+    await registry.hydrate();
   }
 
   const client = new BridgeClient({
@@ -33,6 +35,17 @@ export default defineBackground(() => {
     },
     onCommand: (frame) => router.handle(frame),
     executorKind: () => executorKind,
+    // The plugin-side `executor` option (when set) wins over the dashboard
+    // choice on each connect — rebuild the stack if it differs.
+    onServerPreference: async (mode: ExecutorMode) => {
+      const settings = await getSettings();
+      if (settings.executorMode === mode) {
+        return;
+      }
+      await saveSettings({ executorMode: mode });
+      await rebuild();
+      await setStatus({ executor: executorKind });
+    },
     clientName: `opencode-browser-ext/${import.meta.env.BROWSER}`
   });
 

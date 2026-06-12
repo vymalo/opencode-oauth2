@@ -40,6 +40,37 @@ export class GroupRegistry {
 
   constructor(private readonly executor: Executor) {}
 
+  /**
+   * Repopulate the in-memory map from IndexedDB. The MV3 background worker can
+   * be suspended (and `rebuild()` makes a fresh registry), so without this an
+   * `browser_navigate`/`browser_click` with no explicit tabId would fail with
+   * "group has no open tabs" even though the tabs are still open. Prunes tabs
+   * that no longer exist.
+   */
+  async hydrate(): Promise<void> {
+    const rows = await db.groups.toArray().catch(() => [] as GroupRecord[]);
+    for (const row of rows) {
+      const alive: number[] = [];
+      for (const id of row.tabIds) {
+        try {
+          await chrome.tabs.get(id);
+          alive.push(id);
+        } catch {
+          /* tab closed while the worker was suspended */
+        }
+      }
+      if (alive.length === 0) {
+        await db.groups.delete(row.name).catch(() => {});
+        continue;
+      }
+      this.groups.set(row.name, {
+        ...row,
+        tabIds: alive,
+        activeTabId: alive.includes(row.activeTabId ?? -1) ? row.activeTabId : alive[0]
+      });
+    }
+  }
+
   private async persist(record: GroupRecord): Promise<void> {
     this.groups.set(record.name, record);
     await db.groups.put(record).catch(() => {});
@@ -82,12 +113,19 @@ export class GroupRegistry {
     return { tabId, url: tab.url ?? url ?? "about:blank", title: tab.title ?? "" };
   }
 
-  /** Resolve which tab an action targets. */
+  /**
+   * Resolve which tab an action targets. An explicit `tabId` must belong to the
+   * named group — otherwise a tool call could drive an arbitrary unrelated tab,
+   * breaking group isolation.
+   */
   resolveTab(name: string, tabId?: number): number {
+    const group = this.groups.get(name);
     if (tabId !== undefined) {
+      if (!group?.tabIds.includes(tabId)) {
+        throw new Error(`tab ${tabId} is not part of group "${name}"`);
+      }
       return tabId;
     }
-    const group = this.groups.get(name);
     const resolved = group?.activeTabId ?? group?.tabIds[0];
     if (resolved === undefined) {
       throw new Error(`group "${name}" has no open tabs — call browser_open first`);

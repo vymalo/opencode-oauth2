@@ -39,9 +39,13 @@ function describeTarget(args: { ref?: string; selector?: string; x?: number; y?:
   return "element";
 }
 
-/** Replace anything that isn't filesystem-friendly so a group name is path-safe. */
+/**
+ * Replace anything that isn't filesystem-friendly so a group name is path-safe.
+ * Dots are intentionally NOT allowed — otherwise a group like `..` or `a/../b`
+ * could traverse out of the screenshot directory.
+ */
 function slugifyGroup(group: string): string {
-  const slug = group.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+  const slug = group.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
   return slug.length > 0 ? slug : "default";
 }
 
@@ -218,13 +222,18 @@ export function createBrowserTools(deps: ToolDeps): Record<string, ToolDefinitio
         tabId: z.number().optional()
       },
       async execute(args, ctx) {
-        await bridge.send(
-          "fill",
-          args.group,
-          { fields: args.fields, tabId: args.tabId },
-          ctx.abort
+        const data = asRecord(
+          await bridge.send(
+            "fill",
+            args.group,
+            { fields: args.fields, tabId: args.tabId },
+            ctx.abort
+          )
         );
-        return `Filled ${args.fields.length} field(s) in group "${args.group}".`;
+        const filled = typeof data.filled === "number" ? data.filled : args.fields.length;
+        const missed = args.fields.length - filled;
+        const note = missed > 0 ? ` (${missed} target(s) not found)` : "";
+        return `Filled ${filled} of ${args.fields.length} field(s) in group "${args.group}".${note}`;
       }
     }),
 
@@ -364,6 +373,9 @@ export function createBrowserTools(deps: ToolDeps): Record<string, ToolDefinitio
         tabId: z.number().optional()
       },
       async execute(args, ctx) {
+        if (args.ms === undefined && !args.selector) {
+          throw new Error("browser_wait requires either `ms` (a delay) or `selector`");
+        }
         await bridge.send(
           "wait",
           args.group,

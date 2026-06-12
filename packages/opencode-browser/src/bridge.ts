@@ -9,6 +9,7 @@ import {
   nextId,
   PROTOCOL_VERSION
 } from "./protocol.js";
+import type { ExecutorMode } from "./types.js";
 
 /**
  * A single connected client (the extension's background worker). The bridge
@@ -42,6 +43,12 @@ export interface BridgeOptions {
   token: string;
   /** Per-command timeout in ms; `<= 0` disables the timeout. */
   timeoutMs: number;
+  /**
+   * Server-side executor preference forwarded to the extension in the `ready`
+   * frame. Only set when the operator configured it explicitly; otherwise the
+   * extension keeps its own dashboard setting.
+   */
+  executor?: ExecutorMode;
 }
 
 export interface BridgeDeps {
@@ -192,6 +199,14 @@ export class Bridge {
       this.logger.warn("browser_frame_invalid", {});
       return;
     }
+    // Only the authenticated client may drive the protocol. Command ids are
+    // predictable (`c1`, `c2`, …), so a second local socket that skipped the
+    // handshake could otherwise resolve/reject in-flight tool calls without the
+    // token — this guard, not just the `hello` check, is what protects them.
+    if (frame.type !== "hello" && conn !== this.client) {
+      this.logger.warn("browser_frame_unauthenticated", { type: frame.type });
+      return;
+    }
     switch (frame.type) {
       case "hello":
         this.handleHello(conn, frame.token, frame.client);
@@ -220,8 +235,12 @@ export class Bridge {
       conn.close();
       return;
     }
-    // Latest valid client wins; drop any prior one.
+    // Latest valid client wins; drop any prior one. Reject its in-flight
+    // commands first — the old socket's close event is ignored once `client`
+    // points elsewhere, so without this they'd hang until the per-command
+    // timeout instead of failing fast.
     if (this.client && this.client !== conn) {
+      this.rejectAllPending(new BridgeError("browser extension reconnected", "client_replaced"));
       this.client.close();
     }
     this.client = conn;
@@ -230,7 +249,8 @@ export class Bridge {
       v: PROTOCOL_VERSION,
       type: "ready",
       server: "opencode-browser",
-      protocol: PROTOCOL_VERSION
+      protocol: PROTOCOL_VERSION,
+      executor: this.opts.executor
     });
   }
 

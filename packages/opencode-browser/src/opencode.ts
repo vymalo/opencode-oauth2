@@ -90,8 +90,11 @@ export function createBrowserPlugin(factoryOptions: BrowserPluginFactoryOptions 
     const generateToken = factoryOptions.generateToken ?? (() => randomBytes(24).toString("hex"));
 
     const options = resolveOptions(pluginOptions, generateToken);
-    const tokenProvided =
-      typeof (pluginOptions as BrowserPluginOptions | undefined)?.token === "string";
+    const rawOptions = pluginOptions as BrowserPluginOptions | undefined;
+    const tokenProvided = typeof rawOptions?.token === "string";
+    // Only forward the executor preference when the operator set it explicitly;
+    // otherwise the extension keeps its own dashboard choice.
+    const executorProvided = typeof rawOptions?.executor === "string";
 
     if (!options.enabled) {
       logger.info("browser_plugin_disabled", {});
@@ -107,7 +110,8 @@ export function createBrowserPlugin(factoryOptions: BrowserPluginFactoryOptions 
         host: options.host,
         port: options.port,
         token: options.token,
-        timeoutMs: options.timeoutMs
+        timeoutMs: options.timeoutMs,
+        executor: executorProvided ? options.executor : undefined
       },
       { logger, transport: factoryOptions.transport ?? createBunTransport() }
     );

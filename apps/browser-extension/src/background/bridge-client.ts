@@ -8,7 +8,7 @@ import {
   PROTOCOL_VERSION,
   resultFrame
 } from "../shared/protocol";
-import type { ExecutorKind } from "../shared/types";
+import type { ExecutorKind, ExecutorMode } from "../shared/types";
 
 const INITIAL_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 30_000;
@@ -26,6 +26,12 @@ export interface BridgeClientDeps {
   onCommand: (frame: CommandFrame) => Promise<unknown>;
   /** Executor kind to publish in the status row, for the UI. */
   executorKind: () => ExecutorKind;
+  /**
+   * Called when the server advertises an executor preference in `ready`. The
+   * operator's plugin-side `executor` option takes precedence over the
+   * dashboard choice on each connect.
+   */
+  onServerPreference?: (executor: ExecutorMode) => void | Promise<void>;
   /** Descriptor sent in the hello frame (e.g. "chrome/Linux"). */
   clientName: string;
 }
@@ -93,16 +99,24 @@ export class BridgeClient {
     this.ws = ws;
 
     ws.addEventListener("open", () => {
+      if (ws !== this.ws) {
+        return;
+      }
       ws.send(encodeFrame(helloFrame(config.token, this.deps.clientName)));
     });
     ws.addEventListener("message", (event) => this.onMessage(ws, String(event.data)));
-    ws.addEventListener("close", () => this.onClose());
+    ws.addEventListener("close", () => this.onClose(ws));
     ws.addEventListener("error", () => {
       // The close event always follows; let it handle reconnect.
     });
   }
 
   private async onMessage(ws: WebSocket, raw: string): Promise<void> {
+    // A socket replaced during reconnect can still deliver buffered events —
+    // ignore anything that isn't from the current active socket.
+    if (ws !== this.ws) {
+      return;
+    }
     const frame = decodeFrame(raw);
     if (!frame) {
       return;
@@ -111,6 +125,9 @@ export class BridgeClient {
       case "ready":
         this.backoff = INITIAL_BACKOFF_MS;
         this.startHeartbeat();
+        if (frame.executor && this.deps.onServerPreference) {
+          await this.deps.onServerPreference(frame.executor as ExecutorMode);
+        }
         await setStatus({
           state: "connected",
           connectedAt: Date.now(),
@@ -139,7 +156,13 @@ export class BridgeClient {
     }
   }
 
-  private onClose(): void {
+  private onClose(ws: WebSocket): void {
+    // Ignore the close of a socket we already replaced (manual reconnect /
+    // settings change) — otherwise it would schedule a duplicate backoff
+    // reconnect that races the fresh socket.
+    if (ws !== this.ws) {
+      return;
+    }
     this.stopHeartbeat();
     if (this.stopped) {
       return;
