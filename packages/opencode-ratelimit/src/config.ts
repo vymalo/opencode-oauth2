@@ -71,6 +71,7 @@ function parseTier(raw: Record<string, unknown>): RateLimitTier {
  */
 function normalizeTiers(tiers: RateLimitTier[]): RateLimitTier[] {
   const sorted = [...tiers].sort((a, b) => {
+    if (a.maxResetSeconds === b.maxResetSeconds) return 0; // equal (incl. both null)
     if (a.maxResetSeconds === null) return 1;
     if (b.maxResetSeconds === null) return -1;
     return a.maxResetSeconds - b.maxResetSeconds;

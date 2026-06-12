@@ -127,7 +127,7 @@ export function makeRateLimitFetch(
 
   const wrapped: typeof fetch = async (input, init) => {
     const signal = init?.signal ?? undefined;
-    const model = opts.scope === "model" ? modelFromBody(init?.body) : undefined;
+    const model = opts.scope === "model" ? await modelFromRequest(input, init) : undefined;
     const key = model ? `${providerId}\u0000${model}` : providerId;
     let state = store.get(key);
     if (!state) {
@@ -176,7 +176,7 @@ export function makeRateLimitFetch(
           snapshot.remaining <= 0 &&
           snapshot.resetAtMs !== undefined
         ) {
-          const tier = selectTier(opts.tiers, snapshot.resetSeconds);
+          const tier = selectTier(opts.tiers, effectiveResetSeconds(snapshot));
           if (tier.action === "wait") {
             state.cooldownUntilMs = snapshot.resetAtMs;
             state.cooldownMaxWaitMs = tier.maxWaitMs;
@@ -185,8 +185,12 @@ export function makeRateLimitFetch(
         return response;
       }
 
-      const tier = selectTier(opts.tiers, snapshot.resetSeconds);
+      const tier = selectTier(opts.tiers, effectiveResetSeconds(snapshot));
       if (tier.action === "error") {
+        // Drop any cooldown a prior "wait" tier armed, so the fail-fast is
+        // actually fast — later requests must not sleep a stale window first.
+        state.cooldownUntilMs = 0;
+        state.cooldownMaxWaitMs = 0;
         logger.warn("ratelimit_failfast", {
           providerId,
           model,
@@ -229,11 +233,31 @@ export function makeRateLimitFetch(
 }
 
 /**
- * Best-effort extraction of the `model` from an OpenAI-compatible request body.
- * The AI SDK sends a JSON string body, so this is non-destructive (we never
- * consume a stream). Anything else → `undefined` → the caller falls back to the
- * provider-wide bucket.
+ * Best-effort extraction of the `model` from an OpenAI-compatible request.
+ * The AI SDK calls `fetch(url, { body: "<json>" })`, so the common path reads a
+ * JSON string body synchronously (non-destructive). It also supports the
+ * `fetch(new Request(...))` shape by reading a clone of the Request body, so a
+ * Request-style caller doesn't silently collapse to the provider-wide bucket.
+ * Anything unparseable → `undefined` → caller falls back to the provider bucket.
  */
+async function modelFromRequest(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined
+): Promise<string | undefined> {
+  const fromInit = modelFromBody(init?.body);
+  if (fromInit !== undefined) {
+    return fromInit;
+  }
+  if (typeof Request !== "undefined" && input instanceof Request) {
+    try {
+      return modelFromBody(await input.clone().text());
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
 function modelFromBody(body: BodyInit | null | undefined): string | undefined {
   if (typeof body !== "string") {
     return undefined;
@@ -244,6 +268,22 @@ function modelFromBody(body: BodyInit | null | undefined): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Reset magnitude (seconds) used for tier selection: prefer `x-ratelimit-reset`,
+ * else derive from a `Retry-After` fallback — so a `Retry-After`-only 429 with a
+ * multi-day delay still lands in a long-reset (`error`) tier instead of the
+ * smallest band.
+ */
+function effectiveResetSeconds(snapshot: RateLimitSnapshot): number | undefined {
+  if (snapshot.resetSeconds !== undefined) {
+    return snapshot.resetSeconds;
+  }
+  if (snapshot.retryAfterMs !== undefined) {
+    return Math.ceil(snapshot.retryAfterMs / 1000);
+  }
+  return undefined;
 }
 
 function readSnapshot(

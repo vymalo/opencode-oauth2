@@ -251,6 +251,39 @@ describe("makeRateLimitFetch", () => {
         expect.objectContaining({ limit: 200, remaining: 199, resetSeconds: 11 })
       );
     });
+
+    it("classifies a Retry-After-only 429 by its delay (long → error tier)", async () => {
+      const h = harness(tiered());
+      // No x-ratelimit-reset; a multi-day Retry-After must still hit the error tier.
+      h.fetchImpl.mockResolvedValueOnce(res(429, { "retry-after": "2592000" }));
+
+      const response = await h.fetch("https://api.test");
+
+      expect(response.status).toBe(429);
+      expect(h.fetchImpl).toHaveBeenCalledTimes(1); // fail fast, no retry
+      expect(h.clock.sleep).not.toHaveBeenCalled();
+      expect(eventNames(h.logger.warn)).toContain("ratelimit_failfast");
+    });
+
+    it("clears a stale wait cooldown when failing fast on an error-tier 429", async () => {
+      const h = harness(
+        makeOpts({
+          tiers: [
+            { maxResetSeconds: 120, action: "wait", maxWaitMs: 1_000, maxRetries: 3 },
+            { maxResetSeconds: null, action: "error", maxWaitMs: 0, maxRetries: 0 }
+          ]
+        })
+      );
+      // A prior short-window response armed a capped wait cooldown still in the future.
+      h.state.cooldownUntilMs = h.clock.now() + 60_000;
+      h.state.cooldownMaxWaitMs = 1_000;
+      h.fetchImpl.mockResolvedValueOnce(res(429, { "x-ratelimit-reset": "2592000" }));
+
+      const response = await h.fetch("https://api.test");
+
+      expect(response.status).toBe(429);
+      expect(h.state.cooldownUntilMs).toBe(0); // stale cooldown dropped → next call won't sleep
+    });
   });
 
   describe("scope: model", () => {
@@ -300,6 +333,23 @@ describe("makeRateLimitFetch", () => {
 
       expect(h.store.has("prov")).toBe(true); // keyed by the bare provider id
       expect([...h.store.keys()]).toEqual(["prov"]);
+    });
+
+    it("derives the model from a Request input, not just init.body", async () => {
+      const h = modelHarness();
+      h.fetchImpl.mockResolvedValue(res(200, { "x-ratelimit-remaining": "5" }));
+
+      await h.fetch(
+        new Request("https://api.test", {
+          method: "POST",
+          body: JSON.stringify({ model: "kimi-k2.6" })
+        })
+      );
+
+      const keys = [...h.store.keys()];
+      expect(keys).toHaveLength(1);
+      expect(keys[0]).not.toBe("prov"); // a per-model bucket, not the provider fallback
+      expect(keys[0]).toContain("kimi-k2.6");
     });
   });
 

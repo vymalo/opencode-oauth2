@@ -110,6 +110,21 @@ describe("parseRateLimitOptions", () => {
         { maxResetSeconds: null, action: "wait", maxWaitMs: 7000, maxRetries: DEFAULT_MAX_RETRIES }
       ]);
     });
+
+    it("sorts a mixed set deterministically (comparator returns 0 on ties)", () => {
+      // Includes two catch-alls and out-of-order finite bounds; a non-reflexive
+      // comparator would risk engine-dependent ordering here.
+      const opts = rl({
+        tiers: [
+          { action: "error" },
+          { maxResetSeconds: 300, action: "wait" },
+          { action: "wait", maxWaitMs: 5 },
+          { maxResetSeconds: 60, action: "wait" }
+        ]
+      });
+      const bounds = opts?.tiers.map((t) => t.maxResetSeconds);
+      expect(bounds).toEqual([60, 300, null, null]); // finite ascending, catch-alls last
+    });
   });
 });
 
