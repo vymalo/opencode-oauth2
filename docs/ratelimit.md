@@ -66,13 +66,37 @@ Two knobs trade off against this:
 - **`maxWaitMs`** caps any single wait. Set it (e.g. `10000`) if you'd rather return a `429`/abort quickly than freeze the UI for the full window. `0` keeps the "always wait the full reset" behavior.
 - **`maxRetries`** bounds the `429` retry loop. After it's exhausted the `429` is returned to OpenCode unchanged, so the host's own error handling takes over.
 
+## Tiered policies (burst vs budget)
+
+A single `maxWaitMs`/`maxRetries` pair can't distinguish a **per-minute burst reset** (≤60s, worth waiting through) from a **monthly-budget reset** (days away, should error fast) — Envoy reports both as the same `x-ratelimit-reset` for whichever bucket is binding, and never labels which window it is. The reset's **magnitude** is the one reliable signal, so the `tiers` array maps reset-duration bands to behavior:
+
+```jsonc
+"meta": { "rateLimit": {
+  "tiers": [
+    { "maxResetSeconds": 120, "action": "wait", "maxWaitMs": 0, "maxRetries": 3 },
+    { "action": "error" }
+  ]
+} }
+```
+
+On every `remaining: 0` or `429`, the plugin reads the reset, selects the first tier whose `maxResetSeconds` covers it (ascending, catch-all last), and either **waits** (throttle + bounded retry) or **errors** (surface the `429` immediately — no wait, no retry). The flat form is just sugar for a single catch-all `wait` tier. An auto-appended catch-all defaults to `wait` (the safe direction); add an explicit `{ "action": "error" }` to fail fast on anything longer than your wait bands. This is what lets "≤2min → pause; days → error now" be expressed without `maxRetries` gymnastics.
+
+## Per-model scope
+
+`scope` (default `"model"`) controls how cooldown state is partitioned:
+
+- **`"model"`** keys state per `(provider, model)`. The model is read from the request body (`@ai-sdk/openai-compatible` sends a JSON body with `model`; non-parseable → provider-wide fallback). Use this when the gateway buckets per model — e.g. an Envoy `BackendTrafficPolicy` whose selector includes the model — so exhausting one model's bucket doesn't gate its siblings.
+- **`"provider"`** shares one cooldown across the whole provider. Use it when the gateway buckets per provider/account.
+
+Getting this wrong is a real symptom, not just a nicety: with `"provider"` against per-model buckets, a 429 on model A needlessly blocks models B/C that still have quota.
+
 ## Concurrency
 
-Outside a cooldown, requests flow concurrently and each response's headers correct the shared per-provider state. A burst that races past `remaining: 0` before any response lands isn't gated — but Envoy answers the overflow with `429`s, which the backoff path mops up. During a known cooldown, all callers converge on one shared timer and resume together. This keeps the happy path fully parallel (streaming + title-gen + tool calls) while still respecting a hard stop.
+Outside a cooldown, requests flow concurrently and each response's headers correct the per-bucket state. A burst that races past `remaining: 0` before any response lands isn't gated — but Envoy answers the overflow with `429`s, which the backoff path mops up. During a known cooldown, all callers converge on one shared timer and resume together. This keeps the happy path fully parallel (streaming + title-gen + tool calls) while still respecting a hard stop.
 
 ## State
 
-In-memory, per process, per provider — `{ remaining, limit, resetAtMs, cooldownUntilMs }`. There is **no disk cache** (a deliberate divergence from the other two plugins): a reset window is seconds, so persisting it across restarts would only ever serve stale data.
+In-memory, per process, per bucket (`cooldownUntilMs` + the shared-timer bookkeeping), where a bucket is a provider or a `(provider, model)` pair depending on `scope`. There is **no disk cache** (a deliberate divergence from the other two plugins): a reset window is seconds, so persisting it across restarts would only ever serve stale data.
 
 ## Failure modes
 
@@ -81,4 +105,6 @@ In-memory, per process, per provider — `{ remaining, limit, resetAtMs, cooldow
 | Requests never throttle | Provider didn't opt in, or gateway emits no `x-ratelimit-*` | Add `options.meta.rateLimit`; confirm the gateway sends the draft-03 triple (check `headerPrefix`). |
 | `ratelimit_wait_aborted` during long waits | Wait exceeded OpenCode's `headerTimeout` | Raise `options.headerTimeout` / `chunkTimeout`, or set a smaller `maxWaitMs`. |
 | `ratelimit_giveup` then a `429` surfaces | `maxRetries` exhausted while still limited | Raise `maxRetries`, or accept the host-level `429`. |
+| UI freezes for a long time on a monthly/budget exhaustion | One `wait` tier (or flat config) treats the multi-day reset as waitable | Add a `tiers` entry with `{ "action": "error" }` for the long band (see [Tiered policies](#tiered-policies-burst-vs-budget)). |
+| Exhausting one model blocks other models | `scope: "provider"` against per-model gateway buckets | Set `scope: "model"` (the default). |
 | Quota tracked but no waits on a custom gateway | Header names differ | Set `headerPrefix` (e.g. `ratelimit`). |

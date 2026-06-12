@@ -1,8 +1,9 @@
-import type { RateLimitOptions } from "./types.js";
+import type { RateLimitAction, RateLimitOptions, RateLimitScope, RateLimitTier } from "./types.js";
 
 export const DEFAULT_MAX_WAIT_MS = 0; // 0 = unlimited (wait the full reset window)
 export const DEFAULT_MAX_RETRIES = 5;
 export const DEFAULT_HEADER_PREFIX = "x-ratelimit";
+export const DEFAULT_SCOPE: RateLimitScope = "model";
 
 const META_KEY = "meta";
 const RATE_LIMIT_KEY = "rateLimit";
@@ -37,13 +38,64 @@ function asNonNegativeInt(value: unknown, fallback: number): number {
   return fallback;
 }
 
+function asScope(value: unknown): RateLimitScope {
+  return value === "provider" || value === "model" ? value : DEFAULT_SCOPE;
+}
+
+function asAction(value: unknown): RateLimitAction {
+  return value === "error" ? "error" : "wait";
+}
+
+/** A positive int, or `null` (the catch-all sentinel) when absent/non-positive. */
+function asMaxResetSeconds(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return Math.floor(value);
+  }
+  return null;
+}
+
+function parseTier(raw: Record<string, unknown>): RateLimitTier {
+  return {
+    maxResetSeconds: asMaxResetSeconds(raw.maxResetSeconds),
+    action: asAction(raw.action),
+    maxWaitMs: asNonNegativeInt(raw.maxWaitMs, DEFAULT_MAX_WAIT_MS),
+    maxRetries: asPositiveInt(raw.maxRetries, DEFAULT_MAX_RETRIES)
+  };
+}
+
+/**
+ * Sort ascending by `maxResetSeconds` (catch-all `null` last) and guarantee a
+ * trailing catch-all so every reset magnitude matches some tier. Without an
+ * explicit catch-all the ultimate fallback is "wait the full window" — the safe
+ * direction (never hammer the gateway).
+ */
+function normalizeTiers(tiers: RateLimitTier[]): RateLimitTier[] {
+  const sorted = [...tiers].sort((a, b) => {
+    if (a.maxResetSeconds === null) return 1;
+    if (b.maxResetSeconds === null) return -1;
+    return a.maxResetSeconds - b.maxResetSeconds;
+  });
+  if (!sorted.some((t) => t.maxResetSeconds === null)) {
+    sorted.push({
+      maxResetSeconds: null,
+      action: "wait",
+      maxWaitMs: DEFAULT_MAX_WAIT_MS,
+      maxRetries: DEFAULT_MAX_RETRIES
+    });
+  }
+  return sorted;
+}
+
 /**
  * Parse a provider's `options.meta.rateLimit` block into resolved
  * {@link RateLimitOptions}. Returns `null` when the provider has NOT opted in
- * (no `meta.rateLimit`) or has explicitly disabled it (`enabled: false`) — in
- * both cases the provider's fetch is left untouched.
+ * (no `meta.rateLimit`) or has explicitly disabled it (`enabled: false`).
  *
- * Mirrors `@vymalo/opencode-models-info`'s `parseMetaOptions` opt-in idiom.
+ * Two config styles, both supported:
+ *  - **Flat**: `maxWaitMs` / `maxRetries` → normalized into a single catch-all
+ *    `"wait"` tier (the 0.5.0 behavior).
+ *  - **Tiered**: a `tiers` array, each entry `{ maxResetSeconds?, action?,
+ *    maxWaitMs?, maxRetries? }`, matched by reset magnitude.
  */
 export function parseRateLimitOptions(
   providerOptions: Record<string, unknown> | undefined
@@ -67,10 +119,44 @@ export function parseRateLimitOptions(
     return null;
   }
 
+  const rawTiers = Array.isArray(rateLimit.tiers) ? rateLimit.tiers : undefined;
+  let tiers: RateLimitTier[];
+  if (rawTiers && rawTiers.length > 0) {
+    tiers = normalizeTiers(rawTiers.map((t) => parseTier(asRecord(t) ?? {})));
+  } else {
+    // Flat config → one catch-all "wait" tier (backward compatible with 0.5.0).
+    tiers = [
+      {
+        maxResetSeconds: null,
+        action: "wait",
+        maxWaitMs: asNonNegativeInt(rateLimit.maxWaitMs, DEFAULT_MAX_WAIT_MS),
+        maxRetries: asPositiveInt(rateLimit.maxRetries, DEFAULT_MAX_RETRIES)
+      }
+    ];
+  }
+
   return {
     enabled: true,
-    maxWaitMs: asNonNegativeInt(rateLimit.maxWaitMs, DEFAULT_MAX_WAIT_MS),
-    maxRetries: asPositiveInt(rateLimit.maxRetries, DEFAULT_MAX_RETRIES),
-    headerPrefix: (asString(rateLimit.headerPrefix) ?? DEFAULT_HEADER_PREFIX).toLowerCase()
+    scope: asScope(rateLimit.scope),
+    headerPrefix: (asString(rateLimit.headerPrefix) ?? DEFAULT_HEADER_PREFIX).toLowerCase(),
+    tiers
   };
+}
+
+/**
+ * Select the policy tier for an observed reset. `tiers` is pre-sorted ascending
+ * with a catch-all last, so the first tier whose bound covers `resetSeconds`
+ * wins. An unknown reset is treated as the smallest band (wait a default backoff).
+ */
+export function selectTier(
+  tiers: RateLimitTier[],
+  resetSeconds: number | undefined
+): RateLimitTier {
+  const reset = resetSeconds ?? 0;
+  for (const tier of tiers) {
+    if (tier.maxResetSeconds === null || reset <= tier.maxResetSeconds) {
+      return tier;
+    }
+  }
+  return tiers[tiers.length - 1];
 }
