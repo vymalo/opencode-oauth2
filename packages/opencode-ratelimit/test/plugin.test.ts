@@ -228,6 +228,29 @@ describe("makeRateLimitFetch", () => {
 
       expect(h.state.cooldownUntilMs).toBe(0); // error tier → next request will hit a real 429
     });
+
+    it("handles a real Envoy header set (multi-policy limit, 429 reset=11)", async () => {
+      // Exact headers observed from the live gateway.
+      const REAL = {
+        "x-envoy-upstream-service-time": "8266",
+        "x-ratelimit-limit": "200, 200;w=60, 200000;w=60, 50000000;w=2592000",
+        "x-ratelimit-remaining": "199",
+        "x-ratelimit-reset": "11"
+      };
+      const h = harness(tiered());
+      h.fetchImpl
+        .mockResolvedValueOnce(res(429, REAL)) // reset 11 ≤ 120 → wait tier
+        .mockResolvedValueOnce(res(200, { ...REAL, "x-ratelimit-remaining": "198" }));
+
+      const response = await h.fetch("https://api.test");
+
+      expect(response.status).toBe(200);
+      expect(h.clock.sleep).toHaveBeenCalledWith(11_000); // reset seconds → 11s wait
+      expect(h.logger.debug).toHaveBeenCalledWith(
+        "ratelimit_quota",
+        expect.objectContaining({ limit: 200, remaining: 199, resetSeconds: 11 })
+      );
+    });
   });
 
   describe("scope: model", () => {
