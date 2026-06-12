@@ -57,6 +57,20 @@ See [local-development.md → Fixed redirectPort vs random](./local-development.
 
 If you're hitting the *opposite* problem — a non-compliant IdP that rejects the extra `code_challenge` / `code_verifier` parameters — set `pkce: false` on that server's `oauth2` options to opt out. Leave it on (the default) for everything else; compliant servers that don't require PKCE simply ignore it.
 
+## `OpenAI API key is missing` / wrong endpoint after enabling `responseApi`
+
+**What's happening.** Setting `responseApi: true` swaps the provider's package from `@ai-sdk/openai-compatible` to the native `@ai-sdk/openai`, so OpenCode routes inference through the **Responses API** (`/v1/responses`) instead of Chat Completions (`/v1/chat/completions`). Two things change with that swap:
+
+- The native provider **throws `OpenAI API key is missing` at construction** if no `apiKey` is set. The plugin handles this for you by stamping an inert placeholder key (`oauth2-managed-bearer`) when you haven't supplied one; the real OAuth bearer is still injected per request by `chat.headers`, so the placeholder is never actually sent. You should not see this error from the plugin's own providers — if you do, you likely hand-rolled an `@ai-sdk/openai` provider in `opencode.json` without an `apiKey` and without this plugin managing it.
+- The native provider speaks the **OpenAI Responses wire format**, which is *not* the same as Chat Completions. If your gateway only implements `/v1/chat/completions`, enabling `responseApi` will produce 404s or schema errors on inference even though `/models` discovery still works (discovery is unaffected — it always hits `/v1/models`).
+
+**Look for.**
+
+- `oauth2_provider_response_api_enabled` (debug) confirms the toggle was read for that provider, and the registered provider shows `npm: "@ai-sdk/openai"`.
+- Inference 404 / 400 from the gateway despite successful auth and model discovery → the gateway doesn't serve `/v1/responses`.
+
+**Fix.** Only enable `responseApi` when the gateway actually implements the OpenAI Responses contract at `<baseURL>/responses`. Otherwise leave it unset (the default) to stay on Chat Completions via `@ai-sdk/openai-compatible`.
+
 ## `model discovery failed (403)` after auth succeeded
 
 **What's happening.** OAuth succeeded — you have a valid access token — but the upstream `/v1/models` endpoint returned 403. The access token is missing the scope or audience the gateway expects.
