@@ -1,0 +1,40 @@
+{
+  "name": "@vymalo/opencode-browser-extension",
+  "version": "0.7.0",
+  "private": true,
+  "description": "Companion Chromium/Firefox extension for @vymalo/opencode-browser — connects to the plugin's localhost bridge and drives real browser tabs (open, click, type, scroll, screenshot) on behalf of an OpenCode agent, organized into named tab groups.",
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "dev:firefox": "wxt -b firefox",
+    "build": "wxt build",
+    "build:firefox": "wxt build -b firefox",
+    "zip": "wxt zip",
+    "zip:firefox": "wxt zip -b firefox",
+    "typecheck": "wxt prepare && tsc --noEmit",
+    "test": "vitest run",
+    "lint": "biome lint .",
+    "format": "biome format --write .",
+    "format:check": "biome format ."
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.101.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "dexie": "^4.4.3",
+    "dexie-react-hooks": "^4.4.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "tailwind-merge": "^3.6.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.0",
+    "@types/chrome": "^0.1.43",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@wxt-dev/module-react": "^1.2.2",
+    "tailwindcss": "^4.3.0",
+    "vitest": "^4.1.7",
+    "wxt": "^0.20.26"
+  }
+}

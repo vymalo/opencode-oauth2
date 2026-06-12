@@ -1,20 +1,20 @@
 {
   "name": "opencode-oauth2-workspace",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "private": true,
   "description": "Workspace for @vymalo/opencode-oauth2 — OAuth2/OIDC-secured OpenAI-compatible providers for OpenCode.",
   "packageManager": "pnpm@11.3.0",
   "scripts": {
     "build": "pnpm -r build",
-    "lint": "biome lint packages test-env *.json",
+    "lint": "biome lint packages apps test-env *.json",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "test:env:up": "docker compose -f test-env/docker-compose.yml up -d --wait",
     "test:env:down": "docker compose -f test-env/docker-compose.yml down -v",
     "test:integration:run": "INTEGRATION_MODELS_INFO_URL=${INTEGRATION_MODELS_INFO_URL:-http://127.0.0.1:18080/v1/models} pnpm -r --if-present test:integration",
     "test:integration": "pnpm test:env:up && (pnpm test:integration:run; status=$?; pnpm test:env:down; exit $status)",
-    "format": "biome format --write packages test-env *.json",
-    "format:check": "biome format packages test-env *.json"
+    "format": "biome format --write packages apps test-env *.json",
+    "format:check": "biome format packages apps test-env *.json"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.15",

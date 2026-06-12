@@ -198,6 +198,24 @@ The plugins stack cleanly on one provider. List them in this order so each `conf
 }
 ```
 
+## Companion plugin: browser automation
+
+This workspace also ships [`@vymalo/opencode-browser`](packages/opencode-browser) — a separate, **auth-agnostic** plugin that gives the model **hands in a real browser**. It registers `browser_*` tools (open, click, type, scroll, screenshot, snapshot, …) and hosts a localhost WebSocket **bridge** that a companion Chromium/Firefox **extension** dials. The model drives real tabs, organized into **named groups**.
+
+```jsonc
+{
+  "plugin": [
+    ["@vymalo/opencode-browser", { "port": 4517 }]
+  ]
+}
+```
+
+Because an extension can't host a server, the plugin is the server and the extension connects out to it. On first run the plugin logs a generated `token` — paste it (and `ws://127.0.0.1:4517`) into the extension's dashboard, then *Save & reconnect*. Build/load the extension from [`apps/browser-extension`](apps/browser-extension).
+
+Targeting is via `browser_snapshot` refs (stable, reliable) or CSS selectors / coordinates. Screenshots are written to disk (OpenCode tool output is text-only) — view them with the `read` tool. On Chromium it uses the trusted CDP executor (`chrome.debugger`, with the "being debugged" banner as a visible signal); on Firefox or when the debugger is unavailable it falls back to a content-script executor. Full reference: [`packages/opencode-browser/README.md`](packages/opencode-browser/README.md) and [`docs/browser.md`](docs/browser.md).
+
+> **Security:** the bridge binds `127.0.0.1` + token only and grants control of a real browser profile — use a dedicated/throwaway Chrome profile.
+
 ## Federated identity (CI / Kubernetes)
 
 For GitHub Actions and Kubernetes workloads, use `jwt_bearer` (or `token_exchange`) with the platform's own short-lived OIDC token as the subject. The plugin re-fetches it on every access-token expiry; nothing long-lived gets cached.
@@ -223,6 +241,8 @@ This is a [pnpm](https://pnpm.io) monorepo.
 | [`packages/opencode-oauth2`](packages/opencode-oauth2) | OAuth2/OIDC auth + model discovery — published as `@vymalo/opencode-oauth2` |
 | [`packages/opencode-models-info`](packages/opencode-models-info) | Auth-agnostic model **metadata enrichment** — published as `@vymalo/opencode-models-info` |
 | [`packages/opencode-ratelimit`](packages/opencode-ratelimit) | Auth-agnostic **rate-limit awareness** (Envoy `x-ratelimit-*` throttle + 429 backoff) — published as `@vymalo/opencode-ratelimit` |
+| [`packages/opencode-browser`](packages/opencode-browser) | Auth-agnostic **browser automation** tools + localhost bridge — published as `@vymalo/opencode-browser` |
+| [`apps/browser-extension`](apps/browser-extension) | Companion Chromium/Firefox extension for the browser plugin (private, not published) |
 | [`packages/plugin-bundle`](packages/plugin-bundle) | Rolldown-based bundling for distribution |
 | [`plans/prd.md`](plans/prd.md) | Product requirements and phased roadmap |
 

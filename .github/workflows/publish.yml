@@ -90,6 +90,9 @@ jobs:
       - name: Build ratelimit plugin (tsc → packages/opencode-ratelimit/dist)
         run: pnpm --filter @vymalo/opencode-ratelimit build
 
+      - name: Build browser plugin (tsc → packages/opencode-browser/dist)
+        run: pnpm --filter @vymalo/opencode-browser build
+
       - name: Pack oauth2 tarball (for inspection and as a release asset)
         run: |
           mkdir -p dist-tarball/oauth2
@@ -110,6 +113,13 @@ jobs:
           pnpm --filter @vymalo/opencode-ratelimit pack \
             --pack-destination "$PWD/dist-tarball/ratelimit"
           ls -la dist-tarball/ratelimit/
+
+      - name: Pack browser tarball
+        run: |
+          mkdir -p dist-tarball/browser
+          pnpm --filter @vymalo/opencode-browser pack \
+            --pack-destination "$PWD/dist-tarball/browser"
+          ls -la dist-tarball/browser/
 
       - name: Verify tarball contents
         # Defense-in-depth: confirms each package is shipping its dist/, NOT
@@ -148,7 +158,7 @@ jobs:
             echo "OK: $tarball"
           }
 
-          for tarball in dist-tarball/oauth2/*.tgz dist-tarball/models-info/*.tgz dist-tarball/ratelimit/*.tgz; do
+          for tarball in dist-tarball/oauth2/*.tgz dist-tarball/models-info/*.tgz dist-tarball/ratelimit/*.tgz dist-tarball/browser/*.tgz; do
             verify_tarball "$tarball"
           done
 
@@ -209,6 +219,23 @@ jobs:
             exit 0
           fi
           pnpm --filter @vymalo/opencode-ratelimit publish \
+            --access public \
+            --no-git-checks \
+            --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.MCP_NPM_AUTH_TOKEN }}
+          NPM_CONFIG_PROVENANCE: "true"
+
+      - name: Publish browser to npm (with provenance)
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          set -e
+          version=$(node -p "require('./packages/opencode-browser/package.json').version")
+          if npm view "@vymalo/opencode-browser@${version}" version >/dev/null 2>&1; then
+            echo "::notice::@vymalo/opencode-browser@${version} already on npm — skipping."
+            exit 0
+          fi
+          pnpm --filter @vymalo/opencode-browser publish \
             --access public \
             --no-git-checks \
             --provenance

@@ -4,3 +4,7 @@ node_modules
 
 packages/*/dist
 packages/*/target
+
+# WXT browser-extension build + generated type output
+apps/*/.output
+apps/*/.wxt

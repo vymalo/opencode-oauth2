@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+/*
+ * Calm, restrained palette — a single neutral surface with one indigo accent.
+ * Light and dark are driven by the OS; the dashboard and popup both pull from
+ * these tokens so the two surfaces stay visually consistent.
+ */
+@theme {
+  --color-bg: hsl(0 0% 100%);
+  --color-surface: hsl(0 0% 98.5%);
+  --color-border: hsl(240 6% 90%);
+  --color-fg: hsl(240 10% 12%);
+  --color-muted: hsl(240 4% 46%);
+  --color-accent: hsl(243 75% 59%);
+  --color-accent-fg: hsl(0 0% 100%);
+  --color-ok: hsl(142 70% 38%);
+  --color-warn: hsl(38 92% 45%);
+  --color-danger: hsl(0 72% 51%);
+  --radius: 0.625rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  @theme {
+    --color-bg: hsl(240 10% 8%);
+    --color-surface: hsl(240 8% 11%);
+    --color-border: hsl(240 6% 20%);
+    --color-fg: hsl(0 0% 96%);
+    --color-muted: hsl(240 5% 60%);
+    --color-accent: hsl(243 75% 66%);
+    --color-accent-fg: hsl(240 10% 8%);
+    --color-ok: hsl(142 60% 50%);
+    --color-warn: hsl(38 92% 55%);
+    --color-danger: hsl(0 72% 60%);
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}

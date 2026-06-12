@@ -1,14 +1,14 @@
 {
-  "name": "@vymalo/opencode-oauth2",
+  "name": "@vymalo/opencode-browser",
   "version": "0.7.0",
-  "description": "OpenCode plugin for OAuth2/OIDC-secured, OpenAI-compatible model providers with periodic model sync.",
+  "description": "OpenCode plugin that gives the model hands in a real browser: it registers browser_* tools (open, click, type, scroll, screenshot, snapshot, …) and hosts a localhost WebSocket bridge that a companion Chromium/Firefox extension connects to. Tabs are organized into named groups so each task stays isolated and inspectable.",
   "license": "MIT",
   "author": "vymalo contributors",
   "homepage": "https://github.com/vymalo/opencode-oauth2#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/vymalo/opencode-oauth2.git",
-    "directory": "packages/opencode-oauth2"
+    "directory": "packages/opencode-browser"
   },
   "bugs": {
     "url": "https://github.com/vymalo/opencode-oauth2/issues"
@@ -16,11 +16,13 @@
   "keywords": [
     "opencode",
     "opencode-plugin",
-    "oauth2",
-    "oidc",
-    "openai-compatible",
-    "ai-sdk",
-    "model-sync"
+    "browser",
+    "automation",
+    "chromium",
+    "firefox",
+    "extension",
+    "cdp",
+    "ai-sdk"
   ],
   "type": "module",
   "main": "dist/index.js",

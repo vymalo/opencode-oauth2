@@ -18,6 +18,8 @@
       "!**/node_modules",
       "!**/target",
       "!**/coverage",
+      "!**/.output",
+      "!**/.wxt",
       "!**/.claude",
       "!pnpm-lock.yaml",
       "!**/*.md"
