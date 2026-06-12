@@ -143,13 +143,19 @@ The trusted-input surface (click/type/key) and screenshots have two backends; ev
 | | `cdp` (Chromium) | `content` (fallback / Firefox) |
 | --- | --- | --- |
 | Input | **Trusted** CDP events (`Input.dispatch*`) — `isTrusted: true` | Synthetic DOM events (`isTrusted: false`) |
-| Screenshot | `Page.captureScreenshot`, full-page via `captureBeyondViewport` | `tabs.captureVisibleTab` (viewport only) |
+| Screenshot | `Page.captureScreenshot`, full-page via `captureBeyondViewport` | `tabs.captureVisibleTab` + **scroll-and-stitch** for full-page (OffscreenCanvas) |
 | Banner | Shows Chrome's "being debugged" banner (intentional signal) | None |
 | Browser | Chromium only | Chromium + Firefox |
 
 Synthetic key events on the content-script executor don't trigger the browser's native editing
 actions, so the extension applies the common ones (Backspace/Delete/Enter in inputs) itself —
 trusted shortcuts and rarer keys are only reliable on the CDP executor.
+
+Full-page screenshots on the content executor are produced by **scroll-and-stitch**: the page
+is scrolled one viewport at a time, each slice captured with `tabs.captureVisibleTab`, and the
+slices composited onto an `OffscreenCanvas`. Two caveats vs CDP's native full-page capture:
+`position: fixed` elements repeat in each slice, and very tall pages are captured up to a
+safety cap (≈20 viewports / 16k device px) and reported as `partial` in the tool output.
 
 `executor: "auto"` picks CDP when `chrome.debugger` is available, else content-script. The
 **"being debugged" banner is a feature** — a visible indicator that automation is active. If

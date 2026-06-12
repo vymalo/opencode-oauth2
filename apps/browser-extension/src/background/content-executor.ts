@@ -1,4 +1,5 @@
 import type { Executor, ScreenshotData } from "./executor";
+import { captureFullPage } from "./full-page";
 import {
   pageSyntheticKey,
   pageSyntheticPointer,
@@ -56,6 +57,10 @@ export class ContentExecutor implements Executor {
       await chrome.tabs.update(tabId, { active: true });
       await new Promise((resolve) => setTimeout(resolve, 150));
     }
+    if (fullPage) {
+      // Scroll-and-stitch the whole page (captureVisibleTab is viewport-only).
+      return captureFullPage(tabId, tab.windowId);
+    }
     const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
     const base64 = dataUrl.replace(/^data:image\/png;base64,/, "");
     const size = await runInPage(
@@ -63,9 +68,7 @@ export class ContentExecutor implements Executor {
       () => ({ w: window.innerWidth, h: window.innerHeight }),
       []
     );
-    // captureVisibleTab can only grab the viewport — flag when a full-page
-    // capture was requested so the tool can tell the model it's partial.
-    return { base64, width: size?.w ?? 0, height: size?.h ?? 0, partial: fullPage };
+    return { base64, width: size?.w ?? 0, height: size?.h ?? 0 };
   }
 
   async release(_tabId: number): Promise<void> {
