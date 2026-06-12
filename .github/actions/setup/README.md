@@ -13,7 +13,7 @@ On a cache hit both `lib/node_modules` and `bin/` (the CLI shims) are restored f
 ### Minimal — plugin only (you already have `opencode` installed)
 
 ```yaml
-- uses: vymalo/opencode-oauth2/.github/actions/setup@v0.2.0
+- uses: vymalo/opencode-oauth2/.github/actions/setup@v0.6.1
   with:
     node-version: '22'
 ```
@@ -21,7 +21,7 @@ On a cache hit both `lib/node_modules` and `bin/` (the CLI shims) are restored f
 ### Plugin + opencode CLI
 
 ```yaml
-- uses: vymalo/opencode-oauth2/.github/actions/setup@v0.2.0
+- uses: vymalo/opencode-oauth2/.github/actions/setup@v0.6.1
   with:
     node-version: '22'
     install-opencode: 'true'
@@ -45,7 +45,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: vymalo/opencode-oauth2/.github/actions/setup@v0.2.0
+      - uses: vymalo/opencode-oauth2/.github/actions/setup@v0.6.1
         with:
           node-version: '22'
           install-opencode: 'true'
@@ -61,7 +61,7 @@ The `OPENCODE_CONFIG_DIR` should contain an `opencode.json` like the one in the 
 
 | Name | Default | Description |
 | --- | --- | --- |
-| `version` | `latest` | Plugin version (`"0.2.0"`, `"^0.2.0"`, `"next"`, …). |
+| `version` | `latest` | Plugin version (`"0.6.1"`, `"^0.6.1"`, `"next"`, …). |
 | `install-opencode` | `false` | Also install the opencode CLI globally. |
 | `opencode-package` | `opencode-ai` | npm package name for the CLI. Override for forks/mirrors. |
 | `opencode-version` | `latest` | CLI version. Only used when `install-opencode=true`. |
@@ -86,8 +86,8 @@ The `OPENCODE_CONFIG_DIR` should contain an `opencode.json` like the one in the 
 
 `vymalo-opencode-oauth2-<runner-os>-node-<node-version>-plugin-<resolved-plugin-version>-cli-<opencode-package>@<resolved-cli-version|none>`
 
-Mutable specs (`latest`, `next`, `^0.2.0`) are resolved to a concrete version via `npm view` **before** they land in the key, so the cache doesn't pin a stale install indefinitely when a dist-tag moves.
+Mutable specs (`latest`, `next`, `^0.6.1`) are resolved to a concrete version via `npm view` **before** they land in the key, so the cache doesn't pin a stale install indefinitely when a dist-tag moves.
 
 ## Pinning
 
-Pin to a release tag (`@v0.2.0`) — the action ships with the plugin in the same repo, so the tag determines what gets installed by default. If you set `version:` explicitly the action uses that and only the action.yml itself is taken from the tag ref.
+Pin to a release tag (`@v0.6.1`) — the action ships with the plugin in the same repo, so the tag determines what gets installed by default. If you set `version:` explicitly the action uses that and only the action.yml itself is taken from the tag ref.

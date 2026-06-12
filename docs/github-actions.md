@@ -78,7 +78,7 @@ permissions:
 
 jobs:
   run:
-    uses: vymalo/opencode-oauth2/.github/workflows/opencode-run.yml@v0.2.0
+    uses: vymalo/opencode-oauth2/.github/workflows/opencode-run.yml@v0.6.1
     with:
       model: miaou/glm-5
       prompt: ${{ inputs.prompt }}
@@ -99,7 +99,7 @@ You're responsible for committing `.opencode-ci/opencode.json` (or wherever you 
 If you need to compose your own job — different runner image, custom pre/post steps, multiple `opencode run` calls in one job — use the composite setup action directly. It installs the plugin (and optionally the CLI) globally and caches the install across runs.
 
 ```yaml
-- uses: vymalo/opencode-oauth2/.github/actions/setup@v0.2.0
+- uses: vymalo/opencode-oauth2/.github/actions/setup@v0.6.1
   with:
     node-version: '22'
     install-opencode: 'true'
@@ -107,7 +107,7 @@ If you need to compose your own job — different runner image, custom pre/post 
 
 | Input | Default | Purpose |
 | --- | --- | --- |
-| `version` | `latest` | Plugin version (`"0.2.0"`, `"^0.2.0"`, `"next"`, …). |
+| `version` | `latest` | Plugin version (`"0.6.1"`, `"^0.6.1"`, `"next"`, …). |
 | `install-opencode` | `false` | Also install the opencode CLI globally. |
 | `opencode-package` | `opencode-ai` | npm package name for the CLI. Override for forks/mirrors. |
 | `opencode-version` | `latest` | CLI version. Used only when `install-opencode=true`. |
@@ -138,7 +138,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: vymalo/opencode-oauth2/.github/actions/setup@v0.2.0
+      - uses: vymalo/opencode-oauth2/.github/actions/setup@v0.6.1
         with:
           node-version: '22'
           install-opencode: 'true'
@@ -201,7 +201,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: vymalo/opencode-oauth2/.github/actions/setup@v0.2.0
+      - uses: vymalo/opencode-oauth2/.github/actions/setup@v0.6.1
         with:
           node-version: ${{ matrix.node }}
           install-opencode: 'true'
@@ -272,7 +272,7 @@ jobs:
         # Code from the PR is treated as untrusted input.
         with:
           ref: ${{ github.event.pull_request.base.ref }}
-      - uses: vymalo/opencode-oauth2/.github/actions/setup@v0.2.0
+      - uses: vymalo/opencode-oauth2/.github/actions/setup@v0.6.1
         with:
           node-version: '22'
           install-opencode: 'true'
@@ -297,7 +297,7 @@ If you must run on `pull_request` from forks (e.g. for *limited* AI-driven analy
 jobs:
   run:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    uses: vymalo/opencode-oauth2/.github/workflows/opencode-run.yml@v0.2.0
+    uses: vymalo/opencode-oauth2/.github/workflows/opencode-run.yml@v0.6.1
     with:
       model: miaou/glm-5
       prompt: ${{ inputs.prompt }}
