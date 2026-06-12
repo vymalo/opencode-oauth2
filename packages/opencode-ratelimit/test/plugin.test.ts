@@ -284,6 +284,27 @@ describe("makeRateLimitFetch", () => {
       expect(response.status).toBe(429);
       expect(h.state.cooldownUntilMs).toBe(0); // stale cooldown dropped → next call won't sleep
     });
+
+    it("clears a stale wait cooldown on a non-429 error-tier remaining:0", async () => {
+      const h = harness(
+        makeOpts({
+          tiers: [
+            { maxResetSeconds: 120, action: "wait", maxWaitMs: 1_000, maxRetries: 3 },
+            { maxResetSeconds: null, action: "error", maxWaitMs: 0, maxRetries: 0 }
+          ]
+        })
+      );
+      h.state.cooldownUntilMs = h.clock.now() + 60_000; // stale short cooldown
+      h.state.cooldownMaxWaitMs = 1_000;
+      // A healthy-status response that reports remaining:0 with a long reset → error tier.
+      h.fetchImpl.mockResolvedValueOnce(
+        res(200, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "2592000" })
+      );
+
+      await h.fetch("https://api.test");
+
+      expect(h.state.cooldownUntilMs).toBe(0); // error tier must not leave the gate armed
+    });
   });
 
   describe("scope: model", () => {
@@ -350,6 +371,48 @@ describe("makeRateLimitFetch", () => {
       expect(keys).toHaveLength(1);
       expect(keys[0]).not.toBe("prov"); // a per-model bucket, not the provider fallback
       expect(keys[0]).toContain("kimi-k2.6");
+    });
+
+    it("clones a Request input per attempt so a wait-tier retry works", async () => {
+      const h = modelHarness();
+      h.fetchImpl
+        .mockResolvedValueOnce(res(429, { "x-ratelimit-reset": "5" }))
+        .mockResolvedValueOnce(res(200, { "x-ratelimit-remaining": "5" }));
+      const original = new Request("https://api.test", {
+        method: "POST",
+        body: JSON.stringify({ model: "gemma-4" })
+      });
+
+      const response = await h.fetch(original);
+
+      expect(response.status).toBe(200);
+      expect(h.fetchImpl).toHaveBeenCalledTimes(2);
+      const inputs = h.fetchImpl.mock.calls.map((c) => c[0] as Request);
+      expect(inputs[0]).not.toBe(original); // fresh clone, not the original
+      expect(inputs[0]).not.toBe(inputs[1]); // distinct clone per attempt
+      expect(original.bodyUsed).toBe(false); // original never consumed
+    });
+
+    it("honors an abort signal carried on a Request input", async () => {
+      const h = modelHarness();
+      h.fetchImpl.mockResolvedValueOnce(
+        res(200, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "48" })
+      );
+      await h.call("model-a"); // arms cooldown for model-a's bucket
+      h.fetchImpl.mockClear();
+
+      const req = new Request("https://api.test", {
+        method: "POST",
+        body: JSON.stringify({ model: "model-a" }),
+        signal: AbortSignal.abort()
+      });
+      const error = await h.fetch(req).then(
+        () => null,
+        (e: unknown) => e
+      );
+
+      expect((error as Error)?.name).toBe("AbortError");
+      expect(h.fetchImpl).not.toHaveBeenCalled(); // aborted during the pre-request gate
     });
   });
 

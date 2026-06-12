@@ -125,8 +125,12 @@ export function makeRateLimitFetch(
   const underlying = delegate ?? deps.fetchImpl ?? globalThis.fetch;
   const { logger } = deps;
 
+  const isRequest = (value: RequestInfo | URL): value is Request =>
+    typeof Request !== "undefined" && value instanceof Request;
+
   const wrapped: typeof fetch = async (input, init) => {
-    const signal = init?.signal ?? undefined;
+    // Honor an abort signal whether it rides on `init` or on a `Request` input.
+    const signal = init?.signal ?? (isRequest(input) ? input.signal : undefined) ?? undefined;
     const model = opts.scope === "model" ? await modelFromRequest(input, init) : undefined;
     const key = model ? `${providerId}\u0000${model}` : providerId;
     let state = store.get(key);
@@ -157,7 +161,11 @@ export function makeRateLimitFetch(
     // 3-5. Attempt loop.
     let attempt = 0;
     for (;;) {
-      const response = await underlying(input, init);
+      // A Request body is single-use; send a fresh clone each attempt so a
+      // wait-tier retry doesn't fail with "body already used". (The original is
+      // never sent directly, so each clone has an unconsumed body.)
+      const attemptInput = isRequest(input) ? input.clone() : input;
+      const response = await underlying(attemptInput, init);
       const snapshot = readSnapshot(response, opts, now(), logger, providerId);
       logger.debug("ratelimit_quota", {
         providerId,
@@ -180,6 +188,11 @@ export function makeRateLimitFetch(
           if (tier.action === "wait") {
             state.cooldownUntilMs = snapshot.resetAtMs;
             state.cooldownMaxWaitMs = tier.maxWaitMs;
+          } else {
+            // Error tier → don't arm, and drop any stale cooldown a prior
+            // "wait" window left so the next request hits a real 429 at once.
+            state.cooldownUntilMs = 0;
+            state.cooldownMaxWaitMs = 0;
           }
         }
         return response;
