@@ -67,4 +67,8 @@ export class ContentExecutor implements Executor {
   async release(_tabId: number): Promise<void> {
     // Nothing to release — no persistent attachment.
   }
+
+  async releaseAll(): Promise<void> {
+    // No persistent attachments.
+  }
 }

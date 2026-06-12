@@ -224,6 +224,8 @@ export function pageSyntheticPointer(args: {
   y?: number;
   dblclick?: boolean;
 }): boolean {
+  const useCoords =
+    typeof args.x === "number" && typeof args.y === "number" && !args.ref && !args.selector;
   const el =
     resolveEl(args) ??
     (typeof args.x === "number" && typeof args.y === "number"
@@ -232,13 +234,18 @@ export function pageSyntheticPointer(args: {
   if (!(el instanceof HTMLElement)) {
     return false;
   }
-  el.scrollIntoView({ block: "center" });
+  // Only scroll the element into view for ref/selector targets — for explicit
+  // coordinates the caller means *those* viewport pixels, and scrolling would
+  // move them out from under the click.
+  if (!useCoords) {
+    el.scrollIntoView({ block: "center" });
+  }
   const rect = el.getBoundingClientRect();
   const init: MouseEventInit = {
     bubbles: true,
     cancelable: true,
-    clientX: rect.left + rect.width / 2,
-    clientY: rect.top + rect.height / 2,
+    clientX: useCoords ? (args.x as number) : rect.left + rect.width / 2,
+    clientY: useCoords ? (args.y as number) : rect.top + rect.height / 2,
     view: window
   };
   el.focus();
@@ -272,6 +279,9 @@ export function pageSyntheticType(args: {
   } else if (el.isContentEditable) {
     el.textContent = (el.textContent ?? "") + args.text;
     el.dispatchEvent(new Event("input", { bubbles: true }));
+  } else {
+    // Not a text-editable target — report failure rather than a false success.
+    return false;
   }
   if (args.submit) {
     const enter: KeyboardEventInit = {
@@ -318,7 +328,52 @@ export function pageSyntheticKey(args: { key: string }): boolean {
     shiftKey,
     metaKey
   };
-  target.dispatchEvent(new KeyboardEvent("keydown", init));
+  const notCancelled = target.dispatchEvent(new KeyboardEvent("keydown", init));
+  // Synthetic key events don't trigger the browser's default editing actions,
+  // so apply the common editable-control effects ourselves (best-effort — the
+  // CDP executor handles the rest via trusted input). Skip if a listener called
+  // preventDefault, or if a modifier chord is held.
+  let applied = false;
+  if (
+    notCancelled &&
+    !ctrlKey &&
+    !altKey &&
+    !metaKey &&
+    (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)
+  ) {
+    const field = target;
+    try {
+      // selectionStart/setRangeText throw on inputs that don't support
+      // selection (e.g. type=number); fall back to dispatch-only there.
+      const start = field.selectionStart ?? field.value.length;
+      const end = field.selectionEnd ?? start;
+      if (key === "Backspace") {
+        field.setRangeText("", start === end ? Math.max(0, start - 1) : start, end, "end");
+        applied = true;
+      } else if (key === "Delete") {
+        field.setRangeText(
+          "",
+          start,
+          start === end ? Math.min(field.value.length, end + 1) : end,
+          "end"
+        );
+        applied = true;
+      } else if (key === "Enter") {
+        if (field instanceof HTMLTextAreaElement) {
+          field.setRangeText("\n", start, end, "end");
+          applied = true;
+        } else {
+          (field.closest("form") as HTMLFormElement | null)?.requestSubmit?.();
+          applied = true;
+        }
+      }
+    } catch {
+      applied = false;
+    }
+    if (applied) {
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  }
   target.dispatchEvent(new KeyboardEvent("keyup", init));
   return true;
 }

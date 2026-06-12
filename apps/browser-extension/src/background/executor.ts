@@ -21,6 +21,8 @@ export interface Executor {
   screenshot(tabId: number, fullPage: boolean): Promise<ScreenshotData>;
   /** Release any per-tab resources (e.g. detach the debugger). Best-effort. */
   release(tabId: number): Promise<void>;
+  /** Release everything — called before the executor is torn down/replaced. */
+  releaseAll(): Promise<void>;
 }
 
 export interface BrowserCapabilities {

@@ -169,13 +169,13 @@ export class CommandRouter {
           await new Promise((r) => setTimeout(r, params.ms as number));
           return { data: { ok: true }, summary: `waited ${params.ms}ms` };
         }
+        const state = (params.state as "visible" | "hidden" | "attached") ?? "visible";
         const found = await runInPage(tabId, pageWaitForSelector, [
-          {
-            selector: params.selector as string,
-            state: (params.state as "visible" | "hidden" | "attached") ?? "visible",
-            timeoutMs: 10_000
-          }
+          { selector: params.selector as string, state, timeoutMs: 10_000 }
         ]);
+        if (!found) {
+          throw new Error(`timed out waiting for ${params.selector} to be ${state}`);
+        }
         return { data: { found }, summary: `waited for ${params.selector}` };
       }
       case "screenshot": {

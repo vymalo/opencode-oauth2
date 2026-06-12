@@ -74,6 +74,11 @@ export class CdpSession {
       });
     });
   }
+
+  /** Detach every attached tab — used when the executor stack is replaced. */
+  async detachAll(): Promise<void> {
+    await Promise.all([...this.attached].map((tabId) => this.detach(tabId)));
+  }
 }
 
 /** CDP key descriptors for the handful of named keys we special-case. */

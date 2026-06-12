@@ -168,6 +168,11 @@ export class GroupRegistry {
     if (!group) {
       return { closed: [] };
     }
+    // An explicit tabId must belong to the group — otherwise browser_close
+    // could remove an unrelated user tab (same isolation guard as resolveTab).
+    if (tabId !== undefined && !group.tabIds.includes(tabId)) {
+      throw new Error(`tab ${tabId} is not part of group "${name}"`);
+    }
     const toClose = tabId !== undefined ? [tabId] : [...group.tabIds];
     for (const id of toClose) {
       await this.executor.release(id).catch(() => {});

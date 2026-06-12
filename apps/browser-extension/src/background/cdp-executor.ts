@@ -32,9 +32,12 @@ export class CdpExecutor implements Executor {
     clickCount: number
   ): Promise<void> {
     const base = { x, y, button, clickCount };
+    // CDP `buttons` is a bitfield (left=1, right=2, middle=4) — must match the
+    // requested button or pages reading event.buttons see the wrong one.
+    const buttonsBit = button === "right" ? 2 : button === "middle" ? 4 : 1;
     await this.cdp.send(tabId, "Input.dispatchMouseEvent", {
       type: "mousePressed",
-      buttons: 1,
+      buttons: buttonsBit,
       ...base
     });
     await this.cdp.send(tabId, "Input.dispatchMouseEvent", {
@@ -114,5 +117,9 @@ export class CdpExecutor implements Executor {
 
   async release(tabId: number): Promise<void> {
     await this.cdp.detach(tabId);
+  }
+
+  async releaseAll(): Promise<void> {
+    await this.cdp.detachAll();
   }
 }

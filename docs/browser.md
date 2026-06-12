@@ -147,6 +147,10 @@ The trusted-input surface (click/type/key) and screenshots have two backends; ev
 | Banner | Shows Chrome's "being debugged" banner (intentional signal) | None |
 | Browser | Chromium only | Chromium + Firefox |
 
+Synthetic key events on the content-script executor don't trigger the browser's native editing
+actions, so the extension applies the common ones (Backspace/Delete/Enter in inputs) itself —
+trusted shortcuts and rarer keys are only reliable on the CDP executor.
+
 `executor: "auto"` picks CDP when `chrome.debugger` is available, else content-script. The
 **"being debugged" banner is a feature** — a visible indicator that automation is active. If
 the user dismisses it, the extension transparently re-attaches on the next action.

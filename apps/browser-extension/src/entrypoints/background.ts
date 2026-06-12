@@ -20,6 +20,10 @@ export default defineBackground(() => {
   // the user changes settings (executor mode may have flipped).
   async function rebuild(): Promise<void> {
     const settings = await getSettings();
+    // Detach the outgoing executor's debugger sessions before replacing it,
+    // otherwise the "being debugged" banner sticks and a later switch back to
+    // CDP starts with an empty (stale) attachment set.
+    await executor.releaseAll().catch(() => {});
     executorKind = resolveExecutorKind(settings.executorMode, detectCapabilities());
     executor = executorKind === "cdp" ? new CdpExecutor() : new ContentExecutor();
     registry = new GroupRegistry(executor);
