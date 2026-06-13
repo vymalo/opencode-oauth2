@@ -132,6 +132,34 @@ describe("enrichConfig", () => {
     expect(enriched.tool_call).toBe(false);
   });
 
+  it("clears a stale-true capability flag when the field is overwritten (endpoint reports no tools)", async () => {
+    // The exact gap a reviewer flagged: another plugin stamped tool_call:true,
+    // the endpoint's supported_parameters is present but lacks tools, and the
+    // user opted tool_call into overwrite — the false must win.
+    const noToolsEntry: OpenRouterModel = {
+      id: "model-a",
+      supported_parameters: ["temperature"]
+    };
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ data: [noToolsEntry] }), { status: 200 }));
+    const config = withProvider("custom", {
+      options: {
+        baseURL: "https://x.test/v1",
+        meta: { modelsInfoUrl: "models/info", modelsInfoOverwrite: ["tool_call"] }
+      },
+      models: { "model-a": { tool_call: true } }
+    });
+
+    await enrichConfig(config, {
+      cache: memoryCache(),
+      logger: silentLogger(),
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    });
+
+    expect(getModel(config, "custom", "model-a").tool_call).toBe(false);
+  });
+
   it("keeps a pre-stamped name when modelsInfoOverwrite is absent (default upstream-wins)", async () => {
     const fetchImpl = vi
       .fn()

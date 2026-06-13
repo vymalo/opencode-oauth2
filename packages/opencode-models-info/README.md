@@ -137,6 +137,8 @@ The merge is **upstream-wins** by default: a field already present on a model en
 
 Listed fields still only change when the endpoint actually provides a value (a missing field never blanks an existing one), and unlisted fields keep the default upstream-wins behavior. Valid names are the mapped fields: `name`, `attachment`, `reasoning`, `temperature`, `tool_call`, `cost`, `limit`, `modalities`.
 
+> **Forcing a capability flag *off*.** The boolean flags (`tool_call`, `reasoning`, `temperature`, `attachment`) are normally emitted *true-only*. Listing one in `modelsInfoOverwrite` also lets the endpoint assert `false` (to clear a stale `true`) — but only when the endpoint actually reports the underlying data (`supported_parameters`, or `architecture.input_modalities` for `attachment`). If that data is absent the plugin can't tell true from false, so it leaves the field alone rather than inventing a `false`.
+
 ### Expected response shape (OpenRouter)
 
 ```json

@@ -81,7 +81,7 @@ async function enrichProvider(
       if (!match) {
         continue;
       }
-      const derived = mapOpenRouterEntry(match);
+      const derived = mapOpenRouterEntry(match, overwrite);
       mergeIntoModel(modelConfig, derived, overwrite);
       enrichedCount += 1;
     }

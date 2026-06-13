@@ -30,7 +30,10 @@ export interface ModelMetadata {
  * OpenCode `ModelConfig` fields we know how to populate. Returns only the
  * fields we can derive; callers do the upstream-wins merge.
  */
-export function mapOpenRouterEntry(entry: OpenRouterModel): ModelMetadata {
+export function mapOpenRouterEntry(
+  entry: OpenRouterModel,
+  overwrite?: ReadonlySet<string>
+): ModelMetadata {
   const out: ModelMetadata = {};
 
   if (entry.name) {
@@ -58,22 +61,59 @@ export function mapOpenRouterEntry(entry: OpenRouterModel): ModelMetadata {
 
   const params = entry.supported_parameters ?? [];
   const paramSet = new Set(params.map((p) => p.toLowerCase()));
+  // We can only *assert a capability false* when the source actually told us
+  // about it. An absent `supported_parameters` / `input_modalities` means "we
+  // don't know" — never a misleading `false`.
+  const knowsParams = Array.isArray(entry.supported_parameters);
+  const knowsInputMods = Array.isArray(entry.architecture?.input_modalities);
 
-  if (paramSet.has("tools") || paramSet.has("tool_choice")) {
-    out.tool_call = true;
-  }
-  if (paramSet.has("reasoning") || paramSet.has("reasoning_effort") || paramSet.has("thinking")) {
-    out.reasoning = true;
-  }
-  if (paramSet.has("temperature")) {
-    out.temperature = true;
-  }
-
-  if (inputMods.some((m) => m !== "text")) {
-    out.attachment = true;
-  }
+  setCapability(out, "tool_call", paramSet.has("tools") || paramSet.has("tool_choice"), {
+    known: knowsParams,
+    overwrite
+  });
+  setCapability(
+    out,
+    "reasoning",
+    paramSet.has("reasoning") || paramSet.has("reasoning_effort") || paramSet.has("thinking"),
+    { known: knowsParams, overwrite }
+  );
+  setCapability(out, "temperature", paramSet.has("temperature"), {
+    known: knowsParams,
+    overwrite
+  });
+  setCapability(
+    out,
+    "attachment",
+    inputMods.some((m) => m !== "text"),
+    {
+      known: knowsInputMods,
+      overwrite
+    }
+  );
 
   return out;
+}
+
+/**
+ * Emit a capability flag. By default these are *true-only*: an absent
+ * capability stays `undefined`, which under upstream-wins correctly means
+ * "leave whatever is there". But a field opted into `overwrite` wants the
+ * endpoint's answer to win outright — so we must also emit an explicit `false`
+ * to clear a stale `true` another plugin stamped. We only do that when the
+ * source actually carried the relevant data (`known`); otherwise there is
+ * nothing to assert and the field stays `undefined`.
+ */
+function setCapability(
+  out: ModelMetadata,
+  field: "tool_call" | "reasoning" | "temperature" | "attachment",
+  present: boolean,
+  opts: { known: boolean; overwrite?: ReadonlySet<string> }
+): void {
+  if (present) {
+    out[field] = true;
+  } else if (opts.known && opts.overwrite?.has(field)) {
+    out[field] = false;
+  }
 }
 
 function mapPricing(pricing: OpenRouterModel["pricing"]): ModelMetadata["cost"] | undefined {

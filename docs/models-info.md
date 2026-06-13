@@ -49,6 +49,8 @@ Upstream-wins assumes a value already on a model entry is there on purpose — t
 - An overwrite field still only changes when the endpoint **actually provides** a value — a missing field never blanks an existing one.
 - Unlisted fields keep the default upstream-wins behavior, so a handwritten override you *do* want to keep stays safe.
 
+**Capability flags can be forced *off*, but only when the endpoint reports them.** Normally the mapper emits the boolean flags (`tool_call`, `reasoning`, `temperature`, `attachment`) as *true-only* — an absent capability stays unset. Listing one in `overwrite` lets the endpoint also assert `false` and clear a stale `true` another plugin stamped — **but only when the source actually carried the signal** (`supported_parameters` for the three parameter flags, `architecture.input_modalities` for `attachment`). If the endpoint omits that data entirely, the plugin genuinely doesn't know the answer, so it leaves the field untouched rather than fabricating a `false`. To force a capability off, make sure your endpoint emits the relevant array (even an empty `supported_parameters: []` counts as "no params").
+
 ## Auth composition
 
 The fetch sends the union of the provider's `options.headers` and the meta-specific `meta.modelsInfoHeaders` (meta wins on conflict). That single rule covers the three common setups:
