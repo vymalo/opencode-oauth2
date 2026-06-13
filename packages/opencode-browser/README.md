@@ -42,13 +42,22 @@ directory of the repo, build it (`pnpm build`), and load it unpacked.
 
 ## Tools
 
-`browser_open`, `browser_navigate`, `browser_click`, `browser_double_click`, `browser_type`,
-`browser_fill`, `browser_select`, `browser_scroll`, `browser_press_key`, `browser_screenshot`,
-`browser_snapshot`, `browser_get_text`, `browser_wait`, `browser_tabs`, `browser_close`,
-`browser_release`.
+**32 tools** in three groups, gated by the `groups` option (default `["page","control"]` —
+`debug` is opt-in):
 
-The plugin hands the browser back automatically when OpenCode exits (and `browser_release` lets
-the model do it mid-session) — you never have to disconnect by hand.
+- **`page`** — `snapshot`, `get_text`, `get_html`, `get_attribute`, `query`, `screenshot`, `tabs`
+- **`control`** — `open`, `navigate`, `back`, `forward`, `reload`, `click`, `double_click`,
+  `hover`, `drag`, `type`, `fill`, `select`, `scroll`, `press_key`, `upload`, `wait`, `activate`,
+  `close`, `release`
+- **`debug`** (off by default) — `eval`, `console`, `network`, `handle_dialog`, `set_viewport`,
+  `cookies`
+
+All names are `browser_*`. Because the names are stable, you can also scope tools per agent via
+OpenCode's own tool allow/deny. The plugin hands the browser back automatically when OpenCode
+exits (and `browser_release` lets the model do it mid-session) — you never disconnect by hand.
+
+> Want to use these tools from a non-OpenCode agent? See the sibling
+> [`@vymalo/opencode-browser-mcp`](../opencode-browser-mcp) MCP server.
 
 Every tool takes a `group` (the named tab group). Prefer `browser_snapshot` to get stable
 element **refs**, then target them with `browser_click({ ref })` etc. Screenshots are written to

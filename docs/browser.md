@@ -56,6 +56,7 @@ Options (all optional):
 | `port` | `4517` | WebSocket bridge port. |
 | `token` | _generated_ | Shared secret the extension must present. If omitted, a random token is generated and **logged once** (`browser_bridge_token_generated`) — copy it into the extension. |
 | `executor` | `"auto"` | Forwarded executor preference: `auto` \| `cdp` \| `content`. |
+| `groups` | `["page","control"]` | Which tool groups to register (`page` \| `control` \| `debug`). `debug` is opt-in. |
 | `timeoutMs` | `30000` | Per-command timeout before the tool call rejects. |
 | `screenshotDir` | `".opencode/browser"` | Where screenshots are written (relative paths resolve against the session worktree). |
 
@@ -87,24 +88,54 @@ and dashboard show **Connected** once the handshake succeeds.
 `group` is the primary handle on every tool — it names the tab group the action targets, and
 the extension creates it on the first `browser_open`.
 
+The 32 tools are organized into three **groups**, gated by the `groups` option (plugin) /
+`OCB_GROUPS` (MCP). Default: `page` + `control` (`debug` is opt-in). The `browser_*` names are
+stable, so OpenCode's per-agent tool allow/deny works on them directly too.
+
+**`page`** — observe (read-mostly):
+
 | Tool | Key args | Result |
 | --- | --- | --- |
-| `browser_open` | `group, url?, focus?` | Opens a tab in the group; returns `{ tabId, url, title }`. |
+| `browser_snapshot` | `group` | Accessibility/DOM snapshot with stable **refs**. |
+| `browser_get_text` | `group, tabId?` | Visible text of the page. |
+| `browser_get_html` | `group, ref?/selector?, outer?` | HTML of the page or an element. |
+| `browser_get_attribute` | `group, ref?/selector?, name?` | Tag, text, value, checked, box, attributes. |
+| `browser_query` | `group, selector, limit?` | Matching elements, each with a ref. |
+| `browser_screenshot` | `group, fullPage?, tabId?` | PNG (disk path in OpenCode; inline image in MCP). |
+| `browser_tabs` | `group?` | Lists groups + tabs. |
+
+**`control`** — drive:
+
+| Tool | Key args | Result |
+| --- | --- | --- |
+| `browser_open` | `group, url?, focus?` | Opens a tab in the group. |
 | `browser_navigate` | `group, url, tabId?` | Navigates the active (or given) tab. |
-| `browser_click` | `group, ref?\|selector?\|x,y, button?` | Clicks an element. |
+| `browser_back` / `browser_forward` / `browser_reload` | `group, tabId?` | History nav / reload. |
+| `browser_click` | `group, ref?\|selector?\|x,y, button?` | Clicks (left/middle/right). |
 | `browser_double_click` | `group, ref?\|selector?\|x,y` | Double-clicks. |
+| `browser_hover` | `group, ref?\|selector?\|x,y` | Hovers (reveals menus/tooltips). |
+| `browser_drag` | `group, fromRef?/fromSelector?, ref?/selector?` | Drag-and-drop. |
 | `browser_type` | `group, text, ref?/selector?, submit?` | Types into a field; optional Enter. |
 | `browser_fill` | `group, fields: [{ ref?/selector, value }]` | Batch form fill. |
 | `browser_select` | `group, ref?/selector, value\|values` | Sets `<select>` option(s). |
 | `browser_scroll` | `group, deltaX?, deltaY?, to?` | Scrolls page or element. |
 | `browser_press_key` | `group, key` | Presses a key / chord. |
-| `browser_screenshot` | `group, fullPage?, tabId?` | **Writes a PNG to disk**, returns the path. |
-| `browser_snapshot` | `group` | Accessibility/DOM snapshot with stable **refs**. |
-| `browser_get_text` | `group, tabId?` | Visible text of the page. |
+| `browser_upload` | `group, ref?/selector, paths[]` | Sets a file `<input>` (CDP only). |
 | `browser_wait` | `group, ms?\|selector?, state?` | Fixed delay or wait-for-selector. |
-| `browser_tabs` | `group?` | Lists groups + tabs. |
+| `browser_activate` | `group, tabId?` | Brings a tab to the foreground. |
 | `browser_close` | `group, tabId?` | Closes a tab, or the whole group. |
-| `browser_release` | — | Releases control (detaches the debugger, clears the banner) without closing tabs. |
+| `browser_release` | — | Releases control (detaches the debugger) without closing tabs. |
+
+**`debug`** — powerful / sensitive (**off by default**; mostly CDP/Chromium-only):
+
+| Tool | Key args | Result |
+| --- | --- | --- |
+| `browser_eval` | `group, code` | Evaluates JS in the page DOM, returns the result. |
+| `browser_console` | `group` | Recent console output (CDP only). |
+| `browser_network` | `group` | Recent network requests (CDP only). |
+| `browser_handle_dialog` | `group, accept?, promptText?` | Accept/dismiss a JS dialog (CDP only). |
+| `browser_set_viewport` | `group, width, height, mobile?` | Emulate a viewport (CDP only). |
+| `browser_cookies` | `op, url?, name?, value?` | Read/modify cookies. |
 
 ### Targeting elements — prefer refs
 
@@ -219,6 +250,34 @@ extension disconnects.
 | `debugger attach failed` | Another debugger (DevTools) is attached, or you forced `cdp` on Firefox. Switch executor to `content`. |
 | Screenshot path returned but model can't see it | Use the `read` tool on the returned path — tool output can't carry images. |
 | Clicks ignored on a strict site | You're on the content-script executor (synthetic events). Switch to `cdp` on Chromium for trusted input. |
+
+## Use it from other agents (MCP)
+
+The browser tools aren't tied to OpenCode. **`@vymalo/opencode-browser-mcp`** is an MCP stdio
+server that hosts the same bridge and exposes the same group-filtered `browser_*` tools over the
+Model Context Protocol — so Claude Code, Cursor, Cline, Zed, etc. can drive the extension.
+Screenshots come back as **inline image content** (no disk-path step).
+
+```jsonc
+// e.g. an MCP client config
+{
+  "mcpServers": {
+    "browser": {
+      "command": "npx",
+      "args": ["-y", "@vymalo/opencode-browser-mcp"],
+      "env": { "OCB_TOKEN": "your-shared-token", "OCB_GROUPS": "page,control" }
+    }
+  }
+}
+```
+
+Env: `OCB_TOKEN` (shared secret; generated + printed to stderr if unset), `OCB_PORT` (4517),
+`OCB_HOST` (127.0.0.1), `OCB_GROUPS` (csv, default `page,control`). All logging goes to stderr
+(stdout is the JSON-RPC stream). Paste the URL + token into the extension dashboard exactly as
+with the plugin — the extension doesn't care which adapter is on the other end of the bridge.
+
+The OpenCode plugin and the MCP server share one **tool catalog** (`catalog.ts`), so the two
+surfaces never drift.
 
 ## Development
 
