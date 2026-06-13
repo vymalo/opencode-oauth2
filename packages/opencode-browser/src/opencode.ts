@@ -129,7 +129,11 @@ export function createBrowserPlugin(factoryOptions: BrowserPluginFactoryOptions 
 
     const options = resolveOptions(pluginOptions, generateToken);
     const rawOptions = pluginOptions as BrowserPluginOptions | undefined;
-    const tokenProvided = typeof rawOptions?.token === "string";
+    // Empty string is NOT an explicit token (resolveOptions generates one for
+    // it). Treating "" as provided would mark the shared token "explicit" and
+    // skip the paste_into_extension log, leaving the extension unable to learn
+    // the generated token.
+    const tokenProvided = typeof rawOptions?.token === "string" && rawOptions.token.length > 0;
     // Only forward the executor preference when the operator set it explicitly;
     // otherwise the extension keeps its own dashboard choice.
     const executorProvided = typeof rawOptions?.executor === "string";

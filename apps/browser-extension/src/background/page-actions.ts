@@ -225,6 +225,12 @@ export async function pageDispatch(
     case "query": {
       const selector = p.selector ?? "*";
       const limit = p.limit ?? 50;
+      // Clear refs from a previous query first: reusing q1, q2, … without
+      // clearing means a later action targeting "q1" could resolve to a stale
+      // element left over from an earlier query and act on the wrong target.
+      for (const prev of Array.from(document.querySelectorAll("[data-ocb-ref^='q']"))) {
+        prev.removeAttribute("data-ocb-ref");
+      }
       const nodes = Array.from(document.querySelectorAll(selector))
         .filter(isVisible)
         .slice(0, limit);
