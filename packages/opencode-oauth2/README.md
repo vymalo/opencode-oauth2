@@ -98,6 +98,7 @@ These apply to both config shapes above.
 | `redirectPort` | random | Fixed port for the local callback server (authorization-code only). |
 | `nameOverrides` | `{}` | Map of model id → friendly display name. Applied during catalog normalization. |
 | `syncIntervalMinutes` | `60` | Per-server scheduler interval. Failures preserve the last-known-good model list. |
+| `responseApi` | `false` | Route inference through the OpenAI **Responses API** (`/v1/responses`) instead of Chat Completions (`/v1/chat/completions`). When `true`, the provider is registered with `npm: "@ai-sdk/openai"` (the native OpenAI provider, whose default model targets Responses since AI SDK v5) rather than `@ai-sdk/openai-compatible`. The plugin stamps an inert placeholder `apiKey` so the native provider can be constructed (the real OAuth bearer is still injected per request, so the placeholder is never sent) and wraps the provider's `fetch` to repair Responses SSE streams that omit `output_index`/`content_index` (seen with Envoy AI Gateway; otherwise OpenCode fails with `text part <id> not found`). Only enable this when your gateway implements the OpenAI Responses contract for the model you use. |
 | `jwksUri` | _(unset)_ | Reserved; not currently used at runtime. |
 
 Plus the top-level `pluginConfig.oauth2ModelSync` block accepts:
