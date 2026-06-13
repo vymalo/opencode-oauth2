@@ -9,5 +9,8 @@ packages/*/target
 apps/*/.output
 apps/*/.wxt
 
+# Local store-submission credentials (the .example template is committed)
+apps/*/.env.submit
+
 # Local dev-harness screenshot output
 scripts/harness-shots

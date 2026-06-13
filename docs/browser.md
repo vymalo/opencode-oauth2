@@ -328,3 +328,48 @@ pnpm build          # production .output/chrome-mv3
 pnpm zip            # packaged zip
 pnpm typecheck      # wxt prepare && tsc --noEmit
 ```
+
+## Publishing the extension to the web stores
+
+A release ships **three** artifacts: the two npm packages (`@vymalo/opencode-browser`,
+`@vymalo/opencode-browser-mcp`) and the extension. The extension isn't on npm — it goes to
+the **Chrome Web Store** and **Firefox Add-ons (AMO)**, with the same zips also attached to the
+GitHub Release as a manual-install fallback.
+
+`.github/workflows/publish.yml` automates this. On a published GitHub Release it runs the full
+gate (typecheck/test/lint/build), zips the extension, then a separate `submit-extension` job
+(`needs: publish`) runs `wxt submit` to push to each store. **Each store is gated on its own
+credentials** — set up Chrome alone, Firefox alone, or both; a store with no secrets is skipped,
+not failed.
+
+### One-time store setup
+
+Both stores require a first **manual** upload to create the listing (name, icons, screenshots,
+description, privacy disclosures) — the API can only push *updates* to an existing item.
+
+1. **Build the zips** locally: `pnpm --filter @vymalo/opencode-browser-extension zip && pnpm --filter @vymalo/opencode-browser-extension zip:firefox`.
+2. **Chrome Web Store** — create the item in the [Developer Dashboard](https://chrome.google.com/webstore/devconsole) (one-time $5 fee), upload `…-chrome.zip`, fill the listing, submit for review. Note the **Extension ID**.
+3. **Firefox AMO** — create the add-on at [addons.mozilla.org](https://addons.mozilla.org/developers/), upload `…-firefox.zip` (and the `…-sources.zip` when prompted — AMO requires reviewable sources for bundled code). Note the **add-on ID** (the `gecko.id`/UUID).
+
+### Credentials → GitHub repository secrets
+
+Generate API credentials once and store them as repo secrets (Settings → Secrets and variables
+→ Actions). Locally you can `cp .env.submit.example apps/browser-extension/.env.submit` and fill
+it to test with `pnpm --filter @vymalo/opencode-browser-extension submit:chrome -- --dry-run`.
+
+| Store | Secret | Where it comes from |
+| --- | --- | --- |
+| Chrome | `CHROME_EXTENSION_ID` | The item's ID from the dashboard. |
+| Chrome | `CHROME_CLIENT_ID` / `CHROME_CLIENT_SECRET` / `CHROME_REFRESH_TOKEN` | A Google Cloud OAuth client with the **Chrome Web Store API** enabled. See the [WXT submit guide](https://wxt.dev/guide/essentials/publishing.html#chrome-web-store). |
+| Firefox | `FIREFOX_EXTENSION_ID` | The add-on UUID / `gecko.id`. |
+| Firefox | `FIREFOX_JWT_ISSUER` / `FIREFOX_JWT_SECRET` | AMO API credentials from your [AMO API keys](https://addons.mozilla.org/developers/addon/api/key/). |
+
+### Triggering & validating
+
+- **Publish a GitHub Release** → npm publish runs, then `submit-extension` pushes to whichever
+  stores are configured.
+- **Dry run**: Actions → *Publish* → *Run workflow* with `dry_run: true` → `wxt submit --dry-run`
+  validates credentials and the zip for each configured store **without uploading**. Use this to
+  confirm secrets are wired before a real release.
+- Chrome and Firefox both re-review every update; the API submit only *queues* the new version —
+  it goes live after their review passes.

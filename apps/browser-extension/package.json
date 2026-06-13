@@ -11,6 +11,8 @@
     "build:firefox": "wxt build -b firefox",
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
+    "submit:chrome": "wxt submit --chrome-zip .output/*-chrome.zip",
+    "submit:firefox": "wxt submit --firefox-zip .output/*-firefox.zip --firefox-sources-zip .output/*-sources.zip",
     "typecheck": "wxt prepare && tsc --noEmit",
     "test": "vitest run",
     "lint": "biome lint .",
