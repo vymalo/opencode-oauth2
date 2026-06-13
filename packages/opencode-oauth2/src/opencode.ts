@@ -77,6 +77,15 @@ function applyResponsesApiOptions(
   logger: Logger
 ): Record<string, unknown> {
   if (!responseApi) {
+    // If the same provider id appears in both config shapes and an earlier pass
+    // stamped our placeholder for Responses mode, but Responses ultimately loses
+    // (this shape omits the flag), don't leave the fake key on the resulting
+    // Chat-Completions provider. Only ever scrub our own placeholder.
+    if (asString(options.apiKey) === RESPONSES_API_PLACEHOLDER_KEY) {
+      const cleaned = { ...options };
+      delete cleaned.apiKey;
+      return cleaned;
+    }
     return options;
   }
 
@@ -433,7 +442,8 @@ function collectManagedProviders(config: OpenCodeConfig, logger: Logger): Manage
       authFlow: extension.authFlow,
       pkce: extension.pkce,
       subjectTokenSource: extension.subjectTokenSource,
-      tokenExchangeAudience: extension.tokenExchangeAudience
+      tokenExchangeAudience: extension.tokenExchangeAudience,
+      responseApi: extension.responseApi
     });
   }
 

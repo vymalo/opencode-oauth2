@@ -651,6 +651,51 @@ describe("OpenCode plugin hooks", () => {
     expect((providerConfig.options as Record<string, unknown>).apiKey).toBe("user-supplied-key");
   });
 
+  it("scrubs the placeholder apiKey when responseApi loses across duplicate config shapes", async () => {
+    // Same provider id in both shapes: the pluginConfig server enables
+    // responseApi (stamping the placeholder + npm @ai-sdk/openai), but the
+    // provider-embedded oauth2 block omits it and must win — leaving a clean
+    // Chat-Completions provider with no leftover fake key.
+    const cacheDir = await mkdtemp(join(tmpdir(), "opencode-hook-responses-dup-"));
+    const hooks = await createHooks(cacheDir);
+
+    const config: Record<string, unknown> = {
+      provider: {
+        "dup-ai": {
+          options: {
+            baseURL: "https://api.example.com/v1",
+            oauth2: {
+              issuer: "https://auth.example.com",
+              clientId: "opencode-client",
+              scopes: ["openid"]
+              // responseApi omitted -> Chat Completions wins
+            }
+          }
+        }
+      },
+      pluginConfig: {
+        oauth2ModelSync: {
+          servers: [
+            {
+              id: "dup-ai",
+              issuer: "https://auth.example.com",
+              baseURL: "https://api.example.com/v1",
+              clientId: "opencode-client",
+              scopes: ["openid"],
+              responseApi: true
+            }
+          ]
+        }
+      }
+    };
+
+    await hooks.config?.(config as never);
+
+    const providerConfig = (config.provider as Record<string, Record<string, unknown>>)["dup-ai"];
+    expect(providerConfig.npm).toBe("@ai-sdk/openai-compatible");
+    expect((providerConfig.options as Record<string, unknown>).apiKey).toBeUndefined();
+  });
+
   it("rejects a non-boolean responseApi value", async () => {
     const cacheDir = await mkdtemp(join(tmpdir(), "opencode-hook-responses-bad-"));
     const hooks = await createHooks(cacheDir);

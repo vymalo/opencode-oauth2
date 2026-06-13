@@ -23,7 +23,11 @@
  */
 
 const CONTENT_EVENT = /content_part|output_text|reasoning_text/;
-const BLOCK_RE = /^event:\s*(\S+)\s*\ndata:\s*(\{[\s\S]*\})\s*$/;
+// One SSE frame: an optional `event:` line then a `data:` line carrying JSON.
+// Tolerant of CRLF (`\r\n`) as well as LF line endings — both are valid SSE.
+const BLOCK_RE = /^(?:event:\s*(\S+)[^\S\r\n]*[\r\n]+)?data:\s*(\{[\s\S]*\})\s*$/;
+// Frame boundary is a blank line: `\n\n` or `\r\n\r\n`.
+const FRAME_BOUNDARY = /\r\n\r\n|\n\n/;
 
 /**
  * Stateful per-stream renderer. Tracks the `item_id → output_index` mapping
@@ -66,7 +70,8 @@ function createIndexInjector(): (block: string) => string {
       event.content_index = 0;
     }
 
-    return `event: ${match[1]}\ndata: ${JSON.stringify(event)}\n\n`;
+    const eventLine = match[1] ? `event: ${match[1]}\n` : "";
+    return `${eventLine}data: ${JSON.stringify(event)}\n\n`;
   };
 }
 
@@ -76,9 +81,10 @@ function createIndexInjector(): (block: string) => string {
  */
 export function repairResponsesSseText(input: string): string {
   const render = createIndexInjector();
-  // Split after each `\n\n` boundary, keeping it attached to its block.
+  // Split after each blank-line boundary (LF or CRLF), keeping it attached to
+  // its frame.
   return input
-    .split(/(?<=\n\n)/)
+    .split(/(?<=\r\n\r\n|\n\n)/)
     .map(render)
     .join("");
 }
@@ -97,10 +103,11 @@ export function makeResponsesRepairStream(): TransformStream<Uint8Array, Uint8Ar
     transform(chunk, controller) {
       buffer += decoder.decode(chunk, { stream: true });
       let out = "";
-      let boundary: number;
-      while ((boundary = buffer.indexOf("\n\n")) !== -1) {
-        out += render(buffer.slice(0, boundary + 2));
-        buffer = buffer.slice(boundary + 2);
+      let match: RegExpExecArray | null;
+      while ((match = FRAME_BOUNDARY.exec(buffer)) !== null) {
+        const end = match.index + match[0].length;
+        out += render(buffer.slice(0, end));
+        buffer = buffer.slice(end);
       }
       if (out) {
         controller.enqueue(encoder.encode(out));
@@ -138,7 +145,8 @@ export function createResponsesRepairFetch(delegate?: typeof fetch): typeof fetc
   const repaired: typeof fetch = async (input, init) => {
     const response = await base(input, init);
 
-    const contentType = response.headers.get("content-type") ?? "";
+    // HTTP media types are case-insensitive, so normalize before matching.
+    const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
     if (
       !response.body ||
       !urlOf(input).includes("/responses") ||

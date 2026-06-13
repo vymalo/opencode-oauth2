@@ -75,6 +75,25 @@ describe("repairResponsesSseText", () => {
     const sse = `event: done\ndata: [DONE]\n\n`;
     expect(repairResponsesSseText(sse)).toBe(sse);
   });
+
+  it("handles CRLF-delimited SSE frames (\\r\\n\\r\\n boundaries)", () => {
+    const crlf = RAW_SSE.replace(/\n/g, "\r\n");
+    const events = parseEvents(repairResponsesSseText(crlf));
+    // indices are injected just as for the LF stream
+    expect(
+      events.filter((e) => e.type === "response.output_item.added").map((e) => e.output_index)
+    ).toEqual([0, 1]);
+    expect(events.find((e) => e.type === "response.output_text.delta")?.output_index).toBe(1);
+    expect(events.find((e) => e.type === "response.output_text.delta")?.content_index).toBe(0);
+  });
+
+  it("repairs a data-only frame with no event: line", () => {
+    const sse = `data: {"type":"response.output_item.added","item":{"id":"msg_1","type":"message"}}\n\ndata: {"type":"response.output_text.delta","item_id":"msg_1","delta":"hi"}\n\n`;
+    const events = parseEvents(repairResponsesSseText(sse));
+    expect(events[0].output_index).toBe(0);
+    expect(events[1].output_index).toBe(0);
+    expect(events[1].content_index).toBe(0);
+  });
 });
 
 describe("makeResponsesRepairStream", () => {
@@ -145,5 +164,20 @@ describe("createResponsesRepairFetch", () => {
 
     const res = await f("https://gw.example/v1/responses", { method: "POST" });
     expect(await res.text()).toBe(json);
+  });
+
+  it("repairs even when the content-type is differently cased / parameterized", async () => {
+    const delegate = (async () =>
+      new Response(RAW_SSE, {
+        status: 200,
+        headers: { "content-type": "Text/Event-Stream; charset=utf-8" }
+      })) as unknown as typeof fetch;
+    const f = createResponsesRepairFetch(delegate);
+
+    const res = await f("https://gw.example/v1/responses", { method: "POST" });
+    const events = parseEvents(await res.text());
+    expect(
+      events.filter((e) => e.type === "response.output_item.added").map((e) => e.output_index)
+    ).toEqual([0, 1]);
   });
 });
