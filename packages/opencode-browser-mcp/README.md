@@ -32,8 +32,9 @@ flowchart LR
 ### Claude Code
 
 ```sh
-claude mcp add browser -- npx -y @vymalo/opencode-browser-mcp
-# then set the token it should share with the extension:
+# Set the shared token up front (-e). Re-running `add` with the same name
+# reports "Server already exists" — remove it first (claude mcp remove browser)
+# if you need to change the env.
 claude mcp add browser -e OCB_TOKEN=your-shared-token -- npx -y @vymalo/opencode-browser-mcp
 ```
 

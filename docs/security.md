@@ -29,8 +29,11 @@ you can reason about the blast radius before enabling one.
 - **Auth-agnostic.** It only reads/merges already-resolved config and fetches a metadata URL.
 - When paired with oauth2, it **inherits** the bearer oauth2 stamped onto the provider headers —
   it never acquires or stores credentials itself.
-- The metadata fetch honors `options.headers` + `meta.modelsInfoHeaders`; those headers are part
-  of the cache key, so a tenant switch busts the cache rather than serving another tenant's data.
+- The metadata fetch honors `options.headers` + `meta.modelsInfoHeaders`. Only
+  `meta.modelsInfoHeaders` is part of the cache key — so if you switch tenants via
+  `meta.modelsInfoHeaders` the cache busts, but switching via the provider's `options.headers`
+  alone does **not** bust it (those are sent on the fetch but not keyed). Put any tenant/auth
+  selector that must isolate cached metadata in `meta.modelsInfoHeaders`.
 
 ## `@vymalo/opencode-ratelimit` — response observation
 

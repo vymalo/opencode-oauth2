@@ -113,12 +113,13 @@ stable, so OpenCode's per-agent tool allow/deny works on them directly too.
 | `browser_query` | `group, selector, limit?` | Matching elements, each with a ref. |
 | `browser_screenshot` | `group, fullPage?, tabId?` | PNG (disk path in OpenCode; inline image in MCP). |
 | `browser_tabs` | `group?` | Lists groups + tabs. |
+| `browser_targets` | — | Lists connected browsers (for multi-browser routing). |
 
 **`control`** — drive:
 
 | Tool | Key args | Result |
 | --- | --- | --- |
-| `browser_open` | `group, url?, focus?` | Opens a tab in the group. |
+| `browser_open` | `group, url?, focus?, target?` | Opens a tab in the group (optionally on a chosen browser). |
 | `browser_navigate` | `group, url, tabId?` | Navigates the active (or given) tab. |
 | `browser_back` / `browser_forward` / `browser_reload` | `group, tabId?` | History nav / reload. |
 | `browser_click` | `group, ref?\|selector?\|x,y, button?` | Clicks (left/middle/right). |
@@ -128,7 +129,7 @@ stable, so OpenCode's per-agent tool allow/deny works on them directly too.
 | `browser_type` | `group, text, ref?/selector?, submit?` | Types into a field; optional Enter. |
 | `browser_fill` | `group, fields: [{ ref?/selector, value }]` | Batch form fill. |
 | `browser_select` | `group, ref?/selector, value\|values` | Sets `<select>` option(s). |
-| `browser_scroll` | `group, deltaX?, deltaY?, to?` | Scrolls page or element. |
+| `browser_scroll` | `group, deltaX?, deltaY?, ref?, to?` | Scrolls page or element (`ref` to scroll within one). |
 | `browser_press_key` | `group, key` | Presses a key / chord. |
 | `browser_upload` | `group, ref?/selector, paths[]` | Sets a file `<input>` (CDP only). |
 | `browser_wait` | `group, ms?\|selector?, state?` | Fixed delay or wait-for-selector. |
@@ -140,11 +141,11 @@ stable, so OpenCode's per-agent tool allow/deny works on them directly too.
 
 | Tool | Key args | Result |
 | --- | --- | --- |
-| `browser_eval` | `group, code` | Evaluates JS in the page DOM, returns the result. |
+| `browser_eval` | `group, code, tabId?` | Evaluates JS in the page DOM, returns the result. |
 | `browser_console` | `group` | Recent console output (CDP only). |
 | `browser_network` | `group` | Recent network requests (CDP only). |
 | `browser_handle_dialog` | `group, accept?, promptText?` | Accept/dismiss a JS dialog (CDP only). |
-| `browser_set_viewport` | `group, width, height, mobile?` | Emulate a viewport (CDP only). |
+| `browser_set_viewport` | `group, width, height, mobile?, deviceScaleFactor?` | Emulate a viewport (CDP only). |
 | `browser_cookies` | `op, url?, name?, value?` | Read/modify cookies. |
 
 ### Scoping tools per agent

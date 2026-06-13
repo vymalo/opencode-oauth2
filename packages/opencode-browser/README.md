@@ -137,8 +137,8 @@ Names are stable `browser_*` identifiers, partitioned into three **groups** gate
 | `browser_fill` | `group, fields:[{ref?/selector,value}]` | Batch-fill several fields. |
 | `browser_select` | `group, ref?/selector, value?/values?` | Choose `<select>` option(s). |
 | `browser_press_key` | `group, key` | Press a key or chord (`"Enter"`, `"Control+a"`). |
-| `browser_scroll` | `group, deltaY?, deltaX?, ref?, to?` | Scroll the page or an element. |
-| `browser_upload` | `group, ref?/selector, files:[paths]` | Attach file(s) to a file input. |
+| `browser_scroll` | `group, deltaX?, deltaY?, ref?, to?` | Scroll the page or an element. |
+| `browser_upload` | `group, ref?/selector, paths:[…]` | Attach file(s) to a file input (CDP/Chromium). |
 | `browser_wait` | `group, ms?/selector?, state?` | Wait a fixed delay or for a selector. |
 | `browser_close` | `group, tabId?` | Close a tab, or the whole group if `tabId` omitted. |
 | `browser_release` | `group?` | Hand the browser back (detach CDP) without closing tabs. |
