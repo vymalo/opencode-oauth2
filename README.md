@@ -79,9 +79,13 @@ See [packages/opencode-oauth2/README.md](packages/opencode-oauth2/README.md) for
 
 ## Documentation
 
+Full index: [`docs/README.md`](docs/README.md). The highlights:
+
 | Page | When you need it |
 | --- | --- |
 | [`docs/architecture.md`](docs/architecture.md) | Understand the hooks, token lifecycle per flow, cache layout, sync scheduler, logging |
+| [`docs/browser.md`](docs/browser.md) | Browser automation — topology, wire protocol, the 33-tool reference, executors, multi-client routing, store publishing |
+| [`docs/security.md`](docs/security.md) | Consolidated security model across all plugins — token cache, the browser bridge, blast radius |
 | [`docs/models-info.md`](docs/models-info.md) | The companion metadata-enrichment plugin — how it composes with any auth scheme, caching, failure modes |
 | [`docs/ratelimit.md`](docs/ratelimit.md) | The companion rate-limit-aware plugin — reading Envoy `x-ratelimit-*` headers, the throttle/backoff state machine, the fetch-wrapping interception point, the timeout caveat |
 | [`docs/well-known.md`](docs/well-known.md) | How `.well-known/opencode` distributes a provider + plugin setup to clients — `auth login`, the placeholder-key pattern, where config and tokens actually live |
@@ -212,7 +216,7 @@ This workspace also ships [`@vymalo/opencode-browser`](packages/opencode-browser
 
 Because an extension can't host a server, the plugin is the server and the extension connects out to it. On first run the plugin logs a generated `token` — paste it (and `ws://127.0.0.1:4517`) into the extension's dashboard, then *Save & reconnect*. Build/load the extension from [`apps/browser-extension`](apps/browser-extension).
 
-It exposes **32 tools** in three groups — `page` (observe), `control` (drive), `debug` (powerful/sensitive, off by default) — gated by the `groups` option so you can scope what an agent sees. Targeting is via `browser_snapshot` refs (stable, reliable) or CSS selectors / coordinates. Screenshots are written to disk (OpenCode tool output is text-only) — view them with the `read` tool. On Chromium it uses the trusted CDP executor (`chrome.debugger`, with the "being debugged" banner as a visible signal); on Firefox or when the debugger is unavailable it falls back to a content-script executor (with scroll-and-stitch full-page capture). Full reference: [`packages/opencode-browser/README.md`](packages/opencode-browser/README.md) and [`docs/browser.md`](docs/browser.md).
+It exposes **33 tools** in three groups — `page` (observe), `control` (drive), `debug` (powerful/sensitive, off by default) — gated by the `groups` option so you can scope what an agent sees. Targeting is via `browser_snapshot` refs (stable, reliable) or CSS selectors / coordinates. Screenshots are written to disk (OpenCode tool output is text-only) — view them with the `read` tool. On Chromium it uses the trusted CDP executor (`chrome.debugger`, with the "being debugged" banner as a visible signal); on Firefox or when the debugger is unavailable it falls back to a content-script executor (with scroll-and-stitch full-page capture). Full reference: [`packages/opencode-browser/README.md`](packages/opencode-browser/README.md) and [`docs/browser.md`](docs/browser.md).
 
 **Beyond OpenCode:** [`@vymalo/opencode-browser-mcp`](packages/opencode-browser-mcp) is an MCP stdio server that hosts the same bridge and exposes the same tools over the Model Context Protocol, so any MCP client (Claude Code, Cursor, Cline, …) can drive the extension — screenshots come back as inline images. The plugin and MCP server share one tool catalog, so they never drift.
 
@@ -275,7 +279,7 @@ Roadmap and phase breakdown live in [plans/prd.md](plans/prd.md).
 
 ## Contributing
 
-Issues and PRs are welcome. Please open an issue first for substantial changes so we can align on scope before code review.
+Issues and PRs are welcome — please open an issue first for substantial changes so we can align on scope. See [CONTRIBUTING.md](CONTRIBUTING.md) for bootstrap, the pre-push gate, conventions, package layout, and the release process.
 
 ## License
 

@@ -216,7 +216,11 @@ export async function pageDispatch(
             ? input.value
             : undefined,
         checked: typeof input.checked === "boolean" ? input.checked : undefined,
-        attribute: p.name ? el.getAttribute(p.name) : undefined,
+        attribute: p.name
+          ? secret && p.name.toLowerCase() === "value"
+            ? SECRET_MASK
+            : el.getAttribute(p.name)
+          : undefined,
         attributes: attrs,
         rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
       };

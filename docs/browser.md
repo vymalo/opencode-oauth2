@@ -98,7 +98,7 @@ and dashboard show **Connected** once the handshake succeeds.
 `group` is the primary handle on every tool — it names the tab group the action targets, and
 the extension creates it on the first `browser_open`.
 
-The 32 tools are organized into three **groups**, gated by the `groups` option (plugin) /
+The 33 tools are organized into three **groups**, gated by the `groups` option (plugin) /
 `OCB_GROUPS` (MCP). Default: `page` + `control` (`debug` is opt-in). The `browser_*` names are
 stable, so OpenCode's per-agent tool allow/deny works on them directly too.
 
@@ -113,12 +113,13 @@ stable, so OpenCode's per-agent tool allow/deny works on them directly too.
 | `browser_query` | `group, selector, limit?` | Matching elements, each with a ref. |
 | `browser_screenshot` | `group, fullPage?, tabId?` | PNG (disk path in OpenCode; inline image in MCP). |
 | `browser_tabs` | `group?` | Lists groups + tabs. |
+| `browser_targets` | — | Lists connected browsers (for multi-browser routing). |
 
 **`control`** — drive:
 
 | Tool | Key args | Result |
 | --- | --- | --- |
-| `browser_open` | `group, url?, focus?` | Opens a tab in the group. |
+| `browser_open` | `group, url?, focus?, target?` | Opens a tab in the group (optionally on a chosen browser). |
 | `browser_navigate` | `group, url, tabId?` | Navigates the active (or given) tab. |
 | `browser_back` / `browser_forward` / `browser_reload` | `group, tabId?` | History nav / reload. |
 | `browser_click` | `group, ref?\|selector?\|x,y, button?` | Clicks (left/middle/right). |
@@ -128,7 +129,7 @@ stable, so OpenCode's per-agent tool allow/deny works on them directly too.
 | `browser_type` | `group, text, ref?/selector?, submit?` | Types into a field; optional Enter. |
 | `browser_fill` | `group, fields: [{ ref?/selector, value }]` | Batch form fill. |
 | `browser_select` | `group, ref?/selector, value\|values` | Sets `<select>` option(s). |
-| `browser_scroll` | `group, deltaX?, deltaY?, to?` | Scrolls page or element. |
+| `browser_scroll` | `group, deltaX?, deltaY?, ref?, to?` | Scrolls page or element (`ref` to scroll within one). |
 | `browser_press_key` | `group, key` | Presses a key / chord. |
 | `browser_upload` | `group, ref?/selector, paths[]` | Sets a file `<input>` (CDP only). |
 | `browser_wait` | `group, ms?\|selector?, state?` | Fixed delay or wait-for-selector. |
@@ -140,12 +141,57 @@ stable, so OpenCode's per-agent tool allow/deny works on them directly too.
 
 | Tool | Key args | Result |
 | --- | --- | --- |
-| `browser_eval` | `group, code` | Evaluates JS in the page DOM, returns the result. |
+| `browser_eval` | `group, code, tabId?` | Evaluates JS in the page DOM, returns the result. |
 | `browser_console` | `group` | Recent console output (CDP only). |
 | `browser_network` | `group` | Recent network requests (CDP only). |
 | `browser_handle_dialog` | `group, accept?, promptText?` | Accept/dismiss a JS dialog (CDP only). |
-| `browser_set_viewport` | `group, width, height, mobile?` | Emulate a viewport (CDP only). |
+| `browser_set_viewport` | `group, width, height, mobile?, deviceScaleFactor?` | Emulate a viewport (CDP only). |
 | `browser_cookies` | `op, url?, name?, value?` | Read/modify cookies. |
+
+### Scoping tools per agent
+
+There are two **independent** levers:
+
+- **`groups` (plugin) / `OCB_GROUPS` (MCP)** — *global*: which tools get registered at all. A hard
+  floor for the whole install (e.g. never register `debug`).
+- **OpenCode's per-agent `tools` map** — *per-agent*: which registered tools a given agent may
+  call. This is OpenCode's own `AgentConfig.tools` (`{ "<tool>": true | false }`).
+
+So if you keep **all groups enabled by default**, narrow individual agents with their `tools`
+map — the `browser_*` names are stable, so you target them directly.
+
+```jsonc
+// opencode.json — a read-only research agent: disable the namespace, allow only page tools.
+{
+  "plugin": [["@vymalo/opencode-browser", {}]],   // all groups registered org-wide
+  "agent": {
+    "researcher": {
+      "tools": {
+        "browser_*": false,        // wildcard off…
+        "browser_open": true,      // …then re-enable the specific ones (specific wins)
+        "browser_navigate": true,
+        "browser_snapshot": true,
+        "browser_get_text": true,
+        "browser_query": true,
+        "browser_screenshot": true,
+        "browser_tabs": true
+      }
+    }
+  }
+}
+```
+
+A **denylist** is often enough — leave everything on for an agent except the risky tools:
+
+```jsonc
+{ "agent": { "build": { "tools": {
+  "browser_eval": false, "browser_cookies": false, "browser_console": false,
+  "browser_network": false, "browser_handle_dialog": false, "browser_set_viewport": false
+} } } }
+```
+
+The same `tools:` map works in a `.opencode/agent/<name>.md` front-matter file. Rule of thumb:
+use `groups` for "nobody gets this," and the agent `tools` map for "this agent only gets these."
 
 ### Targeting elements — prefer refs
 
