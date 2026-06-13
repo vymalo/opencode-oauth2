@@ -32,6 +32,12 @@ export interface BridgeClientDeps {
    * dashboard choice on each connect.
    */
   onServerPreference?: (executor: ExecutorMode) => void | Promise<void>;
+  /**
+   * Called when the link drops (manual disconnect or the server going away) so
+   * the executor can release control — e.g. detach the CDP debugger so the
+   * browser isn't left with the "being debugged" banner after the agent stops.
+   */
+  onDisconnected?: () => void | Promise<void>;
   /** Descriptor sent in the hello frame (e.g. "chrome/Linux"). */
   clientName: string;
 }
@@ -62,6 +68,7 @@ export class BridgeClient {
     this.stopHeartbeat();
     this.ws?.close();
     this.ws = null;
+    void this.deps.onDisconnected?.();
     void setStatus({ state: "disconnected", connectedAt: undefined });
   }
 
@@ -167,6 +174,9 @@ export class BridgeClient {
     if (this.stopped) {
       return;
     }
+    // Server went away — release control (detach the debugger) while we're
+    // disconnected; a later command re-attaches if it comes back.
+    void this.deps.onDisconnected?.();
     void setStatus({ state: "connecting", connectedAt: undefined });
     this.scheduleReconnect();
   }

@@ -50,6 +50,9 @@ export default defineBackground(() => {
       await rebuild();
       await setStatus({ executor: executorKind });
     },
+    // Release control (detach the CDP debugger) when the link drops, so the
+    // browser isn't left with the "being debugged" banner after the agent stops.
+    onDisconnected: () => executor.releaseAll(),
     clientName: `opencode-browser-ext/${import.meta.env.BROWSER}`
   });
 
