@@ -75,10 +75,13 @@ browser_bridge_token_generated  paste_into_extension=<token>
 
 ### 2. Load the extension
 
+Grab a prebuilt zip from the repo's **GitHub Release** (`opencode-browser-extension-<version>-chrome.zip`
+/ `-firefox.zip`) and unzip it, or build it yourself:
+
 ```sh
 cd apps/browser-extension
 pnpm build              # → .output/chrome-mv3
-pnpm zip                # → packaged .zip for the store / unpacked load
+pnpm zip                # → .output/opencode-browser-extension-<version>-chrome.zip
 ```
 
 - **Chrome/Edge/Brave**: `chrome://extensions` → enable Developer mode → *Load unpacked* →

@@ -9,6 +9,8 @@ import { defineConfig } from "wxt";
 export default defineConfig({
   srcDir: "src",
   modules: ["@wxt-dev/module-react"],
+  // Clean release-artifact names: opencode-browser-extension-<version>-<target>.zip
+  zip: { name: "opencode-browser-extension" },
   // Explicit imports everywhere (no magic auto-imports) — clearer for readers
   // and avoids tsc surprises. `#imports` still resolves defineBackground/etc.
   imports: false,

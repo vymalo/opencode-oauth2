@@ -97,6 +97,14 @@ jobs:
         # Depends on the built opencode-browser dist above for its /lib types.
         run: pnpm --filter @vymalo/opencode-browser-mcp build
 
+      - name: Zip the browser extension (Chrome + Firefox)
+        # The extension is private (not on npm) — it ships as zips attached to
+        # the GitHub Release. `wxt zip` also emits a Firefox sources zip for AMO.
+        run: |
+          pnpm --filter @vymalo/opencode-browser-extension zip
+          pnpm --filter @vymalo/opencode-browser-extension zip:firefox
+          ls -la apps/browser-extension/.output/*.zip
+
       - name: Pack oauth2 tarball (for inspection and as a release asset)
         run: |
           mkdir -p dist-tarball/oauth2
@@ -277,10 +285,14 @@ jobs:
           echo "::notice::DRY RUN — skipped npm publish."
           echo "Tarball ready at: dist-tarball/"
 
-      - name: Attach tarball to GitHub Release
+      - name: Attach release artifacts to GitHub Release
         if: ${{ github.event_name == 'release' && inputs.dry_run != true }}
         uses: softprops/action-gh-release@v3
         with:
-          # The tarball alongside the release page makes downstream
-          # verification trivial (no need to fetch from npm just to inspect).
-          files: dist-tarball/**/*.tgz
+          # Three artifacts per release: the two npm package tarballs (for
+          # inspection alongside npm) and the browser-extension zips (Chrome +
+          # Firefox + Firefox sources) — the extension isn't on npm, so the
+          # Release is its distribution channel.
+          files: |
+            dist-tarball/**/*.tgz
+            apps/browser-extension/.output/*.zip
