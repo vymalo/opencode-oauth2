@@ -116,6 +116,17 @@ export function createBrowserPlugin(factoryOptions: BrowserPluginFactoryOptions 
       { logger, transport: factoryOptions.transport ?? createBunTransport() }
     );
 
+    // When OpenCode exits, hand the browser back automatically — the user
+    // shouldn't have to click Disconnect. (Hard kills are also covered by the
+    // extension releasing on socket close; this is the graceful path.)
+    process.once("exit", () => {
+      try {
+        bridge.shutdown();
+      } catch {
+        /* best-effort */
+      }
+    });
+
     try {
       bridge.start();
       if (!tokenProvided) {

@@ -38,6 +38,11 @@ export interface BridgeClientDeps {
    * browser isn't left with the "being debugged" banner after the agent stops.
    */
   onDisconnected?: () => void | Promise<void>;
+  /**
+   * Called on a server `release` frame — let go of control (detach the
+   * debugger) but stay connected, so a later command can re-attach.
+   */
+  onRelease?: () => void | Promise<void>;
   /** Descriptor sent in the hello frame (e.g. "chrome/Linux"). */
   clientName: string;
 }
@@ -144,6 +149,9 @@ export class BridgeClient {
         return;
       case "command":
         await this.runCommand(ws, frame);
+        return;
+      case "release":
+        await this.deps.onRelease?.();
         return;
       case "ping":
         ws.send(encodeFrame({ v: PROTOCOL_VERSION, type: "pong" }));

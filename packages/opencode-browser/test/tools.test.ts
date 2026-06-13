@@ -70,6 +70,7 @@ describe("tool arg schemas", () => {
         "browser_navigate",
         "browser_open",
         "browser_press_key",
+        "browser_release",
         "browser_screenshot",
         "browser_scroll",
         "browser_select",

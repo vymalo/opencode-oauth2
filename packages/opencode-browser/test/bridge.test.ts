@@ -208,6 +208,33 @@ describe("Bridge send", () => {
   });
 });
 
+describe("Bridge release / shutdown", () => {
+  it("requestRelease sends a release frame to the connected client", () => {
+    const { transport, bridge } = setup();
+    const client = connect(transport);
+    const before = client.sent.length;
+    expect(bridge.requestRelease()).toBe(true);
+    expect(decodeFrame(client.sent[before])).toEqual({ v: PROTOCOL_VERSION, type: "release" });
+  });
+
+  it("requestRelease returns false when nothing is connected", () => {
+    const { bridge } = setup();
+    expect(bridge.requestRelease()).toBe(false);
+  });
+
+  it("shutdown releases the client and stops the transport", () => {
+    const { transport, bridge } = setup();
+    const client = connect(transport);
+    bridge.shutdown();
+    expect(decodeFrame(client.sent[client.sent.length - 1])).toEqual({
+      v: PROTOCOL_VERSION,
+      type: "release"
+    });
+    expect(transport.stopped).toBe(true);
+    expect(bridge.connected).toBe(false);
+  });
+});
+
 describe("Bridge timeout", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());

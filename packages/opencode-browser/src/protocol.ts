@@ -112,6 +112,16 @@ export interface EventFrame {
   data?: Record<string, unknown>;
 }
 
+/**
+ * Server → extension: stop driving and release control (detach the CDP
+ * debugger) without closing tabs. The next command re-attaches. Lets the plugin
+ * hand the browser back without waiting for the socket to drop.
+ */
+export interface ReleaseFrame {
+  v: number;
+  type: "release";
+}
+
 export interface PingFrame {
   v: number;
   type: "ping";
@@ -128,6 +138,7 @@ export type Frame =
   | CommandFrame
   | ResultFrame
   | EventFrame
+  | ReleaseFrame
   | PingFrame
   | PongFrame;
 
@@ -174,6 +185,8 @@ export function decodeFrame(raw: string): Frame | null {
         : null;
     case "event":
       return typeof parsed.name === "string" ? (parsed as unknown as EventFrame) : null;
+    case "release":
+      return { v: PROTOCOL_VERSION, type: "release" };
     case "ping":
       return { v: PROTOCOL_VERSION, type: "ping" };
     case "pong":

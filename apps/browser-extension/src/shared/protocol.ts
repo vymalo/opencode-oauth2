@@ -96,6 +96,12 @@ export interface EventFrame {
   data?: Record<string, unknown>;
 }
 
+/** Server → extension: release control (detach the debugger) without closing tabs. */
+export interface ReleaseFrame {
+  v: number;
+  type: "release";
+}
+
 export interface PingFrame {
   v: number;
   type: "ping";
@@ -112,6 +118,7 @@ export type Frame =
   | CommandFrame
   | ResultFrame
   | EventFrame
+  | ReleaseFrame
   | PingFrame
   | PongFrame;
 
@@ -150,6 +157,8 @@ export function decodeFrame(raw: string): Frame | null {
         : null;
     case "event":
       return typeof parsed.name === "string" ? (parsed as unknown as EventFrame) : null;
+    case "release":
+      return { v: PROTOCOL_VERSION, type: "release" };
     case "ping":
       return { v: PROTOCOL_VERSION, type: "ping" };
     case "pong":

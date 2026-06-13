@@ -44,7 +44,11 @@ directory of the repo, build it (`pnpm build`), and load it unpacked.
 
 `browser_open`, `browser_navigate`, `browser_click`, `browser_double_click`, `browser_type`,
 `browser_fill`, `browser_select`, `browser_scroll`, `browser_press_key`, `browser_screenshot`,
-`browser_snapshot`, `browser_get_text`, `browser_wait`, `browser_tabs`, `browser_close`.
+`browser_snapshot`, `browser_get_text`, `browser_wait`, `browser_tabs`, `browser_close`,
+`browser_release`.
+
+The plugin hands the browser back automatically when OpenCode exits (and `browser_release` lets
+the model do it mid-session) — you never have to disconnect by hand.
 
 Every tool takes a `group` (the named tab group). Prefer `browser_snapshot` to get stable
 element **refs**, then target them with `browser_click({ ref })` etc. Screenshots are written to

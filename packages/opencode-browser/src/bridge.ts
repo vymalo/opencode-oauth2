@@ -126,6 +126,30 @@ export class Bridge {
   }
 
   /**
+   * Ask the connected extension to release control (detach the debugger) without
+   * closing tabs or the socket. Returns false if nothing is connected. The next
+   * command transparently re-attaches.
+   */
+  requestRelease(): boolean {
+    if (!this.client) {
+      return false;
+    }
+    this.logger.info("browser_release_requested", {});
+    this.safeSend(this.client, { v: PROTOCOL_VERSION, type: "release" });
+    return true;
+  }
+
+  /**
+   * Graceful teardown initiated by the plugin: tell the extension to release,
+   * then stop the server. Use this on plugin/OpenCode shutdown so the browser
+   * isn't left controlled — the user shouldn't have to disconnect by hand.
+   */
+  shutdown(): void {
+    this.requestRelease();
+    this.stop();
+  }
+
+  /**
    * Send a command to the extension and resolve with its result `data`. Rejects
    * if no extension is connected, on timeout, on abort, or when the extension
    * reports an error.

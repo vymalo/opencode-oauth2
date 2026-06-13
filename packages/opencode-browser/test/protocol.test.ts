@@ -60,6 +60,13 @@ describe("protocol encode/decode", () => {
     const ping = decodeFrame(JSON.stringify({ v: 9, type: "ping" })) as Frame;
     expect(ping).toEqual({ v: PROTOCOL_VERSION, type: "ping" });
   });
+
+  it("decodes a release frame", () => {
+    expect(decodeFrame(JSON.stringify({ v: 1, type: "release" }))).toEqual({
+      v: PROTOCOL_VERSION,
+      type: "release"
+    });
+  });
 });
 
 describe("nextId", () => {

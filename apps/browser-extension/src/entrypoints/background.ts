@@ -53,6 +53,8 @@ export default defineBackground(() => {
     // Release control (detach the CDP debugger) when the link drops, so the
     // browser isn't left with the "being debugged" banner after the agent stops.
     onDisconnected: () => executor.releaseAll(),
+    // Plugin asked us to hand control back (browser_release / shutdown).
+    onRelease: () => executor.releaseAll(),
     clientName: `opencode-browser-ext/${import.meta.env.BROWSER}`
   });
 

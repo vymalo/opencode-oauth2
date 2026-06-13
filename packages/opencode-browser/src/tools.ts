@@ -407,6 +407,18 @@ export function createBrowserTools(deps: ToolDeps): Record<string, ToolDefinitio
       }
     }),
 
+    browser_release: tool({
+      description:
+        "Release control of the browser: stop driving and detach the debugger (clears the 'being debugged' banner) without closing any tabs. The next browser_* call re-attaches automatically. Use this when you're done so the user gets their browser back.",
+      args: {},
+      async execute() {
+        const released = bridge.requestRelease();
+        return released
+          ? "Released browser control. Tabs are left open; the next browser_* action re-attaches."
+          : "No browser extension is connected — nothing to release.";
+      }
+    }),
+
     browser_close: tool({
       description: "Close a tab (pass `tabId`) or the whole group (omit `tabId`).",
       args: { group, tabId: z.number().optional() },

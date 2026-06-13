@@ -104,6 +104,7 @@ the extension creates it on the first `browser_open`.
 | `browser_wait` | `group, ms?\|selector?, state?` | Fixed delay or wait-for-selector. |
 | `browser_tabs` | `group?` | Lists groups + tabs. |
 | `browser_close` | `group, tabId?` | Closes a tab, or the whole group. |
+| `browser_release` | — | Releases control (detaches the debugger, clears the banner) without closing tabs. |
 
 ### Targeting elements — prefer refs
 
@@ -166,6 +167,20 @@ sets the plugin's `executor` option, the plugin advertises it in the handshake a
 extension adopts it **on each connect** (overriding the dashboard choice) — useful for
 `.well-known/opencode` server-shipped config. Leave the plugin option unset to let the
 dashboard be authoritative.
+
+## Stopping / releasing control
+
+Handing the browser back is the **plugin's** job — you shouldn't have to click
+Disconnect. Three things release control (detach the CDP debugger; tabs stay open and a later
+command transparently re-attaches):
+
+- **`browser_release`** — the model/plugin calls it when done. The bridge sends a `release`
+  frame and the extension detaches.
+- **OpenCode exits** — the plugin's `exit` hook calls `bridge.shutdown()` (a `release` frame +
+  server stop), and the dropped socket independently triggers the extension to release. So a
+  hard kill releases too.
+- **Manual** — the dashboard's Disconnect still works, and so does the `chrome.debugger` banner's
+  Cancel button.
 
 ## Wire protocol
 
