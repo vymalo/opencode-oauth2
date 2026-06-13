@@ -90,6 +90,21 @@ jobs:
       - name: Build ratelimit plugin (tsc → packages/opencode-ratelimit/dist)
         run: pnpm --filter @vymalo/opencode-ratelimit build
 
+      - name: Build browser plugin (tsc → packages/opencode-browser/dist)
+        run: pnpm --filter @vymalo/opencode-browser build
+
+      - name: Build browser MCP server (tsc → packages/opencode-browser-mcp/dist)
+        # Depends on the built opencode-browser dist above for its /lib types.
+        run: pnpm --filter @vymalo/opencode-browser-mcp build
+
+      - name: Zip the browser extension (Chrome + Firefox)
+        # The extension is private (not on npm) — it ships as zips attached to
+        # the GitHub Release. `wxt zip` also emits a Firefox sources zip for AMO.
+        run: |
+          pnpm --filter @vymalo/opencode-browser-extension zip
+          pnpm --filter @vymalo/opencode-browser-extension zip:firefox
+          ls -la apps/browser-extension/.output/*.zip
+
       - name: Pack oauth2 tarball (for inspection and as a release asset)
         run: |
           mkdir -p dist-tarball/oauth2
@@ -110,6 +125,20 @@ jobs:
           pnpm --filter @vymalo/opencode-ratelimit pack \
             --pack-destination "$PWD/dist-tarball/ratelimit"
           ls -la dist-tarball/ratelimit/
+
+      - name: Pack browser tarball
+        run: |
+          mkdir -p dist-tarball/browser
+          pnpm --filter @vymalo/opencode-browser pack \
+            --pack-destination "$PWD/dist-tarball/browser"
+          ls -la dist-tarball/browser/
+
+      - name: Pack browser-mcp tarball
+        run: |
+          mkdir -p dist-tarball/browser-mcp
+          pnpm --filter @vymalo/opencode-browser-mcp pack \
+            --pack-destination "$PWD/dist-tarball/browser-mcp"
+          ls -la dist-tarball/browser-mcp/
 
       - name: Verify tarball contents
         # Defense-in-depth: confirms each package is shipping its dist/, NOT
@@ -148,7 +177,7 @@ jobs:
             echo "OK: $tarball"
           }
 
-          for tarball in dist-tarball/oauth2/*.tgz dist-tarball/models-info/*.tgz dist-tarball/ratelimit/*.tgz; do
+          for tarball in dist-tarball/oauth2/*.tgz dist-tarball/models-info/*.tgz dist-tarball/ratelimit/*.tgz dist-tarball/browser/*.tgz dist-tarball/browser-mcp/*.tgz; do
             verify_tarball "$tarball"
           done
 
@@ -216,16 +245,126 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.MCP_NPM_AUTH_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
 
+      - name: Publish browser to npm (with provenance)
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          set -e
+          version=$(node -p "require('./packages/opencode-browser/package.json').version")
+          if npm view "@vymalo/opencode-browser@${version}" version >/dev/null 2>&1; then
+            echo "::notice::@vymalo/opencode-browser@${version} already on npm — skipping."
+            exit 0
+          fi
+          pnpm --filter @vymalo/opencode-browser publish \
+            --access public \
+            --no-git-checks \
+            --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.MCP_NPM_AUTH_TOKEN }}
+          NPM_CONFIG_PROVENANCE: "true"
+
+      - name: Publish browser-mcp to npm (with provenance)
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          set -e
+          version=$(node -p "require('./packages/opencode-browser-mcp/package.json').version")
+          if npm view "@vymalo/opencode-browser-mcp@${version}" version >/dev/null 2>&1; then
+            echo "::notice::@vymalo/opencode-browser-mcp@${version} already on npm — skipping."
+            exit 0
+          fi
+          pnpm --filter @vymalo/opencode-browser-mcp publish \
+            --access public \
+            --no-git-checks \
+            --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.MCP_NPM_AUTH_TOKEN }}
+          NPM_CONFIG_PROVENANCE: "true"
+
       - name: Dry-run notice
         if: ${{ inputs.dry_run == true }}
         run: |
           echo "::notice::DRY RUN — skipped npm publish."
           echo "Tarball ready at: dist-tarball/"
 
-      - name: Attach tarball to GitHub Release
+      - name: Attach release artifacts to GitHub Release
         if: ${{ github.event_name == 'release' && inputs.dry_run != true }}
         uses: softprops/action-gh-release@v3
         with:
-          # The tarball alongside the release page makes downstream
-          # verification trivial (no need to fetch from npm just to inspect).
-          files: dist-tarball/**/*.tgz
+          # Three artifacts per release: the two npm package tarballs (for
+          # inspection alongside npm) and the browser-extension zips (Chrome +
+          # Firefox + Firefox sources) — the extension isn't on npm, so the
+          # Release is its distribution channel.
+          files: |
+            dist-tarball/**/*.tgz
+            apps/browser-extension/.output/*.zip
+
+  # ---------------------------------------------------------------------------
+  # Push the extension to the web stores. Separate job so a flaky store API
+  # never rolls back the npm publish, and so store credentials stay isolated
+  # from the npm token. Runs only after `publish` succeeds (we never submit an
+  # extension build that didn't pass the full gate). Each store is gated on its
+  # own credentials being present, so you can enable Chrome first and Firefox
+  # later (or either alone) without the other failing the job.
+  #
+  # `wxt submit` wraps `publish-browser-extension`. Required repository secrets:
+  #   Chrome Web Store — CHROME_EXTENSION_ID, CHROME_CLIENT_ID,
+  #     CHROME_CLIENT_SECRET, CHROME_REFRESH_TOKEN
+  #   Firefox AMO      — FIREFOX_EXTENSION_ID, FIREFOX_JWT_ISSUER,
+  #     FIREFOX_JWT_SECRET
+  # See docs/browser.md → "Publishing the extension to the web stores".
+  submit-extension:
+    name: Submit extension to web stores
+    runs-on: ubuntu-latest
+    needs: publish
+    # Also runnable via workflow_dispatch (honours dry_run → `wxt submit
+    # --dry-run`, which validates credentials + zip without uploading).
+    if: ${{ github.event_name == 'release' || github.event_name == 'workflow_dispatch' }}
+    env:
+      # Mapped at job level so the per-store steps can branch on presence via
+      # `if: env.* != ''` (secrets can't be referenced directly in `if:`).
+      CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+      CHROME_CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
+      CHROME_CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
+      CHROME_REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
+      FIREFOX_EXTENSION_ID: ${{ secrets.FIREFOX_EXTENSION_ID }}
+      FIREFOX_JWT_ISSUER: ${{ secrets.FIREFOX_JWT_ISSUER }}
+      FIREFOX_JWT_SECRET: ${{ secrets.FIREFOX_JWT_SECRET }}
+      # Empty on a real release; "-- --dry-run" on a dry-run dispatch.
+      SUBMIT_ARGS: ${{ inputs.dry_run == true && '-- --dry-run' || '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.3.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Zip the browser extension (Chrome + Firefox)
+        run: |
+          pnpm --filter @vymalo/opencode-browser-extension zip
+          pnpm --filter @vymalo/opencode-browser-extension zip:firefox
+          ls -la apps/browser-extension/.output/*.zip
+
+      - name: Submit to Chrome Web Store
+        # Skipped (not failed) when Chrome credentials aren't configured.
+        if: ${{ env.CHROME_EXTENSION_ID != '' }}
+        run: pnpm --filter @vymalo/opencode-browser-extension run submit:chrome ${{ env.SUBMIT_ARGS }}
+
+      - name: Submit to Firefox Add-ons (AMO)
+        if: ${{ env.FIREFOX_EXTENSION_ID != '' }}
+        run: pnpm --filter @vymalo/opencode-browser-extension run submit:firefox ${{ env.SUBMIT_ARGS }}
+
+      - name: No stores configured
+        if: ${{ env.CHROME_EXTENSION_ID == '' && env.FIREFOX_EXTENSION_ID == '' }}
+        run: |
+          echo "::notice::No store credentials set — skipped store submission."
+          echo "Add CHROME_*/FIREFOX_* repo secrets to enable. See docs/browser.md."

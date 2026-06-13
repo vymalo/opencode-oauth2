@@ -1,5 +1,6 @@
 packages:
   - packages/*
+  - apps/*
 
 # Native build scripts that are allowed to run on install.
 # esbuild is a vitest/vite transitive dep; msgpackr-extract is an optional
@@ -13,3 +14,6 @@ packages:
 allowBuilds:
   esbuild: true
   msgpackr-extract: true
+  # spawn-sync (a transitive WXT/web-ext dep) ships a native build step we do
+  # not need — the prebuilt JS works fine. Deny it.
+  spawn-sync: false
