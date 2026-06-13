@@ -5,6 +5,22 @@ export const DEFAULT_TIMEOUT_MS = 5_000;
 
 const META_KEY = "meta";
 
+/**
+ * Fields a user may opt out of upstream-wins via `meta.modelsInfoOverwrite`.
+ * Mirrors the keys of `ModelMetadata` — anything outside this set is ignored
+ * so a typo never silently clobbers an unrelated field.
+ */
+const OVERWRITABLE_FIELDS = new Set([
+  "name",
+  "attachment",
+  "reasoning",
+  "temperature",
+  "tool_call",
+  "cost",
+  "limit",
+  "modalities"
+]);
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return undefined;
@@ -28,6 +44,19 @@ function asStringMap(value: unknown): Record<string, string> | undefined {
     }
   }
   return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function asOverwriteList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const out: string[] = [];
+  for (const raw of value) {
+    if (typeof raw === "string" && OVERWRITABLE_FIELDS.has(raw) && !out.includes(raw)) {
+      out.push(raw);
+    }
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 function asPositiveInt(value: unknown, fallback: number): number {
@@ -85,6 +114,7 @@ export function parseMetaOptions(
     modelsInfoTtlSeconds: asPositiveInt(meta.modelsInfoTtlSeconds, DEFAULT_TTL_SECONDS),
     modelsInfoTimeoutMs: asPositiveInt(meta.modelsInfoTimeoutMs, DEFAULT_TIMEOUT_MS),
     modelsInfoHeaders: asStringMap(meta.modelsInfoHeaders),
+    modelsInfoOverwrite: asOverwriteList(meta.modelsInfoOverwrite),
     modelsInfoFormat: "openrouter"
   };
 }

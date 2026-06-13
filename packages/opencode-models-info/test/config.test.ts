@@ -63,6 +63,32 @@ describe("parseMetaOptions", () => {
     expect(out?.modelsInfoHeaders).toBeUndefined();
   });
 
+  it("parses modelsInfoOverwrite, keeping only known fields and dropping dupes", () => {
+    const out = parseMetaOptions({
+      meta: {
+        modelsInfoUrl: "https://x.test/m",
+        modelsInfoOverwrite: ["name", "modalities", "name", "bogus", 7]
+      }
+    });
+    expect(out?.modelsInfoOverwrite).toEqual(["name", "modalities"]);
+  });
+
+  it("leaves modelsInfoOverwrite undefined when absent, non-array, or empty after filtering", () => {
+    expect(
+      parseMetaOptions({ meta: { modelsInfoUrl: "https://x.test/m" } })?.modelsInfoOverwrite
+    ).toBeUndefined();
+    expect(
+      parseMetaOptions({
+        meta: { modelsInfoUrl: "https://x.test/m", modelsInfoOverwrite: "name" }
+      })?.modelsInfoOverwrite
+    ).toBeUndefined();
+    expect(
+      parseMetaOptions({
+        meta: { modelsInfoUrl: "https://x.test/m", modelsInfoOverwrite: ["bogus"] }
+      })?.modelsInfoOverwrite
+    ).toBeUndefined();
+  });
+
   it("resolves a path-relative modelsInfoUrl under the baseURL's path", () => {
     // No leading slash + baseURL with or without trailing slash → joins under
     // baseURL's path. baseURL is always treated as a directory.

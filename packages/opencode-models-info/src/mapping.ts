@@ -30,7 +30,10 @@ export interface ModelMetadata {
  * OpenCode `ModelConfig` fields we know how to populate. Returns only the
  * fields we can derive; callers do the upstream-wins merge.
  */
-export function mapOpenRouterEntry(entry: OpenRouterModel): ModelMetadata {
+export function mapOpenRouterEntry(
+  entry: OpenRouterModel,
+  overwrite?: ReadonlySet<string>
+): ModelMetadata {
   const out: ModelMetadata = {};
 
   if (entry.name) {
@@ -58,22 +61,59 @@ export function mapOpenRouterEntry(entry: OpenRouterModel): ModelMetadata {
 
   const params = entry.supported_parameters ?? [];
   const paramSet = new Set(params.map((p) => p.toLowerCase()));
+  // We can only *assert a capability false* when the source actually told us
+  // about it. An absent `supported_parameters` / `input_modalities` means "we
+  // don't know" — never a misleading `false`.
+  const knowsParams = Array.isArray(entry.supported_parameters);
+  const knowsInputMods = Array.isArray(entry.architecture?.input_modalities);
 
-  if (paramSet.has("tools") || paramSet.has("tool_choice")) {
-    out.tool_call = true;
-  }
-  if (paramSet.has("reasoning") || paramSet.has("reasoning_effort") || paramSet.has("thinking")) {
-    out.reasoning = true;
-  }
-  if (paramSet.has("temperature")) {
-    out.temperature = true;
-  }
-
-  if (inputMods.some((m) => m !== "text")) {
-    out.attachment = true;
-  }
+  setCapability(out, "tool_call", paramSet.has("tools") || paramSet.has("tool_choice"), {
+    known: knowsParams,
+    overwrite
+  });
+  setCapability(
+    out,
+    "reasoning",
+    paramSet.has("reasoning") || paramSet.has("reasoning_effort") || paramSet.has("thinking"),
+    { known: knowsParams, overwrite }
+  );
+  setCapability(out, "temperature", paramSet.has("temperature"), {
+    known: knowsParams,
+    overwrite
+  });
+  setCapability(
+    out,
+    "attachment",
+    inputMods.some((m) => m !== "text"),
+    {
+      known: knowsInputMods,
+      overwrite
+    }
+  );
 
   return out;
+}
+
+/**
+ * Emit a capability flag. By default these are *true-only*: an absent
+ * capability stays `undefined`, which under upstream-wins correctly means
+ * "leave whatever is there". But a field opted into `overwrite` wants the
+ * endpoint's answer to win outright — so we must also emit an explicit `false`
+ * to clear a stale `true` another plugin stamped. We only do that when the
+ * source actually carried the relevant data (`known`); otherwise there is
+ * nothing to assert and the field stays `undefined`.
+ */
+function setCapability(
+  out: ModelMetadata,
+  field: "tool_call" | "reasoning" | "temperature" | "attachment",
+  present: boolean,
+  opts: { known: boolean; overwrite?: ReadonlySet<string> }
+): void {
+  if (present) {
+    out[field] = true;
+  } else if (opts.known && opts.overwrite?.has(field)) {
+    out[field] = false;
+  }
 }
 
 function mapPricing(pricing: OpenRouterModel["pricing"]): ModelMetadata["cost"] | undefined {
@@ -134,18 +174,26 @@ function filterModalities(values: OpenRouterModality[] | undefined): OpenCodeMod
 
 /**
  * Merge a derived metadata snapshot onto an existing OpenCode model entry.
- * Upstream wins: any field already present is left untouched. Returns the
- * same object reference (mutated) for ergonomic chaining.
+ * Upstream wins by default: any field already present is left untouched.
+ * Returns the same object reference (mutated) for ergonomic chaining.
+ *
+ * `overwrite` opts specific fields *out* of upstream-wins, letting the derived
+ * (endpoint) value replace one that's already set. This exists because another
+ * plugin (e.g. `@vymalo/opencode-oauth2`) may auto-stamp a field such as `name`
+ * before this hook runs — to upstream-wins that looks like deliberate user
+ * config, so without an opt-out the endpoint's value can never land. A field
+ * named in `overwrite` only wins when the derived value is actually present.
  */
 export function mergeIntoModel<T extends Record<string, unknown>>(
   existing: T,
-  derived: ModelMetadata
+  derived: ModelMetadata,
+  overwrite?: ReadonlySet<string>
 ): T {
   for (const [key, value] of Object.entries(derived)) {
     if (value === undefined) {
       continue;
     }
-    if (existing[key] === undefined) {
+    if (existing[key] === undefined || overwrite?.has(key)) {
       (existing as Record<string, unknown>)[key] = value;
     }
   }

@@ -57,6 +57,31 @@ See [local-development.md → Fixed redirectPort vs random](./local-development.
 
 If you're hitting the *opposite* problem — a non-compliant IdP that rejects the extra `code_challenge` / `code_verifier` parameters — set `pkce: false` on that server's `oauth2` options to opt out. Leave it on (the default) for everything else; compliant servers that don't require PKCE simply ignore it.
 
+## `OpenAI API key is missing` / wrong endpoint after enabling `responseApi`
+
+**What's happening.** Setting `responseApi: true` swaps the provider's package from `@ai-sdk/openai-compatible` to the native `@ai-sdk/openai`, so OpenCode routes inference through the **Responses API** (`/v1/responses`) instead of Chat Completions (`/v1/chat/completions`). Two things change with that swap:
+
+- The native provider **throws `OpenAI API key is missing` at construction** if no `apiKey` is set. The plugin handles this for you by stamping an inert placeholder key (`oauth2-managed-bearer`) when you haven't supplied one; the real OAuth bearer is still injected per request by `chat.headers`, so the placeholder is never actually sent. You should not see this error from the plugin's own providers — if you do, you likely hand-rolled an `@ai-sdk/openai` provider in `opencode.json` without an `apiKey` and without this plugin managing it.
+- The native provider speaks the **OpenAI Responses wire format**, which is *not* the same as Chat Completions. The route must exist **and the chosen model must be served on it** — gateways often expose `/v1/responses` for only a subset of models. A model that 404s on `/v1/responses` (while working on `/v1/chat/completions`) is a model-routing gap, not a missing route.
+
+**Look for.**
+
+- `oauth2_provider_response_api_enabled` (debug) confirms the toggle was read for that provider, and the registered provider shows `npm: "@ai-sdk/openai"`.
+- Inference 404 / 400 from the gateway despite successful auth and model discovery → either the gateway doesn't serve `/v1/responses`, or that specific model isn't routed there. Try another model.
+
+**Fix.** Only enable `responseApi` when the gateway implements the OpenAI Responses contract at `<baseURL>/responses` for the model you're using. Otherwise leave it unset (the default) to stay on Chat Completions via `@ai-sdk/openai-compatible`.
+
+## `text part <id> not found` on a `responseApi` provider
+
+**What's happening.** Inference reaches the gateway and the model responds, but OpenCode aborts with `text part <msg_id> not found`. The gateway's Responses **SSE stream omits the `output_index` / `content_index` fields** that the canonical OpenAI Responses API always includes. AI-SDK / OpenCode key each streamed message part by those indices, so when they're absent the text part is never associated with its deltas. Observed against **Envoy AI Gateway** fronting a local model server.
+
+**Look for.**
+
+- The error fires *after* successful auth + model discovery, only with `responseApi: true`, and only when the model emits a reasoning item before the text (the missing indices desync part bookkeeping there).
+- A raw `curl` of `<baseURL>/responses` with `"stream":true` shows events like `{"type":"response.output_text.delta","item_id":"msg_…","delta":"…"}` with **no** `output_index` / `content_index`.
+
+**Fix.** The plugin repairs this automatically: when `responseApi` is on, it wraps the provider's `fetch` and injects the missing `output_index` (per item, in `output_item.added` order) and `content_index: 0` into the SSE before OpenCode parses it (see [`src/responses-repair.ts`](../packages/opencode-oauth2/src/responses-repair.ts)). The repair never overwrites indices a conformant gateway already sends, so it's a safe no-op there. The cleaner long-term fix is gateway-side — emit the indices so every OpenAI Responses client works.
+
 ## `model discovery failed (403)` after auth succeeded
 
 **What's happening.** OAuth succeeded — you have a valid access token — but the upstream `/v1/models` endpoint returned 403. The access token is missing the scope or audience the gateway expects.
@@ -136,6 +161,42 @@ curl -s http://127.0.0.1:<port>/config/providers \
 ```
 
 Once both `context` and `output` are known, the plugin emits a real `limit`, and the cost/limit render in the UI. (`cost` was already correct — adding the limit is what makes both visible.)
+
+## Model name shows the normalized id, not what the metadata endpoint returns
+
+**What's happening.** With `@vymalo/opencode-oauth2` + `@vymalo/opencode-models-info` stacked, the UI shows e.g. `Kimi K2.6` even though your `models/info` endpoint returns `"name": "kimi-k2.6"`. oauth2's model discovery stamps a **normalized** display name onto every model entry *before* models-info runs ([`mergeDiscoveredModels`](../packages/opencode-oauth2/src/opencode.ts) → [`normalizeModelId`](../packages/opencode-oauth2/src/model-normalization.ts)). models-info's merge is **upstream-wins**, so it sees `name` already set and won't overwrite it — the endpoint's name never lands.
+
+**Fix.** Opt `name` out of upstream-wins for that provider:
+
+```jsonc
+{
+  "options": {
+    "meta": {
+      "modelsInfoUrl": "models/info",
+      "modelsInfoOverwrite": ["name"]
+    }
+  }
+}
+```
+
+See [models-info.md → Overriding upstream-wins](./models-info.md#overriding-upstream-wins). The same applies to any field oauth2 (or another plugin) pre-stamps; `name` is the only one oauth2 currently sets.
+
+## Vision-capable model won't accept image attachments
+
+**What's happening.** A model your `models/info` endpoint reports with `architecture.input_modalities: ["text", "image"]` shows no image/attachment support in OpenCode. The mapper *does* derive both `modalities.input` **and** `attachment: true` from that field ([`mapping.ts`](../packages/opencode-models-info/src/mapping.ts)), and — unlike `name` — oauth2 does **not** pre-stamp `modalities`/`attachment`, so upstream-wins doesn't block them. So if image input is missing, the enrichment isn't reaching the entry with current data. In order of likelihood:
+
+1. **Stale cache.** The catalog is cached for `meta.modelsInfoTtlSeconds` (default 24h). If `image` was added to the endpoint within that window, the on-disk copy predates it. Clear it and relaunch: `rm -rf ~/Library/Caches/opencode-models-info/` (macOS; see [Caching](./models-info.md#caching-and-failure-modes) for Linux/Windows paths).
+2. **The fetch is failing.** Look for `models_info_fetch_failed_no_cache` / `..._using_stale` — usually a 401 on an auth-protected metadata endpoint (see [the 401 section](#models_info_fetch_failed_no_cache-http-401--metadata-not-enriched)).
+3. **id mismatch** between the discovered model (`/v1/models`, which becomes the config key) and the `models/info` entry — only matching ids get enriched.
+
+**Confirm.** Start `opencode serve` and inspect the resolved config:
+
+```sh
+curl -s http://127.0.0.1:<port>/config/providers \
+  | jq '.providers[] | select(.id=="<provider-id>") | .models["<model-id>"] | {attachment, modalities}'
+```
+
+`attachment: true` + `modalities.input` containing `image` means enrichment worked and the gap is elsewhere; their absence points back to one of the three causes above.
 
 ## `oauth_client_credentials_failed` 401 with `invalid_client`
 

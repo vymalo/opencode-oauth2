@@ -15,6 +15,7 @@ import {
   type LogLevel
 } from "./logging.js";
 import { OAuth2ModelSyncPlugin } from "./plugin.js";
+import { createResponsesRepairFetch } from "./responses-repair.js";
 import type { TokenSet } from "./types.js";
 
 /**
@@ -43,8 +44,72 @@ export function fromOpenCodeLogLevel(value: unknown): LogLevel | undefined {
 }
 
 const OPENAI_COMPATIBLE_NPM = "@ai-sdk/openai-compatible";
+// The native OpenAI provider. Since AI SDK v5 its default `languageModel()`
+// targets the Responses API (`/v1/responses`), where `@ai-sdk/openai-compatible`
+// only ever speaks Chat Completions (`/v1/chat/completions`). Opting a provider
+// into `responseApi: true` swaps the emitted `npm` to this package so OpenCode
+// routes inference through the gateway's Responses endpoint instead.
+const OPENAI_RESPONSES_NPM = "@ai-sdk/openai";
+// Unlike `@ai-sdk/openai-compatible`, the native provider throws
+// "OpenAI API key is missing" at request construction when no `apiKey` is set.
+// We inject the real bearer per-request via `chat.headers` (which overwrites
+// Authorization before anything leaves the process), so this inert placeholder
+// only exists to satisfy that construction-time guard — it is never sent.
+const RESPONSES_API_PLACEHOLDER_KEY = "oauth2-managed-bearer";
 const OAUTH_OPTIONS_KEYS = ["oauth2", "oauth2ModelSync"] as const;
 const PLUGIN_SERVICE_NAME = "opencode-oauth2-plugin";
+
+function resolveProviderNpm(responseApi: boolean | undefined): string {
+  return responseApi ? OPENAI_RESPONSES_NPM : OPENAI_COMPATIBLE_NPM;
+}
+
+/**
+ * When a provider opts into the Responses API, ensure its options carry an
+ * `apiKey` so the native `@ai-sdk/openai` provider can be constructed. A
+ * user-supplied key is left untouched; otherwise we stamp an inert placeholder
+ * (the real bearer is injected per-request by `chat.headers`). A no-op for
+ * Chat-Completions providers, which need no key.
+ */
+function applyResponsesApiOptions(
+  options: Record<string, unknown>,
+  responseApi: boolean | undefined,
+  providerId: string,
+  logger: Logger
+): Record<string, unknown> {
+  if (!responseApi) {
+    // If the same provider id appears in both config shapes and an earlier pass
+    // stamped our placeholder for Responses mode, but Responses ultimately loses
+    // (this shape omits the flag), don't leave the fake key on the resulting
+    // Chat-Completions provider. Only ever scrub our own placeholder.
+    if (asString(options.apiKey) === RESPONSES_API_PLACEHOLDER_KEY) {
+      const cleaned = { ...options };
+      delete cleaned.apiKey;
+      return cleaned;
+    }
+    return options;
+  }
+
+  logger.debug("oauth2_provider_response_api_enabled", { providerId });
+
+  const next: Record<string, unknown> = { ...options };
+
+  // The native @ai-sdk/openai provider throws at construction without an
+  // apiKey; stamp an inert placeholder only when the user hasn't set one. The
+  // real bearer is injected per-request by chat.headers, so it is never sent.
+  if (!asString(next.apiKey)) {
+    next.apiKey = RESPONSES_API_PLACEHOLDER_KEY;
+  }
+
+  // Repair the gateway's Responses SSE: some gateways (e.g. Envoy AI Gateway)
+  // omit `output_index` / `content_index`, which AI-SDK/OpenCode need to
+  // assemble message parts (absent → "text part <id> not found"). We compose
+  // with any pre-existing fetch so a later fetch-wrapping plugin (e.g.
+  // @vymalo/opencode-ratelimit) still wraps ours rather than clobbering it.
+  const delegate = typeof next.fetch === "function" ? (next.fetch as typeof fetch) : undefined;
+  next.fetch = createResponsesRepairFetch(delegate);
+
+  return next;
+}
 
 type OpenCodeConfig = Parameters<NonNullable<Hooks["config"]>>[0];
 type OpenCodeProviderMap = NonNullable<OpenCodeConfig["provider"]>;
@@ -67,6 +132,7 @@ interface OAuthProviderExtension {
   pkce?: boolean;
   subjectTokenSource?: SubjectTokenSource;
   tokenExchangeAudience?: string;
+  responseApi?: boolean;
 }
 
 function asBoolean(value: unknown, source: string): boolean | undefined {
@@ -239,7 +305,8 @@ function parseOAuthExtension(provider: OpenCodeProviderConfig): OAuthProviderExt
     // layer just passes the raw value through so error messages reference
     // the canonical config path.
     subjectTokenSource: raw.subjectTokenSource as SubjectTokenSource | undefined,
-    tokenExchangeAudience: asString(raw.tokenExchangeAudience)
+    tokenExchangeAudience: asString(raw.tokenExchangeAudience),
+    responseApi: asBoolean(raw.responseApi, "provider.options.oauth2.responseApi")
   };
 }
 
@@ -303,7 +370,8 @@ function parsePluginConfigServers(
       authFlow: asAuthFlow(entry.authFlow, sourceLabel),
       pkce: asBoolean(entry.pkce, `${sourceLabel}.pkce`),
       subjectTokenSource: entry.subjectTokenSource as SubjectTokenSource | undefined,
-      tokenExchangeAudience: asString(entry.tokenExchangeAudience)
+      tokenExchangeAudience: asString(entry.tokenExchangeAudience),
+      responseApi: asBoolean(entry.responseApi, `${sourceLabel}.responseApi`)
     });
   }
 
@@ -318,12 +386,14 @@ function collectManagedProviders(config: OpenCodeConfig, logger: Logger): Manage
     const providerConfig = (providers[server.id] ??= {});
     const providerOptions = asRecord(providerConfig.options) ?? {};
 
-    providerConfig.npm = OPENAI_COMPATIBLE_NPM;
+    providerConfig.npm = resolveProviderNpm(server.responseApi);
     providerConfig.name = asString(providerConfig.name) ?? server.name ?? server.id;
-    providerConfig.options = {
-      ...providerOptions,
-      baseURL: server.baseURL
-    };
+    providerConfig.options = applyResponsesApiOptions(
+      { ...providerOptions, baseURL: server.baseURL },
+      server.responseApi,
+      server.id,
+      logger
+    );
 
     byId.set(server.id, {
       ...server,
@@ -345,12 +415,14 @@ function collectManagedProviders(config: OpenCodeConfig, logger: Logger): Manage
     }
 
     const providerName = asString(providerConfig.name) ?? providerId;
-    providerConfig.npm = OPENAI_COMPATIBLE_NPM;
+    providerConfig.npm = resolveProviderNpm(extension.responseApi);
     providerConfig.name = providerName;
-    providerConfig.options = {
-      ...options,
-      baseURL
-    };
+    providerConfig.options = applyResponsesApiOptions(
+      { ...options, baseURL },
+      extension.responseApi,
+      providerId,
+      logger
+    );
 
     byId.set(providerId, {
       id: providerId,
@@ -370,7 +442,8 @@ function collectManagedProviders(config: OpenCodeConfig, logger: Logger): Manage
       authFlow: extension.authFlow,
       pkce: extension.pkce,
       subjectTokenSource: extension.subjectTokenSource,
-      tokenExchangeAudience: extension.tokenExchangeAudience
+      tokenExchangeAudience: extension.tokenExchangeAudience,
+      responseApi: extension.responseApi
     });
   }
 
