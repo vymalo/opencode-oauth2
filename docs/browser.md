@@ -98,7 +98,7 @@ and dashboard show **Connected** once the handshake succeeds.
 `group` is the primary handle on every tool — it names the tab group the action targets, and
 the extension creates it on the first `browser_open`.
 
-The 32 tools are organized into three **groups**, gated by the `groups` option (plugin) /
+The 33 tools are organized into three **groups**, gated by the `groups` option (plugin) /
 `OCB_GROUPS` (MCP). Default: `page` + `control` (`debug` is opt-in). The `browser_*` names are
 stable, so OpenCode's per-agent tool allow/deny works on them directly too.
 

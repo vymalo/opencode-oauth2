@@ -1,11 +1,72 @@
 # OpenCode Browser — extension
 
-Companion Chromium/Firefox extension for [`@vymalo/opencode-browser`](../../packages/opencode-browser).
-Its background worker dials the plugin's localhost bridge and drives real browser tabs (open,
-click, type, scroll, screenshot) on behalf of an OpenCode agent, organized into named tab groups.
+Companion Chromium/Firefox extension for [`@vymalo/opencode-browser`](../../packages/opencode-browser)
+and [`@vymalo/opencode-browser-mcp`](../../packages/opencode-browser-mcp). Its background worker
+dials the localhost **bridge** and drives real browser tabs (open, click, type, scroll,
+screenshot) on behalf of an agent, organized into **named tab groups**.
 
 Built with **WXT** (cross-browser MV3), **React + Tailwind + shadcn-style UI**, **TanStack
 Query**, and **Dexie/IndexedDB**.
+
+> **Private package** — not published to npm. It ships as a Release zip and to the Chrome Web
+> Store / Firefox Add-ons. See [publishing](#publishing).
+
+## Install
+
+Pick whichever is easiest:
+
+| Source | How |
+| --- | --- |
+| **Chrome Web Store** | Search "OpenCode Browser" (once the listing is live), or use your org's link. |
+| **Firefox Add-ons (AMO)** | Same — install the listed add-on. |
+| **Release zip** | Grab `opencode-browser-extension-<ver>-chrome.zip` / `-firefox.zip` from [Releases](https://github.com/vymalo/opencode-oauth2/releases) and load unpacked. |
+| **Build from source** | `pnpm build` (below), then load `.output/`. |
+
+### Load unpacked (zip / source)
+
+- **Chrome / Edge / Brave**: `chrome://extensions` → enable *Developer mode* → *Load unpacked* →
+  pick `.output/chrome-mv3` (or unzip the chrome zip and pick that folder).
+- **Firefox**: `about:debugging#/runtime/this-firefox` → *Load Temporary Add-on* →
+  pick `.output/firefox-mv2/manifest.json`.
+
+## Connect
+
+1. Start an agent that hosts the bridge — the OpenCode plugin (`@vymalo/opencode-browser`) or the
+   MCP server (`@vymalo/opencode-browser-mcp`). It prints a **token**.
+2. Click the toolbar icon → **Dashboard** (or right-click → Options).
+3. Enter the **bridge URL** (`ws://127.0.0.1:4517`), the **token**, optionally a **browser label**
+   (handy when you run several browsers), choose an **executor**, then **Save & reconnect**.
+
+> ⚠️ This gives an agent control of a real browser profile. **Use a dedicated or throwaway
+> profile**, not your daily one. The "being debugged" banner Chrome shows during a session is an
+> intentional signal that automation is active.
+
+## Dashboard tour
+
+- **Connection** — bridge URL, token, executor mode, browser label; live connection status.
+- **Activity** — a timeline of every command the agent ran (action, group, params, result).
+- **Screenshots** — a gallery of captures, stored locally in IndexedDB.
+- **Popup** — a compact status + connect/disconnect toggle for quick checks.
+
+## Executors
+
+- **CDP** (`chrome.debugger`, Chromium) — trusted input, full-page capture, console & network
+  logs. Shows the debugger banner.
+- **Content script** — synthetic events + `captureVisibleTab`; the Firefox-safe fallback, also
+  used when CDP is unavailable.
+- **Auto** (default) — CDP on Chromium when the `debugger` permission is granted, else content.
+
+The host plugin/MCP can advertise a preferred executor; the dashboard setting wins for your
+session.
+
+## Permissions
+
+`tabs`, `scripting`, `storage`, `activeTab`, `cookies`, plus `debugger` + `tabGroups` on Chromium
+only (dropped on Firefox, where they don't exist). `<all_urls>` host access is needed because the
+agent can target any site you direct it to. The extension **collects no data off-device** — all
+settings/history/screenshots live in local IndexedDB; the only network connection is the
+loopback bridge you configure. The Firefox manifest declares `data_collection_permissions: none`
+accordingly.
 
 ## Develop
 
@@ -15,18 +76,10 @@ pnpm dev:firefox    # WXT dev server (Firefox)
 pnpm build          # production build → .output/chrome-mv3
 pnpm build:firefox  # → .output/firefox-mv2
 pnpm zip            # packaged .zip for store / unpacked load
+pnpm zip:firefox    # Firefox zip + a reviewable sources zip (for AMO)
 pnpm typecheck      # wxt prepare && tsc --noEmit
 pnpm test           # vitest (pure helpers)
 ```
-
-## Load it
-
-- **Chrome/Edge/Brave**: `chrome://extensions` → Developer mode → *Load unpacked* →
-  `.output/chrome-mv3`.
-- **Firefox**: `about:debugging` → *Load Temporary Add-on* → `.output/firefox-mv2/manifest.json`.
-
-Then open the toolbar popup → *Dashboard*, paste the bridge URL (`ws://127.0.0.1:4517`) and the
-token printed by the plugin, choose an executor, and *Save & reconnect*.
 
 ## Layout
 
@@ -44,7 +97,21 @@ src/
 
 The two executors share all DOM-bound work via `chrome.scripting.executeScript`. The CDP
 executor (`chrome.debugger`) adds trusted input + full-page capture on Chromium; the
-content-script executor is the Firefox-safe fallback. See
-[`docs/browser.md`](../../docs/browser.md) for the full architecture.
+content-script executor is the Firefox-safe fallback. Full architecture, wire protocol, and tool
+reference: [`docs/browser.md`](../../docs/browser.md).
 
-This package is **private** — it is not published to npm; distribute the built `.zip`.
+## Publishing
+
+`wxt zip` produces the store artifacts; the release pipeline attaches them to the GitHub Release
+and runs `wxt submit` to the Chrome Web Store + Firefox AMO (each gated on its own repo secrets).
+The Firefox add-on id is pinned to `opencode-browser@vymalo.com`. Full store-setup + secret list:
+[`docs/browser.md` → Publishing the extension to the web stores](../../docs/browser.md#publishing-the-extension-to-the-web-stores).
+
+## Troubleshooting
+
+| Symptom | Fix |
+| --- | --- |
+| "Disconnected" in the dashboard | Check the bridge URL/port and that an agent is hosting it; re-copy the token. |
+| Auth rejected | Token mismatch — paste exactly what the plugin/MCP logged. |
+| Actions do nothing on Firefox | Some features are CDP/Chromium-only; Firefox uses the content executor. |
+| Banner won't go away | Released on `browser_release` or when the agent exits — expected otherwise. |
