@@ -10,11 +10,18 @@ This is a **dual plugin**:
 | OpenCode plugin | `@vymalo/opencode-browser` (`packages/opencode-browser`) | Registers `browser_*` **tools** the model calls, and hosts a localhost **WebSocket bridge**. |
 | Browser extension | `apps/browser-extension` (private, Chromium MV3 + Firefox) | A React/Tailwind/shadcn app whose background worker dials the bridge and drives real tabs. |
 
-## Topology — why the plugin is the server
+## Topology — an auto-elect broker
 
 Browser extensions **cannot host servers**, but a background service worker *can* open an
-outbound WebSocket to `127.0.0.1`. So the plugin hosts the bridge and the extension connects
-out to it. OpenCode runs on **Bun**, so the bridge uses `Bun.serve`'s WebSocket support.
+outbound WebSocket to `127.0.0.1`. So an **agent** (the plugin or the MCP server) hosts the
+bridge and the extension connects out to it. OpenCode runs on **Bun**, so the bridge uses
+`Bun.serve`; the MCP server uses Node `ws`.
+
+The bridge is a **broker** with two roles: **agents** (producers — the plugin, the MCP server,
+extra sessions) and **executors** (the browser extensions). The first agent to start wins the
+port bind and runs the broker in-process; later agents detect the bound port and connect as
+**guests**. If the host exits, a guest re-binds and takes over. This means you can run the
+plugin and the MCP server (or several sessions) at once — see [Multiple browsers & agents](#multiple-browsers--agents).
 
 ```
 OpenCode (Bun)                                   Browser (Chromium / Firefox)
@@ -250,6 +257,30 @@ extension disconnects.
 | `debugger attach failed` | Another debugger (DevTools) is attached, or you forced `cdp` on Firefox. Switch executor to `content`. |
 | Screenshot path returned but model can't see it | Use the `read` tool on the returned path — tool output can't carry images. |
 | Clicks ignored on a strict site | You're on the content-script executor (synthetic events). Switch to `cdp` on Chromium for trusted input. |
+
+## Multiple browsers & agents
+
+The broker routes by **group ownership**, so several browsers and several agents can share one
+bridge:
+
+- **Multiple browsers (executors).** Connect more than one extension (e.g. Chrome + Firefox, or
+  two profiles). Give each a **label** in its dashboard (defaults to a generated id). `browser_targets`
+  lists them as `{ id, label, browser, groups }`. Choose where a new group opens with `target` on
+  `browser_open` (`browser_open(group:"research", target:"work-chrome")`); later commands for that
+  group follow it automatically. Omit `target` with a single browser.
+- **Multiple agents (producers).** Run the plugin and the MCP server (or several sessions) at the
+  same time — whichever starts first hosts the broker; the rest are guests. A group is **owned by
+  the agent that created it**: another agent gets `group "X" is owned by another client`, so give
+  your agents distinct group names. When an agent exits, its groups become **orphaned** and the
+  next agent to use one adopts it (tabs survive).
+- **Token sharing.** Adapters auto-share a token via a per-user `bridge.json` state file (set an
+  explicit `token` / `OCB_TOKEN` to be deterministic on a simultaneous cold start). The extension
+  still needs the token pasted in once.
+- **Failover.** If the hosting agent quits, a guest re-binds and rebuilds group→browser ownership
+  by re-querying each extension's tabs. During the brief re-election window commands fail fast with
+  `bridge is re-electing` and the model retries.
+
+Full design notes: [`plans/multi-client-routing.md`](../plans/multi-client-routing.md).
 
 ## Use it from other agents (MCP)
 

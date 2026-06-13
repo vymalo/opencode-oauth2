@@ -8,3 +8,6 @@ packages/*/target
 # WXT browser-extension build + generated type output
 apps/*/.output
 apps/*/.wxt
+
+# Local dev-harness screenshot output
+scripts/harness-shots
