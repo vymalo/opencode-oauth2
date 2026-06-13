@@ -1,6 +1,6 @@
 {
   "name": "@vymalo/opencode-models-info",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "OpenCode plugin that enriches model entries with full metadata (context length, pricing, modalities, capability flags) fetched from a provider-supplied OpenRouter-shaped endpoint.",
   "license": "MIT",
   "author": "vymalo contributors",
