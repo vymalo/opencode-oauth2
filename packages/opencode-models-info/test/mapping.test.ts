@@ -59,6 +59,34 @@ describe("mapOpenRouterEntry", () => {
     });
     expect(out.attachment).toBeUndefined();
   });
+
+  it("leaves a capability undefined (true-only) when not opted into overwrite", () => {
+    // supported_parameters present but lacks tools → we know it's false, but
+    // without overwrite we stay true-only so upstream-wins leaves it alone.
+    const out = mapOpenRouterEntry({ id: "x", supported_parameters: ["temperature"] });
+    expect(out.tool_call).toBeUndefined();
+  });
+
+  it("emits an explicit false capability when overwritten and the source reported it", () => {
+    const out = mapOpenRouterEntry(
+      {
+        id: "x",
+        supported_parameters: ["temperature"],
+        architecture: { input_modalities: ["text"], output_modalities: ["text"] }
+      },
+      new Set(["tool_call", "attachment"])
+    );
+    expect(out.tool_call).toBe(false);
+    expect(out.attachment).toBe(false);
+  });
+
+  it("stays undefined under overwrite when the source never reported the capability", () => {
+    // No supported_parameters / input_modalities at all → we genuinely don't
+    // know, so overwrite must not fabricate a false.
+    const out = mapOpenRouterEntry({ id: "x" }, new Set(["tool_call", "attachment"]));
+    expect(out.tool_call).toBeUndefined();
+    expect(out.attachment).toBeUndefined();
+  });
 });
 
 describe("mergeIntoModel", () => {
@@ -81,5 +109,18 @@ describe("mergeIntoModel", () => {
     mergeIntoModel(existing, { reasoning: true });
     mergeIntoModel(existing, { reasoning: false });
     expect(existing.reasoning).toBe(true);
+  });
+
+  it("overwrites only the fields named in the overwrite set", () => {
+    const existing: Record<string, unknown> = { name: "Kimi K2.6", tool_call: true };
+    mergeIntoModel(existing, { name: "kimi-k2.6", tool_call: false }, new Set(["name"]));
+    expect(existing.name).toBe("kimi-k2.6");
+    expect(existing.tool_call).toBe(true);
+  });
+
+  it("does not write an overwrite field when the derived value is absent", () => {
+    const existing: Record<string, unknown> = { name: "Kimi K2.6" };
+    mergeIntoModel(existing, { tool_call: true }, new Set(["name"]));
+    expect(existing.name).toBe("Kimi K2.6");
   });
 });

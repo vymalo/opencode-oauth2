@@ -162,6 +162,42 @@ curl -s http://127.0.0.1:<port>/config/providers \
 
 Once both `context` and `output` are known, the plugin emits a real `limit`, and the cost/limit render in the UI. (`cost` was already correct — adding the limit is what makes both visible.)
 
+## Model name shows the normalized id, not what the metadata endpoint returns
+
+**What's happening.** With `@vymalo/opencode-oauth2` + `@vymalo/opencode-models-info` stacked, the UI shows e.g. `Kimi K2.6` even though your `models/info` endpoint returns `"name": "kimi-k2.6"`. oauth2's model discovery stamps a **normalized** display name onto every model entry *before* models-info runs ([`mergeDiscoveredModels`](../packages/opencode-oauth2/src/opencode.ts) → [`normalizeModelId`](../packages/opencode-oauth2/src/model-normalization.ts)). models-info's merge is **upstream-wins**, so it sees `name` already set and won't overwrite it — the endpoint's name never lands.
+
+**Fix.** Opt `name` out of upstream-wins for that provider:
+
+```jsonc
+{
+  "options": {
+    "meta": {
+      "modelsInfoUrl": "models/info",
+      "modelsInfoOverwrite": ["name"]
+    }
+  }
+}
+```
+
+See [models-info.md → Overriding upstream-wins](./models-info.md#overriding-upstream-wins). The same applies to any field oauth2 (or another plugin) pre-stamps; `name` is the only one oauth2 currently sets.
+
+## Vision-capable model won't accept image attachments
+
+**What's happening.** A model your `models/info` endpoint reports with `architecture.input_modalities: ["text", "image"]` shows no image/attachment support in OpenCode. The mapper *does* derive both `modalities.input` **and** `attachment: true` from that field ([`mapping.ts`](../packages/opencode-models-info/src/mapping.ts)), and — unlike `name` — oauth2 does **not** pre-stamp `modalities`/`attachment`, so upstream-wins doesn't block them. So if image input is missing, the enrichment isn't reaching the entry with current data. In order of likelihood:
+
+1. **Stale cache.** The catalog is cached for `meta.modelsInfoTtlSeconds` (default 24h). If `image` was added to the endpoint within that window, the on-disk copy predates it. Clear it and relaunch: `rm -rf ~/Library/Caches/opencode-models-info/` (macOS; see [Caching](./models-info.md#caching-and-failure-modes) for Linux/Windows paths).
+2. **The fetch is failing.** Look for `models_info_fetch_failed_no_cache` / `..._using_stale` — usually a 401 on an auth-protected metadata endpoint (see [the 401 section](#models_info_fetch_failed_no_cache-http-401--metadata-not-enriched)).
+3. **id mismatch** between the discovered model (`/v1/models`, which becomes the config key) and the `models/info` entry — only matching ids get enriched.
+
+**Confirm.** Start `opencode serve` and inspect the resolved config:
+
+```sh
+curl -s http://127.0.0.1:<port>/config/providers \
+  | jq '.providers[] | select(.id=="<provider-id>") | .models["<model-id>"] | {attachment, modalities}'
+```
+
+`attachment: true` + `modalities.input` containing `image` means enrichment worked and the gap is elsewhere; their absence points back to one of the three causes above.
+
 ## `oauth_client_credentials_failed` 401 with `invalid_client`
 
 **What's happening.** The IdP rejected the `client_id` + `client_secret` combination. Three common root causes for Keycloak; similar elsewhere.

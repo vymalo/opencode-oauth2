@@ -103,6 +103,83 @@ describe("enrichConfig", () => {
     expect(getModel(config, "custom", "unmatched").name).toBe("Untouched");
   });
 
+  it("lets the endpoint name win over a pre-stamped name when modelsInfoOverwrite lists it", async () => {
+    // Mirrors the oauth2 composition: another plugin already wrote a normalized
+    // `name` onto the entry, so plain upstream-wins would freeze it. Opting
+    // `name` into overwrite lets the metadata endpoint's name take over, while
+    // un-listed fields (here the upstream tool_call) stay untouched.
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ data: [openRouterEntry] }), { status: 200 })
+      );
+    const config = withProvider("custom", {
+      options: {
+        baseURL: "https://x.test/v1",
+        meta: { modelsInfoUrl: "models/info", modelsInfoOverwrite: ["name"] }
+      },
+      models: { "model-a": { name: "Model A (normalized)", tool_call: false } }
+    });
+
+    await enrichConfig(config, {
+      cache: memoryCache(),
+      logger: silentLogger(),
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    });
+
+    const enriched = getModel(config, "custom", "model-a");
+    expect(enriched.name).toBe("Model A");
+    expect(enriched.tool_call).toBe(false);
+  });
+
+  it("clears a stale-true capability flag when the field is overwritten (endpoint reports no tools)", async () => {
+    // The exact gap a reviewer flagged: another plugin stamped tool_call:true,
+    // the endpoint's supported_parameters is present but lacks tools, and the
+    // user opted tool_call into overwrite — the false must win.
+    const noToolsEntry: OpenRouterModel = {
+      id: "model-a",
+      supported_parameters: ["temperature"]
+    };
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ data: [noToolsEntry] }), { status: 200 }));
+    const config = withProvider("custom", {
+      options: {
+        baseURL: "https://x.test/v1",
+        meta: { modelsInfoUrl: "models/info", modelsInfoOverwrite: ["tool_call"] }
+      },
+      models: { "model-a": { tool_call: true } }
+    });
+
+    await enrichConfig(config, {
+      cache: memoryCache(),
+      logger: silentLogger(),
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    });
+
+    expect(getModel(config, "custom", "model-a").tool_call).toBe(false);
+  });
+
+  it("keeps a pre-stamped name when modelsInfoOverwrite is absent (default upstream-wins)", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ data: [openRouterEntry] }), { status: 200 })
+      );
+    const config = withProvider("custom", {
+      options: { baseURL: "https://x.test/v1", meta: { modelsInfoUrl: "models/info" } },
+      models: { "model-a": { name: "Model A (normalized)" } }
+    });
+
+    await enrichConfig(config, {
+      cache: memoryCache(),
+      logger: silentLogger(),
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    });
+
+    expect(getModel(config, "custom", "model-a").name).toBe("Model A (normalized)");
+  });
+
   it("does not refetch when a non-expired cache entry exists", async () => {
     const seed = new Map<string, CachedModelsRecord>();
     const fetchImpl = vi.fn();

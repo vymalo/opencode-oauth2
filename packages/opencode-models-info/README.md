@@ -78,6 +78,7 @@ Two practical rules: drop the leading `/` to keep the metadata path under your i
 | `meta.modelsInfoTtlSeconds`     | `86400` (24h)      | Cache TTL.                                                            |
 | `meta.modelsInfoTimeoutMs`      | `5000`             | Per-fetch HTTP timeout.                                               |
 | `meta.modelsInfoHeaders`        | _(none)_           | Extra request headers. Override `options.headers` on conflict. Included in the cache key, so a tenant switch busts the cache. |
+| `meta.modelsInfoOverwrite`      | _(none)_           | Array of field names (`name`, `attachment`, `reasoning`, `temperature`, `tool_call`, `cost`, `limit`, `modalities`) that the endpoint is allowed to overwrite even when already set. Opts those fields out of upstream-wins — see [Forcing endpoint values to win](#forcing-endpoint-values-to-win). Unknown names are ignored. |
 
 ### Auth composition
 
@@ -114,6 +115,29 @@ List the oauth2 plugin **first** so its `config` hook runs before this one — t
 ```
 
 oauth2 authenticates the provider and discovers its models; this plugin then fetches `modelsInfoUrl` using the token oauth2 stamped onto the provider headers, and enriches those discovered models. No `models` block and no `Authorization` header to manage — both are handled for you.
+
+> **The displayed name.** oauth2's discovery stamps a **normalized** `name` onto each model (e.g. `kimi-k2.6` → `Kimi K2.6`). Because the merge is upstream-wins, that pre-set name blocks the endpoint's own `name` from landing — so the UI shows the normalized label, not the one your metadata endpoint returns. Add `"modelsInfoOverwrite": ["name"]` (next section) to let the endpoint name win.
+
+### Forcing endpoint values to win
+
+The merge is **upstream-wins** by default: a field already present on a model entry is never overwritten, so a handwritten `opencode.json` always takes precedence. But an upstream value isn't always handwritten — another plugin may auto-stamp one. The clearest case is `@vymalo/opencode-oauth2`, which writes a normalized `name` onto every discovered model; to upstream-wins that's indistinguishable from a deliberate user value, so the endpoint's `name` can never replace it.
+
+`meta.modelsInfoOverwrite` opts specific fields *out* of upstream-wins:
+
+```jsonc
+{
+  "options": {
+    "meta": {
+      "modelsInfoUrl": "models/info",
+      "modelsInfoOverwrite": ["name"]   // endpoint name beats oauth2's normalized one
+    }
+  }
+}
+```
+
+Listed fields still only change when the endpoint actually provides a value (a missing field never blanks an existing one), and unlisted fields keep the default upstream-wins behavior. Valid names are the mapped fields: `name`, `attachment`, `reasoning`, `temperature`, `tool_call`, `cost`, `limit`, `modalities`.
+
+> **Forcing a capability flag *off*.** The boolean flags (`tool_call`, `reasoning`, `temperature`, `attachment`) are normally emitted *true-only*. Listing one in `modelsInfoOverwrite` also lets the endpoint assert `false` (to clear a stale `true`) — but only when the endpoint actually reports the underlying data (`supported_parameters`, or `architecture.input_modalities` for `attachment`). If that data is absent the plugin can't tell true from false, so it leaves the field alone rather than inventing a `false`.
 
 ### Expected response shape (OpenRouter)
 
