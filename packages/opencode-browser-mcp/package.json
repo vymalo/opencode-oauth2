@@ -1,0 +1,64 @@
+{
+  "name": "@vymalo/opencode-browser-mcp",
+  "version": "0.7.0",
+  "description": "MCP server for @vymalo/opencode-browser — exposes the browser_* tools (open, click, type, scroll, screenshot, snapshot, …) over the Model Context Protocol so any MCP client (Claude Code, Cursor, Cline, …) can drive the companion browser extension. Hosts the same localhost bridge; screenshots are returned inline as image content.",
+  "license": "MIT",
+  "author": "vymalo contributors",
+  "homepage": "https://github.com/vymalo/opencode-oauth2#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vymalo/opencode-oauth2.git",
+    "directory": "packages/opencode-browser-mcp"
+  },
+  "bugs": {
+    "url": "https://github.com/vymalo/opencode-oauth2/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "browser",
+    "automation",
+    "chromium",
+    "firefox"
+  ],
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "opencode-browser-mcp": "dist/mcp.js"
+  },
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "biome lint .",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "format": "biome format --write .",
+    "format:check": "biome format ."
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@vymalo/opencode-browser": "workspace:*",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.0",
+    "vite": "^8.0.14",
+    "vitest": "^4.1.7"
+  }
+}

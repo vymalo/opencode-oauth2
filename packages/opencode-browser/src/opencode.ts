@@ -1,0 +1,213 @@
+import { randomBytes } from "node:crypto";
+import type { Hooks, Plugin, PluginInput, PluginOptions } from "@opencode-ai/plugin";
+
+import type { AgentSocketFactory } from "./agent-client.js";
+import { DEFAULT_GROUPS, TOOL_GROUPS } from "./catalog.js";
+import { createEndpoint } from "./endpoint.js";
+import {
+  createJsonConsoleLogger,
+  DEFAULT_LOG_LEVEL,
+  fromOpenCodeLogLevel,
+  type LogFields,
+  LOG_LEVEL_PRIORITY,
+  type Logger,
+  type LogLevel
+} from "./logging.js";
+import type { ToolGroup } from "./schema.js";
+import { resolveSharedToken, writeBridgeFile } from "./token-file.js";
+import { createBrowserTools, type SaveScreenshot } from "./tools.js";
+import { type BridgeTransport, createBunTransport } from "./transport.js";
+import type { BrowserPluginOptions, ResolvedBrowserOptions } from "./types.js";
+
+interface WsLike {
+  send(data: string): void;
+  close(): void;
+  addEventListener(type: string, cb: (event: { data?: unknown }) => void): void;
+}
+
+/** Agent-socket factory using the runtime's global WebSocket (Bun provides one). */
+const bunAgentSocket: AgentSocketFactory = (url, handlers) => {
+  const Ctor = (globalThis as { WebSocket?: new (url: string) => WsLike }).WebSocket;
+  if (!Ctor) {
+    throw new Error("global WebSocket is not available in this runtime");
+  }
+  const ws = new Ctor(url);
+  ws.addEventListener("open", () => handlers.onOpen());
+  ws.addEventListener("message", (event) =>
+    handlers.onMessage(typeof event.data === "string" ? event.data : String(event.data))
+  );
+  ws.addEventListener("close", () => handlers.onClose());
+  ws.addEventListener("error", () => {});
+  return { send: (data) => ws.send(data), close: () => ws.close() };
+};
+
+function resolveGroups(raw: unknown): ToolGroup[] {
+  if (!Array.isArray(raw)) {
+    return [...DEFAULT_GROUPS];
+  }
+  const valid = raw.filter((g): g is ToolGroup => TOOL_GROUPS.includes(g as ToolGroup));
+  return valid.length > 0 ? valid : [...DEFAULT_GROUPS];
+}
+
+const PLUGIN_SERVICE_NAME = "opencode-browser-plugin";
+
+const DEFAULTS = {
+  host: "127.0.0.1",
+  port: 4517,
+  executor: "auto",
+  timeoutMs: 30_000,
+  screenshotDir: ".opencode/browser"
+} as const;
+
+type OpenCodeConfig = Parameters<NonNullable<Hooks["config"]>>[0];
+
+export interface BrowserPluginFactoryOptions {
+  /** Inject a logger (defaults to the OpenCode-piped logger). */
+  logger?: Logger;
+  /** Inject the server transport factory for host mode (defaults to Bun.serve). */
+  createServerTransport?: () => BridgeTransport;
+  /** Inject the agent-socket factory for guest mode (defaults to global WebSocket). */
+  createAgentSocket?: AgentSocketFactory;
+  /** Inject the screenshot disk-writer (tests). */
+  saveScreenshot?: SaveScreenshot;
+  /** Inject token generation (tests). */
+  generateToken?: () => string;
+}
+
+/**
+ * Pipe plugin logs through OpenCode's `client.app.log` so they show up in the
+ * host's structured log stream, with the JSON console as a reliable fallback.
+ * Mirrors the pattern used by `@vymalo/opencode-oauth2` / `-ratelimit`.
+ */
+function createOpenCodeLogger(client: PluginInput["client"], getMinLevel: () => LogLevel): Logger {
+  const fallback = createJsonConsoleLogger("debug");
+
+  const write = (level: LogLevel, event: string, fields?: LogFields) => {
+    if (LOG_LEVEL_PRIORITY[level] < LOG_LEVEL_PRIORITY[getMinLevel()]) {
+      return;
+    }
+    fallback[level](event, fields);
+    void client.app
+      .log({ body: { service: PLUGIN_SERVICE_NAME, level, message: event, extra: fields } })
+      .catch(() => {
+        /* best-effort */
+      });
+  };
+
+  return {
+    debug: (event, fields) => write("debug", event, fields),
+    info: (event, fields) => write("info", event, fields),
+    warn: (event, fields) => write("warn", event, fields),
+    error: (event, fields) => write("error", event, fields)
+  };
+}
+
+function resolveOptions(
+  raw: PluginOptions | undefined,
+  generateToken: () => string
+): ResolvedBrowserOptions {
+  const opts = (raw ?? {}) as BrowserPluginOptions;
+  const token =
+    typeof opts.token === "string" && opts.token.length > 0 ? opts.token : generateToken();
+  return {
+    enabled: opts.enabled !== false,
+    host: opts.host ?? DEFAULTS.host,
+    port: opts.port ?? DEFAULTS.port,
+    token,
+    executor: opts.executor ?? DEFAULTS.executor,
+    groups: resolveGroups(opts.groups),
+    timeoutMs: opts.timeoutMs ?? DEFAULTS.timeoutMs,
+    screenshotDir: opts.screenshotDir ?? DEFAULTS.screenshotDir
+  };
+}
+
+export function createBrowserPlugin(factoryOptions: BrowserPluginFactoryOptions = {}): Plugin {
+  return async ({ client }, pluginOptions) => {
+    let currentLogLevel: LogLevel = DEFAULT_LOG_LEVEL;
+    const logger = factoryOptions.logger ?? createOpenCodeLogger(client, () => currentLogLevel);
+    const generateToken = factoryOptions.generateToken ?? (() => randomBytes(24).toString("hex"));
+
+    const options = resolveOptions(pluginOptions, generateToken);
+    const rawOptions = pluginOptions as BrowserPluginOptions | undefined;
+    // Empty string is NOT an explicit token (resolveOptions generates one for
+    // it). Treating "" as provided would mark the shared token "explicit" and
+    // skip the paste_into_extension log, leaving the extension unable to learn
+    // the generated token.
+    const tokenProvided = typeof rawOptions?.token === "string" && rawOptions.token.length > 0;
+    // Only forward the executor preference when the operator set it explicitly;
+    // otherwise the extension keeps its own dashboard choice.
+    const executorProvided = typeof rawOptions?.executor === "string";
+
+    if (!options.enabled) {
+      logger.info("browser_plugin_disabled", {});
+      return {
+        config: async (config: OpenCodeConfig) => {
+          currentLogLevel = fromOpenCodeLogLevel(config.logLevel) ?? DEFAULT_LOG_LEVEL;
+        }
+      };
+    }
+
+    // Share the token across adapters via the per-user state file (explicit wins).
+    const { token, source } = resolveSharedToken(
+      options.port,
+      tokenProvided ? options.token : undefined,
+      generateToken
+    );
+    writeBridgeFile(options.port, token);
+
+    // Auto-elect: host the broker (win the bind) or join an existing one as a guest.
+    const endpoint = await createEndpoint(
+      {
+        host: options.host,
+        port: options.port,
+        token,
+        executor: executorProvided ? options.executor : undefined,
+        timeoutMs: options.timeoutMs,
+        label: "opencode-plugin"
+      },
+      {
+        logger,
+        createServerTransport: factoryOptions.createServerTransport ?? createBunTransport,
+        createAgentSocket: factoryOptions.createAgentSocket ?? bunAgentSocket
+      }
+    );
+
+    // When OpenCode exits, hand the browser back automatically — the user
+    // shouldn't have to click Disconnect.
+    process.once("exit", () => {
+      try {
+        endpoint.shutdown();
+      } catch {
+        /* best-effort */
+      }
+    });
+
+    if (source !== "explicit") {
+      // Make the token visible so it can be pasted into the extension. The
+      // `paste_into_extension` field name dodges the logger's redaction filter.
+      logger.info("browser_bridge_token", {
+        paste_into_extension: token,
+        source,
+        mode: endpoint.mode()
+      });
+    }
+
+    const tools = createBrowserTools({
+      send: endpoint.send,
+      options,
+      logger,
+      saveScreenshot: factoryOptions.saveScreenshot
+    });
+
+    return {
+      tool: tools,
+      config: async (config: OpenCodeConfig) => {
+        currentLogLevel = fromOpenCodeLogLevel(config.logLevel) ?? DEFAULT_LOG_LEVEL;
+      }
+    };
+  };
+}
+
+export const OpencodeBrowserPlugin = createBrowserPlugin();
+
+export default OpencodeBrowserPlugin;
