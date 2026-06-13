@@ -82,8 +82,11 @@ export class GroupRegistry {
     }
     const existing = this.groups.get(name);
     try {
+      // Chrome uses -1 (TAB_GROUP_ID_NONE) for "no group" and 0 is a valid id,
+      // so test for presence explicitly rather than truthiness — otherwise a
+      // group with id 0 would be split into a fresh native group on reuse.
       const groupId = await chrome.tabs.group(
-        existing?.tabGroupId
+        existing?.tabGroupId !== undefined
           ? { tabIds: [tabId], groupId: existing.tabGroupId }
           : { tabIds: [tabId] }
       );

@@ -104,6 +104,12 @@ export async function pageDispatch(
     const style = window.getComputedStyle(el);
     return style.visibility !== "hidden" && style.display !== "none" && style.opacity !== "0";
   };
+  // Never surface password values in snapshots/queries/inspections — they flow
+  // to the model and host logs. browser_snapshot is a default-group tool meant
+  // to be called before interacting with forms, so this guards the common path.
+  const SECRET_MASK = "••••••";
+  const isSecret = (el: Element): boolean =>
+    el instanceof HTMLInputElement && el.type === "password";
   const accessibleName = (el: Element): string => {
     const aria = el.getAttribute("aria-label");
     if (aria) {
@@ -113,7 +119,7 @@ export async function pageDispatch(
     if (placeholder) {
       return placeholder.trim();
     }
-    const value = (el as HTMLInputElement).value;
+    const value = isSecret(el) ? "" : (el as HTMLInputElement).value;
     const txt = (el.textContent ?? "").replace(/\s+/g, " ").trim();
     return (txt || value || "").slice(0, 80);
   };
@@ -193,15 +199,22 @@ export async function pageDispatch(
       }
       const rect = el.getBoundingClientRect();
       const input = el as HTMLInputElement;
+      const secret = isSecret(el);
       const attrs: Record<string, string> = {};
       for (const a of Array.from(el.attributes)) {
-        attrs[a.name] = a.value;
+        attrs[a.name] = secret && a.name === "value" ? SECRET_MASK : a.value;
       }
       return {
         found: true,
         tag: el.tagName.toLowerCase(),
         text: accessibleName(el),
-        value: typeof input.value === "string" ? input.value : undefined,
+        value: secret
+          ? input.value
+            ? SECRET_MASK
+            : undefined
+          : typeof input.value === "string"
+            ? input.value
+            : undefined,
         checked: typeof input.checked === "boolean" ? input.checked : undefined,
         attribute: p.name ? el.getAttribute(p.name) : undefined,
         attributes: attrs,
@@ -234,6 +247,13 @@ export async function pageDispatch(
         return { found: false, x: 0, y: 0 };
       }
       el.scrollIntoView({ block: "center", inline: "center" });
+      // A ref/selector can still resolve to a hidden element (display:none,
+      // zero-size, visibility:hidden). Returning a center for it would make the
+      // CDP click/hover/type paths fire trusted events at an invisible point
+      // and report success — reject it instead.
+      if (!isVisible(el)) {
+        return { found: false, x: 0, y: 0 };
+      }
       const rect = el.getBoundingClientRect();
       return { found: true, x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
     }

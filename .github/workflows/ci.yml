@@ -39,14 +39,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Build first: @vymalo/opencode-browser-mcp typechecks/tests against
+      # @vymalo/opencode-browser's published "./lib" export (dist/lib.d.ts),
+      # which doesn't exist until the dependency is built. `pnpm -r` runs in
+      # topological order, so this produces every package's dist up front.
+      - name: Build
+        run: pnpm -r build
+
       - name: Typecheck
         run: pnpm -r typecheck
 
       - name: Test
         run: pnpm -r test
-
-      - name: Build
-        run: pnpm -r build
 
       - name: Lint
         run: pnpm lint

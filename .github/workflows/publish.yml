@@ -64,6 +64,15 @@ jobs:
         # gate the release — moderate-severity Node CVEs are noisy.
         run: pnpm audit --audit-level=high --prod
 
+      - name: Build all packages
+        # Must run BEFORE typecheck/test: @vymalo/opencode-browser-mcp resolves
+        # @vymalo/opencode-browser via its published "./lib" export
+        # (dist/lib.d.ts), which doesn't exist on a clean runner until the
+        # dependency is built. `pnpm -r` builds in topological order, so every
+        # package's dist (incl. the Rolldown bundle, so a broken bundler is
+        # still caught here) is in place before the recursive checks.
+        run: pnpm -r build
+
       - name: Typecheck
         run: pnpm -r typecheck
 
@@ -75,27 +84,6 @@ jobs:
 
       - name: Format check
         run: pnpm format:check
-
-      - name: Build oauth2 plugin (tsc → packages/opencode-oauth2/dist)
-        run: pnpm --filter @vymalo/opencode-oauth2 build
-
-      - name: Build oauth2 release bundle (Rolldown)
-        # Not what we publish to npm (that's the tsc output), but we still
-        # build it on every publish so a broken bundler is caught here.
-        run: pnpm --filter @vymalo/opencode-oauth2-bundle build
-
-      - name: Build models-info plugin (tsc → packages/opencode-models-info/dist)
-        run: pnpm --filter @vymalo/opencode-models-info build
-
-      - name: Build ratelimit plugin (tsc → packages/opencode-ratelimit/dist)
-        run: pnpm --filter @vymalo/opencode-ratelimit build
-
-      - name: Build browser plugin (tsc → packages/opencode-browser/dist)
-        run: pnpm --filter @vymalo/opencode-browser build
-
-      - name: Build browser MCP server (tsc → packages/opencode-browser-mcp/dist)
-        # Depends on the built opencode-browser dist above for its /lib types.
-        run: pnpm --filter @vymalo/opencode-browser-mcp build
 
       - name: Zip the browser extension (Chrome + Firefox)
         # The extension is private (not on npm) — it ships as zips attached to
@@ -355,13 +343,26 @@ jobs:
           ls -la apps/browser-extension/.output/*.zip
 
       - name: Submit to Chrome Web Store
-        # Skipped (not failed) when Chrome credentials aren't configured.
-        if: ${{ env.CHROME_EXTENSION_ID != '' }}
+        # Gated on the FULL Chrome credential set, not just the id — a partial
+        # set would otherwise reach `wxt submit` and hard-fail the upload
+        # instead of being skipped.
+        if: ${{ env.CHROME_EXTENSION_ID != '' && env.CHROME_CLIENT_ID != '' && env.CHROME_CLIENT_SECRET != '' && env.CHROME_REFRESH_TOKEN != '' }}
         run: pnpm --filter @vymalo/opencode-browser-extension run submit:chrome ${{ env.SUBMIT_ARGS }}
 
       - name: Submit to Firefox Add-ons (AMO)
-        if: ${{ env.FIREFOX_EXTENSION_ID != '' }}
+        # Same: require the full Firefox credential set before attempting.
+        if: ${{ env.FIREFOX_EXTENSION_ID != '' && env.FIREFOX_JWT_ISSUER != '' && env.FIREFOX_JWT_SECRET != '' }}
         run: pnpm --filter @vymalo/opencode-browser-extension run submit:firefox ${{ env.SUBMIT_ARGS }}
+
+      - name: Warn on partial Chrome credentials
+        # Surface the misconfiguration rather than silently skipping when an id
+        # is present but the OAuth client is incomplete.
+        if: ${{ env.CHROME_EXTENSION_ID != '' && !(env.CHROME_CLIENT_ID != '' && env.CHROME_CLIENT_SECRET != '' && env.CHROME_REFRESH_TOKEN != '') }}
+        run: echo "::warning::CHROME_EXTENSION_ID is set but CHROME_CLIENT_ID/SECRET/REFRESH_TOKEN are incomplete — Chrome submission skipped."
+
+      - name: Warn on partial Firefox credentials
+        if: ${{ env.FIREFOX_EXTENSION_ID != '' && !(env.FIREFOX_JWT_ISSUER != '' && env.FIREFOX_JWT_SECRET != '') }}
+        run: echo "::warning::FIREFOX_EXTENSION_ID is set but FIREFOX_JWT_ISSUER/SECRET are incomplete — Firefox submission skipped."
 
       - name: No stores configured
         if: ${{ env.CHROME_EXTENSION_ID == '' && env.FIREFOX_EXTENSION_ID == '' }}
