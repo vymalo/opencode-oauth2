@@ -1,49 +1,74 @@
-import type { Executor, ScreenshotData } from "./executor";
+import type { ConsoleEntry, Executor, NetworkEntry, ScreenshotData } from "./executor";
 import { captureFullPage } from "./full-page";
-import {
-  pageSyntheticKey,
-  pageSyntheticPointer,
-  pageSyntheticType,
-  type Target,
-  runInPage
-} from "./page-actions";
+import { runInPage, runPageAction, type Target } from "./page-actions";
+
+const CDP_ONLY = (feature: string) =>
+  new Error(
+    `${feature} requires the CDP executor (Chromium with the debugger) — not available on the content-script backend`
+  );
 
 /**
  * Fallback executor: synthetic DOM events injected into the page plus
- * `tabs.captureVisibleTab` for screenshots. No "being debugged" banner and it
- * works on Firefox, but clicks aren't trusted (`isTrusted: false`) and capture
- * is limited to the visible viewport.
+ * `tabs.captureVisibleTab` (+ scroll-stitch for full-page). No "being debugged"
+ * banner and works on Firefox, but clicks aren't trusted (`isTrusted: false`)
+ * and the CDP-only capabilities below are unavailable.
  */
 export class ContentExecutor implements Executor {
   readonly kind = "content" as const;
 
   async click(tabId: number, target: Target, button: "left" | "middle" | "right"): Promise<void> {
-    const ok = await runInPage(tabId, pageSyntheticPointer, [
-      { ...target, button, dblclick: false }
-    ]);
+    const { ok } = await runPageAction<{ ok: boolean }>(tabId, "pointer", {
+      ...target,
+      button,
+      dblclick: false
+    });
     if (!ok) {
       throw new Error("could not locate the target element");
     }
   }
 
   async doubleClick(tabId: number, target: Target): Promise<void> {
-    const ok = await runInPage(tabId, pageSyntheticPointer, [{ ...target, dblclick: true }]);
+    const { ok } = await runPageAction<{ ok: boolean }>(tabId, "pointer", {
+      ...target,
+      dblclick: true
+    });
     if (!ok) {
       throw new Error("could not locate the target element");
     }
   }
 
-  async type(tabId: number, text: string, target: Target, submit: boolean): Promise<void> {
-    const ok = await runInPage(tabId, pageSyntheticType, [
-      { text, ref: target.ref, selector: target.selector, submit }
-    ]);
+  async hover(tabId: number, target: Target): Promise<void> {
+    const { ok } = await runPageAction<{ ok: boolean }>(tabId, "hover", { ...target });
     if (!ok) {
-      throw new Error("no focusable element to type into");
+      throw new Error("could not locate the target element");
+    }
+  }
+
+  async drag(tabId: number, from: Target, to: Target): Promise<void> {
+    const { ok } = await runPageAction<{ ok: boolean }>(tabId, "drag", {
+      from: { ref: from.ref, selector: from.selector },
+      ref: to.ref,
+      selector: to.selector
+    });
+    if (!ok) {
+      throw new Error("could not locate the drag source or target");
+    }
+  }
+
+  async type(tabId: number, text: string, target: Target, submit: boolean): Promise<void> {
+    const { ok } = await runPageAction<{ ok: boolean }>(tabId, "type", {
+      text,
+      ref: target.ref,
+      selector: target.selector,
+      submit
+    });
+    if (!ok) {
+      throw new Error("no text-editable element to type into");
     }
   }
 
   async pressKey(tabId: number, key: string): Promise<void> {
-    await runInPage(tabId, pageSyntheticKey, [{ key }]);
+    await runPageAction(tabId, "key", { key });
   }
 
   async screenshot(tabId: number, fullPage: boolean): Promise<ScreenshotData> {
@@ -58,7 +83,6 @@ export class ContentExecutor implements Executor {
       await new Promise((resolve) => setTimeout(resolve, 150));
     }
     if (fullPage) {
-      // Scroll-and-stitch the whole page (captureVisibleTab is viewport-only).
       return captureFullPage(tabId, tab.windowId);
     }
     const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
@@ -69,6 +93,26 @@ export class ContentExecutor implements Executor {
       []
     );
     return { base64, width: size?.w ?? 0, height: size?.h ?? 0 };
+  }
+
+  async upload(): Promise<void> {
+    throw CDP_ONLY("browser_upload");
+  }
+
+  async setViewport(): Promise<void> {
+    throw CDP_ONLY("browser_set_viewport");
+  }
+
+  async getConsole(): Promise<ConsoleEntry[]> {
+    throw CDP_ONLY("browser_console");
+  }
+
+  async getNetwork(): Promise<NetworkEntry[]> {
+    throw CDP_ONLY("browser_network");
+  }
+
+  async handleDialog(): Promise<void> {
+    throw CDP_ONLY("browser_handle_dialog");
   }
 
   async release(_tabId: number): Promise<void> {

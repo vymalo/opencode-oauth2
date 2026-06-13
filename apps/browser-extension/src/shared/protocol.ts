@@ -28,6 +28,22 @@ export type BrowserAction =
   | "wait"
   | "tabs"
   | "close"
+  | "back"
+  | "forward"
+  | "reload"
+  | "hover"
+  | "activate"
+  | "drag"
+  | "upload"
+  | "get_html"
+  | "get_attribute"
+  | "query"
+  | "eval"
+  | "console"
+  | "network"
+  | "handle_dialog"
+  | "set_viewport"
+  | "cookies"
   | "release";
 
 export const BROWSER_ACTIONS: readonly BrowserAction[] = [
@@ -46,6 +62,22 @@ export const BROWSER_ACTIONS: readonly BrowserAction[] = [
   "wait",
   "tabs",
   "close",
+  "back",
+  "forward",
+  "reload",
+  "hover",
+  "activate",
+  "drag",
+  "upload",
+  "get_html",
+  "get_attribute",
+  "query",
+  "eval",
+  "console",
+  "network",
+  "handle_dialog",
+  "set_viewport",
+  "cookies",
   "release"
 ] as const;
 

@@ -9,6 +9,27 @@ export interface ScreenshotData {
   partial?: boolean;
 }
 
+export interface ConsoleEntry {
+  level: string;
+  text: string;
+  ts: number;
+}
+
+export interface NetworkEntry {
+  method: string;
+  url: string;
+  status?: number;
+  type?: string;
+  ts: number;
+}
+
+export interface Viewport {
+  width: number;
+  height: number;
+  mobile?: boolean;
+  deviceScaleFactor?: number;
+}
+
 /**
  * The trusted-input surface that genuinely differs between backends. Everything
  * else (snapshot, text, scroll, fill, select, wait) is DOM-only and handled
@@ -20,7 +41,19 @@ export interface Executor {
   doubleClick(tabId: number, target: Target): Promise<void>;
   type(tabId: number, text: string, target: Target, submit: boolean): Promise<void>;
   pressKey(tabId: number, key: string): Promise<void>;
+  hover(tabId: number, target: Target): Promise<void>;
+  drag(tabId: number, from: Target, to: Target): Promise<void>;
   screenshot(tabId: number, fullPage: boolean): Promise<ScreenshotData>;
+  /** Set a file input's files. CDP-only — the content executor throws. */
+  upload(tabId: number, target: Target, paths: string[]): Promise<void>;
+  /** Emulate a viewport. CDP-only — the content executor throws. */
+  setViewport(tabId: number, viewport: Viewport): Promise<void>;
+  /** Recent console output. CDP-only — the content executor throws. */
+  getConsole(tabId: number): Promise<ConsoleEntry[]>;
+  /** Recent network requests. CDP-only — the content executor throws. */
+  getNetwork(tabId: number): Promise<NetworkEntry[]>;
+  /** Accept/dismiss a pending JS dialog. CDP-only — the content executor throws. */
+  handleDialog(tabId: number, accept: boolean, promptText?: string): Promise<void>;
   /** Release any per-tab resources (e.g. detach the debugger). Best-effort. */
   release(tabId: number): Promise<void>;
   /** Release everything — called before the executor is torn down/replaced. */

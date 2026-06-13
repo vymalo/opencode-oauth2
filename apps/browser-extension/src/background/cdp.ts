@@ -6,12 +6,19 @@
  * that's an intentional, visible signal that automation is active.
  */
 
+import type { ConsoleEntry, NetworkEntry } from "./executor";
+
 function lastError(): string | undefined {
   return chrome.runtime.lastError?.message;
 }
 
+const BUFFER_CAP = 100;
+
 export class CdpSession {
   private readonly attached = new Set<number>();
+  private readonly consoleBuf = new Map<number, ConsoleEntry[]>();
+  private readonly networkBuf = new Map<number, NetworkEntry[]>();
+  private readonly inflight = new Map<number, Map<string, NetworkEntry>>();
 
   constructor() {
     // If the user dismisses the "being debugged" banner (or the tab crashes),
@@ -20,12 +27,84 @@ export class CdpSession {
     chrome.debugger?.onDetach?.addListener((source) => {
       if (source.tabId !== undefined) {
         this.attached.delete(source.tabId);
+        this.consoleBuf.delete(source.tabId);
+        this.networkBuf.delete(source.tabId);
+        this.inflight.delete(source.tabId);
       }
     });
+    // Buffer console + network events so browser_console / browser_network can
+    // read recent activity.
+    chrome.debugger?.onEvent?.addListener((source, method, params) =>
+      this.onCdpEvent(source.tabId, method, params as Record<string, unknown>)
+    );
   }
 
   isAttached(tabId: number): boolean {
     return this.attached.has(tabId);
+  }
+
+  getConsole(tabId: number): ConsoleEntry[] {
+    return this.consoleBuf.get(tabId) ?? [];
+  }
+
+  getNetwork(tabId: number): NetworkEntry[] {
+    return this.networkBuf.get(tabId) ?? [];
+  }
+
+  private push<T>(map: Map<number, T[]>, tabId: number, entry: T): void {
+    const list = map.get(tabId) ?? [];
+    list.push(entry);
+    if (list.length > BUFFER_CAP) {
+      list.splice(0, list.length - BUFFER_CAP);
+    }
+    map.set(tabId, list);
+  }
+
+  private onCdpEvent(
+    tabId: number | undefined,
+    method: string,
+    params: Record<string, unknown>
+  ): void {
+    if (tabId === undefined) {
+      return;
+    }
+    const now = Date.now();
+    if (method === "Runtime.consoleAPICalled") {
+      const args = (params.args as Array<{ value?: unknown; description?: string }>) ?? [];
+      const text = args.map((a) => String(a.value ?? a.description ?? "")).join(" ");
+      this.push(this.consoleBuf, tabId, { level: String(params.type ?? "log"), text, ts: now });
+    } else if (method === "Runtime.exceptionThrown") {
+      const details = params.exceptionDetails as
+        | { text?: string; exception?: { description?: string } }
+        | undefined;
+      const text = details?.exception?.description ?? details?.text ?? "exception";
+      this.push(this.consoleBuf, tabId, { level: "error", text, ts: now });
+    } else if (method === "Log.entryAdded") {
+      const entry = params.entry as { level?: string; text?: string } | undefined;
+      this.push(this.consoleBuf, tabId, {
+        level: String(entry?.level ?? "info"),
+        text: String(entry?.text ?? ""),
+        ts: now
+      });
+    } else if (method === "Network.requestWillBeSent") {
+      const request = params.request as { url?: string; method?: string } | undefined;
+      const entry: NetworkEntry = {
+        method: String(request?.method ?? "GET"),
+        url: String(request?.url ?? ""),
+        type: params.type ? String(params.type) : undefined,
+        ts: now
+      };
+      this.push(this.networkBuf, tabId, entry);
+      const byId = this.inflight.get(tabId) ?? new Map<string, NetworkEntry>();
+      byId.set(String(params.requestId), entry);
+      this.inflight.set(tabId, byId);
+    } else if (method === "Network.responseReceived") {
+      const response = params.response as { status?: number } | undefined;
+      const entry = this.inflight.get(tabId)?.get(String(params.requestId));
+      if (entry && response) {
+        entry.status = response.status;
+      }
+    }
   }
 
   async attach(tabId: number): Promise<void> {
@@ -46,6 +125,8 @@ export class CdpSession {
     await this.send(tabId, "Page.enable");
     await this.send(tabId, "DOM.enable");
     await this.send(tabId, "Runtime.enable");
+    await this.send(tabId, "Log.enable");
+    await this.send(tabId, "Network.enable");
   }
 
   send<T = unknown>(tabId: number, method: string, params?: Record<string, unknown>): Promise<T> {

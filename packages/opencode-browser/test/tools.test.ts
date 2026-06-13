@@ -5,6 +5,7 @@ import { tool } from "@opencode-ai/plugin";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Bridge } from "../src/bridge.js";
+import { BROWSER_TOOLS } from "../src/catalog.js";
 import type { Logger } from "../src/logging.js";
 import { createBrowserTools } from "../src/tools.js";
 import type { ResolvedBrowserOptions } from "../src/types.js";
@@ -74,26 +75,25 @@ describe("tool arg schemas", () => {
     expect(names).not.toContain("browser_open");
   });
 
-  it("exposes the full action set", () => {
-    expect(Object.keys(tools).sort()).toEqual(
-      [
-        "browser_click",
-        "browser_close",
-        "browser_double_click",
-        "browser_fill",
-        "browser_get_text",
-        "browser_navigate",
+  it("exposes every catalog tool when all groups are enabled", () => {
+    const names = Object.keys(tools);
+    expect(names).toHaveLength(BROWSER_TOOLS.length);
+    for (const spec of BROWSER_TOOLS) {
+      expect(names).toContain(spec.name);
+    }
+    // spot-check representative tools from each group
+    expect(names).toEqual(
+      expect.arrayContaining([
         "browser_open",
-        "browser_press_key",
-        "browser_release",
-        "browser_screenshot",
-        "browser_scroll",
-        "browser_select",
-        "browser_snapshot",
-        "browser_tabs",
-        "browser_type",
-        "browser_wait"
-      ].sort()
+        "browser_click",
+        "browser_back",
+        "browser_hover",
+        "browser_get_html",
+        "browser_query",
+        "browser_eval",
+        "browser_console",
+        "browser_cookies"
+      ])
     );
   });
 });

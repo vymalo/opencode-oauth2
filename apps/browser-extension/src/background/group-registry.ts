@@ -144,6 +144,47 @@ export class GroupRegistry {
     return { tabId: target, url: tab.url ?? url, title: tab.title ?? "" };
   }
 
+  private async afterNav(name: string, target: number): Promise<TabInfo> {
+    const tab = await waitForComplete(target);
+    const group = this.groups.get(name);
+    if (group) {
+      await this.persist({ ...group, activeTabId: target });
+    }
+    return { tabId: target, url: tab.url ?? "", title: tab.title ?? "" };
+  }
+
+  async back(name: string, tabId?: number): Promise<TabInfo> {
+    const target = this.resolveTab(name, tabId);
+    await chrome.tabs.goBack(target);
+    return this.afterNav(name, target);
+  }
+
+  async forward(name: string, tabId?: number): Promise<TabInfo> {
+    const target = this.resolveTab(name, tabId);
+    await chrome.tabs.goForward(target);
+    return this.afterNav(name, target);
+  }
+
+  async reload(name: string, tabId?: number): Promise<TabInfo> {
+    const target = this.resolveTab(name, tabId);
+    await chrome.tabs.reload(target);
+    return this.afterNav(name, target);
+  }
+
+  async activate(name: string, tabId?: number): Promise<TabInfo> {
+    const target = this.resolveTab(name, tabId);
+    await chrome.tabs.update(target, { active: true });
+    const tab = await chrome.tabs.get(target);
+    if (tab.windowId !== undefined) {
+      await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+    }
+    const group = this.groups.get(name);
+    if (group) {
+      await this.persist({ ...group, activeTabId: target });
+    }
+    return { tabId: target, url: tab.url ?? "", title: tab.title ?? "" };
+  }
+
   async list(name?: string): Promise<{ groups: Array<GroupRecord & { tabs: TabInfo[] }> }> {
     const wanted = name ? [this.groups.get(name)].filter(Boolean) : [...this.groups.values()];
     const groups = await Promise.all(

@@ -72,6 +72,7 @@ function describeTarget(a: Record<string, unknown>): string {
   return "element";
 }
 const text = (t: string): NeutralResult => ({ kind: "text", text: t });
+const json = (data: unknown, t: string): NeutralResult => ({ kind: "json", data, text: t });
 
 /**
  * The single source of truth for the browser tool surface, shared by the
@@ -359,5 +360,238 @@ export const BROWSER_TOOLS: readonly ToolSpec[] = [
         text: `screenshot ${width}×${height}`
       };
     }
+  },
+
+  // ─── navigation (control) ──────────────────────────────────────────────────
+  {
+    name: "browser_back",
+    group: "control",
+    action: "back",
+    description: "Go back in the tab's history.",
+    input: { group, tabId },
+    result: (data) => json(rec(data), `Went back to ${rec(data).url ?? ""}`.trim())
+  },
+  {
+    name: "browser_forward",
+    group: "control",
+    action: "forward",
+    description: "Go forward in the tab's history.",
+    input: { group, tabId },
+    result: (data) => json(rec(data), `Went forward to ${rec(data).url ?? ""}`.trim())
+  },
+  {
+    name: "browser_reload",
+    group: "control",
+    action: "reload",
+    description: "Reload the group's active tab.",
+    input: { group, tabId },
+    result: (data) => json(rec(data), `Reloaded ${rec(data).url ?? ""}`.trim())
+  },
+  {
+    name: "browser_activate",
+    group: "control",
+    action: "activate",
+    description: "Bring a group's tab to the foreground (focus its window and tab).",
+    input: { group, tabId },
+    result: (data) => json(rec(data), `Activated tab ${rec(data).tabId ?? ""}`.trim())
+  },
+  {
+    name: "browser_hover",
+    group: "control",
+    action: "hover",
+    description:
+      "Move the pointer over an element (reveals hover menus/tooltips). Target by `ref`, `selector`, or `x`/`y`.",
+    input: {
+      group,
+      ref: refField,
+      selector: selectorField,
+      x: { type: "number", optional: true },
+      y: { type: "number", optional: true },
+      tabId
+    },
+    result: (_d, args) => text(`Hovered ${describeTarget(args)} in group "${args.group}".`)
+  },
+  {
+    name: "browser_drag",
+    group: "control",
+    action: "drag",
+    description: "Drag from a source element to a target element (each by `ref` or `selector`).",
+    input: {
+      group,
+      fromRef: { type: "string", optional: true, description: "Source element ref." },
+      fromSelector: { type: "string", optional: true, description: "Source CSS selector." },
+      ref: { type: "string", optional: true, description: "Target element ref." },
+      selector: { type: "string", optional: true, description: "Target CSS selector." },
+      tabId
+    },
+    result: (_d, args) => text(`Dragged to ${describeTarget(args)} in group "${args.group}".`)
+  },
+  {
+    name: "browser_upload",
+    group: "control",
+    action: "upload",
+    description:
+      "Set the files on a file <input>, by absolute path(s) on the machine running the bridge. CDP executor only (Chromium).",
+    input: {
+      group,
+      ref: refField,
+      selector: selectorField,
+      paths: {
+        type: "array",
+        description: "Absolute file path(s) to attach.",
+        items: { type: "string" }
+      },
+      tabId
+    },
+    result: (_d, args) =>
+      text(
+        `Uploaded ${Array.isArray(args.paths) ? args.paths.length : 0} file(s) to ${describeTarget(args)}.`
+      )
+  },
+
+  // ─── reading (page) ────────────────────────────────────────────────────────
+  {
+    name: "browser_get_html",
+    group: "page",
+    action: "get_html",
+    description:
+      "Get the HTML of the page (or of a `ref`/`selector` element). `outer: false` for innerHTML.",
+    input: {
+      group,
+      ref: refField,
+      selector: selectorField,
+      outer: { type: "boolean", optional: true, description: "Outer HTML (default true)." },
+      tabId
+    },
+    result: (data) => text(String(rec(data).html ?? ""))
+  },
+  {
+    name: "browser_get_attribute",
+    group: "page",
+    action: "get_attribute",
+    description:
+      "Read an element's tag, text, value, checked state, bounding box, and attributes (or one named attribute).",
+    input: {
+      group,
+      ref: refField,
+      selector: selectorField,
+      name: { type: "string", optional: true, description: "A single attribute name to read." },
+      tabId
+    },
+    result: (data) => json(rec(data), JSON.stringify(rec(data), null, 2))
+  },
+  {
+    name: "browser_query",
+    group: "page",
+    action: "query",
+    description:
+      "Find visible elements matching a CSS selector. Returns each with a stable ref you can pass to other tools.",
+    input: {
+      group,
+      selector: { type: "string", description: "CSS selector to match." },
+      limit: { type: "number", optional: true, description: "Max matches (default 50)." },
+      tabId
+    },
+    result: (data) => json(rec(data), JSON.stringify(rec(data), null, 2))
+  },
+
+  // ─── debug (off by default) ────────────────────────────────────────────────
+  {
+    name: "browser_eval",
+    group: "debug",
+    action: "eval",
+    description:
+      "Evaluate JavaScript in the page's DOM context and return the JSON-serializable result. Powerful — enabled only when the `debug` group is on.",
+    input: { group, code: { type: "string", description: "JavaScript to evaluate." }, tabId },
+    result: (data) => {
+      const r = rec(data).result;
+      return json(rec(data), typeof r === "string" ? r : JSON.stringify(r, null, 2));
+    }
+  },
+  {
+    name: "browser_console",
+    group: "debug",
+    action: "console",
+    description:
+      "Return recent console output (logs, warnings, errors). CDP executor only (Chromium).",
+    input: { group, tabId },
+    result: (data) => {
+      const entries = (rec(data).entries as unknown[]) ?? [];
+      return json(rec(data), JSON.stringify(entries, null, 2));
+    }
+  },
+  {
+    name: "browser_network",
+    group: "debug",
+    action: "network",
+    description:
+      "Return recent network requests (method, URL, status). CDP executor only (Chromium).",
+    input: { group, tabId },
+    result: (data) => {
+      const entries = (rec(data).entries as unknown[]) ?? [];
+      return json(rec(data), JSON.stringify(entries, null, 2));
+    }
+  },
+  {
+    name: "browser_handle_dialog",
+    group: "debug",
+    action: "handle_dialog",
+    description:
+      "Accept or dismiss a pending JavaScript dialog (alert/confirm/prompt). CDP executor only (Chromium).",
+    input: {
+      group,
+      accept: { type: "boolean", optional: true, description: "Accept (default true) or dismiss." },
+      promptText: { type: "string", optional: true, description: "Text for a prompt() dialog." },
+      tabId
+    },
+    result: (_d, args) => text(`${args.accept === false ? "Dismissed" : "Accepted"} the dialog.`)
+  },
+  {
+    name: "browser_set_viewport",
+    group: "debug",
+    action: "set_viewport",
+    description: "Emulate a viewport size / device metrics. CDP executor only (Chromium).",
+    input: {
+      group,
+      width: { type: "number", description: "Viewport width in CSS px." },
+      height: { type: "number", description: "Viewport height in CSS px." },
+      mobile: { type: "boolean", optional: true, description: "Emulate a mobile device." },
+      deviceScaleFactor: {
+        type: "number",
+        optional: true,
+        description: "Device pixel ratio (0 = default)."
+      },
+      tabId
+    },
+    result: (_d, args) => text(`Set viewport to ${args.width}×${args.height}.`)
+  },
+  {
+    name: "browser_cookies",
+    group: "debug",
+    action: "cookies",
+    description:
+      "Read or modify cookies. `op`: get (by url+name), list (by url), set (url+name+value), clear (url+name).",
+    input: {
+      group: {
+        type: "string",
+        optional: true,
+        description: "Group (unused; cookies are profile-wide)."
+      },
+      op: { type: "string", enum: ["get", "list", "set", "clear"], description: "Operation." },
+      url: { type: "string", optional: true, description: "URL the cookie applies to." },
+      name: { type: "string", optional: true },
+      value: { type: "string", optional: true },
+      domain: { type: "string", optional: true },
+      path: { type: "string", optional: true }
+    },
+    params: (args) => ({
+      op: args.op,
+      url: args.url,
+      name: args.name,
+      value: args.value,
+      domain: args.domain,
+      path: args.path
+    }),
+    result: (data) => json(rec(data), JSON.stringify(rec(data), null, 2))
   }
 ];

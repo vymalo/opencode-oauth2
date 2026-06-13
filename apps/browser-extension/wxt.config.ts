@@ -18,7 +18,7 @@ export default defineConfig({
       name: "OpenCode Browser",
       description:
         "Lets an OpenCode agent drive this browser through the @vymalo/opencode-browser plugin's localhost bridge.",
-      permissions: ["tabs", "scripting", "storage", "activeTab", ...chromiumOnly],
+      permissions: ["tabs", "scripting", "storage", "activeTab", "cookies", ...chromiumOnly],
       host_permissions: ["<all_urls>"]
     };
   },
