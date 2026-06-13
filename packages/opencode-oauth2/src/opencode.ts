@@ -15,6 +15,7 @@ import {
   type LogLevel
 } from "./logging.js";
 import { OAuth2ModelSyncPlugin } from "./plugin.js";
+import { createResponsesRepairFetch } from "./responses-repair.js";
 import type { TokenSet } from "./types.js";
 
 /**
@@ -81,11 +82,24 @@ function applyResponsesApiOptions(
 
   logger.debug("oauth2_provider_response_api_enabled", { providerId });
 
-  if (asString(options.apiKey)) {
-    return options;
+  const next: Record<string, unknown> = { ...options };
+
+  // The native @ai-sdk/openai provider throws at construction without an
+  // apiKey; stamp an inert placeholder only when the user hasn't set one. The
+  // real bearer is injected per-request by chat.headers, so it is never sent.
+  if (!asString(next.apiKey)) {
+    next.apiKey = RESPONSES_API_PLACEHOLDER_KEY;
   }
 
-  return { ...options, apiKey: RESPONSES_API_PLACEHOLDER_KEY };
+  // Repair the gateway's Responses SSE: some gateways (e.g. Envoy AI Gateway)
+  // omit `output_index` / `content_index`, which AI-SDK/OpenCode need to
+  // assemble message parts (absent → "text part <id> not found"). We compose
+  // with any pre-existing fetch so a later fetch-wrapping plugin (e.g.
+  // @vymalo/opencode-ratelimit) still wraps ours rather than clobbering it.
+  const delegate = typeof next.fetch === "function" ? (next.fetch as typeof fetch) : undefined;
+  next.fetch = createResponsesRepairFetch(delegate);
+
+  return next;
 }
 
 type OpenCodeConfig = Parameters<NonNullable<Hooks["config"]>>[0];
