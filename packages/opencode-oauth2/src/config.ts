@@ -77,6 +77,17 @@ export interface OAuthServerConfigInput {
    * issuer.
    */
   tokenExchangeAudience?: string;
+  /**
+   * Route inference through the OpenAI **Responses API** (`/v1/responses`)
+   * instead of Chat Completions (`/v1/chat/completions`). When `true` the
+   * managed provider is registered with `npm: "@ai-sdk/openai"` (whose default
+   * `languageModel()` targets Responses since AI SDK v5) rather than
+   * `@ai-sdk/openai-compatible`. Only enable it when the gateway implements the
+   * OpenAI Responses contract. Defaults to `false`. This flag affects provider
+   * registration only — it never touches the token lifecycle, so it is read at
+   * the config-synthesis layer and not part of the validated runtime config.
+   */
+  responseApi?: boolean;
 }
 
 export interface OAuth2ModelSyncConfigInput {

@@ -524,6 +524,200 @@ describe("OpenCode plugin hooks", () => {
     const providers = config.provider as Record<string, Record<string, unknown>>;
     expect(providers["server-1"]?.npm).toBe("@ai-sdk/openai-compatible");
   });
+
+  it("routes a responseApi provider through @ai-sdk/openai while still injecting the real bearer", async () => {
+    // responseApi swaps the emitted npm to the native OpenAI provider (Responses
+    // API by default since AI SDK v5) and stamps an inert placeholder apiKey so
+    // its construction-time key guard passes. The real token is still injected
+    // per-request by chat.headers — the placeholder never leaves the process.
+    const cacheDir = await mkdtemp(join(tmpdir(), "opencode-hook-responses-provider-"));
+    const cache = new FileCacheStore(cacheDir);
+    await cache.ensureReady();
+
+    await cache.saveServerState({
+      serverId: "example-ai",
+      updatedAt: Date.now(),
+      lastSyncAt: Date.now(),
+      token: {
+        accessToken: "cached-access",
+        tokenType: "Bearer",
+        refreshToken: "cached-refresh",
+        expiresAt: Date.now() + 60_000
+      },
+      rawModels: [{ id: "glm-5" }],
+      models: [{ id: "glm-5", displayName: "GLM 5" }]
+    });
+
+    const hooks = await createHooks(cacheDir);
+
+    const config: Record<string, unknown> = {
+      provider: {
+        "example-ai": {
+          options: {
+            baseURL: "https://api.example.com/v1",
+            oauth2: {
+              issuer: "https://auth.example.com",
+              clientId: "opencode-client",
+              scopes: ["openid", "offline_access"],
+              responseApi: true
+            }
+          }
+        }
+      }
+    };
+
+    await hooks.config?.(config as never);
+
+    const providerConfig = (config.provider as Record<string, Record<string, unknown>>)[
+      "example-ai"
+    ];
+    expect(providerConfig.npm).toBe("@ai-sdk/openai");
+
+    const options = providerConfig.options as Record<string, unknown>;
+    expect(options.apiKey).toBe("oauth2-managed-bearer");
+    expect(options.baseURL).toBe("https://api.example.com/v1");
+
+    const output = { headers: {} as Record<string, string> };
+    await hooks["chat.headers"]?.(
+      {
+        sessionID: "session-1",
+        agent: "general",
+        model: { id: "glm-5", providerID: "example-ai" },
+        message: { id: "message-1" }
+      } as never,
+      output
+    );
+
+    expect(output.headers.Authorization).toBe("Bearer cached-access");
+  });
+
+  it("routes a responseApi server from pluginConfig through @ai-sdk/openai", async () => {
+    const cacheDir = await mkdtemp(join(tmpdir(), "opencode-hook-responses-plugincfg-"));
+    const hooks = await createHooks(cacheDir);
+
+    const config: Record<string, unknown> = {
+      pluginConfig: {
+        oauth2ModelSync: {
+          servers: [
+            {
+              id: "responses-server",
+              issuer: "https://auth.example.com",
+              baseURL: "https://api.example.com/v1",
+              clientId: "opencode-client",
+              scopes: ["openid"],
+              responseApi: true
+            }
+          ]
+        }
+      }
+    };
+
+    await hooks.config?.(config as never);
+
+    const providers = config.provider as Record<string, Record<string, unknown>>;
+    expect(providers["responses-server"]?.npm).toBe("@ai-sdk/openai");
+
+    const options = providers["responses-server"]?.options as Record<string, unknown>;
+    expect(options.apiKey).toBe("oauth2-managed-bearer");
+  });
+
+  it("does not overwrite a user-supplied apiKey when responseApi is enabled", async () => {
+    const cacheDir = await mkdtemp(join(tmpdir(), "opencode-hook-responses-userkey-"));
+    const hooks = await createHooks(cacheDir);
+
+    const config: Record<string, unknown> = {
+      provider: {
+        "example-ai": {
+          options: {
+            baseURL: "https://api.example.com/v1",
+            apiKey: "user-supplied-key",
+            oauth2: {
+              issuer: "https://auth.example.com",
+              clientId: "opencode-client",
+              scopes: ["openid"],
+              responseApi: true
+            }
+          }
+        }
+      }
+    };
+
+    await hooks.config?.(config as never);
+
+    const providerConfig = (config.provider as Record<string, Record<string, unknown>>)[
+      "example-ai"
+    ];
+    expect(providerConfig.npm).toBe("@ai-sdk/openai");
+    expect((providerConfig.options as Record<string, unknown>).apiKey).toBe("user-supplied-key");
+  });
+
+  it("scrubs the placeholder apiKey when responseApi loses across duplicate config shapes", async () => {
+    // Same provider id in both shapes: the pluginConfig server enables
+    // responseApi (stamping the placeholder + npm @ai-sdk/openai), but the
+    // provider-embedded oauth2 block omits it and must win — leaving a clean
+    // Chat-Completions provider with no leftover fake key.
+    const cacheDir = await mkdtemp(join(tmpdir(), "opencode-hook-responses-dup-"));
+    const hooks = await createHooks(cacheDir);
+
+    const config: Record<string, unknown> = {
+      provider: {
+        "dup-ai": {
+          options: {
+            baseURL: "https://api.example.com/v1",
+            oauth2: {
+              issuer: "https://auth.example.com",
+              clientId: "opencode-client",
+              scopes: ["openid"]
+              // responseApi omitted -> Chat Completions wins
+            }
+          }
+        }
+      },
+      pluginConfig: {
+        oauth2ModelSync: {
+          servers: [
+            {
+              id: "dup-ai",
+              issuer: "https://auth.example.com",
+              baseURL: "https://api.example.com/v1",
+              clientId: "opencode-client",
+              scopes: ["openid"],
+              responseApi: true
+            }
+          ]
+        }
+      }
+    };
+
+    await hooks.config?.(config as never);
+
+    const providerConfig = (config.provider as Record<string, Record<string, unknown>>)["dup-ai"];
+    expect(providerConfig.npm).toBe("@ai-sdk/openai-compatible");
+    expect((providerConfig.options as Record<string, unknown>).apiKey).toBeUndefined();
+  });
+
+  it("rejects a non-boolean responseApi value", async () => {
+    const cacheDir = await mkdtemp(join(tmpdir(), "opencode-hook-responses-bad-"));
+    const hooks = await createHooks(cacheDir);
+
+    const config: Record<string, unknown> = {
+      provider: {
+        "example-ai": {
+          options: {
+            baseURL: "https://api.example.com/v1",
+            oauth2: {
+              issuer: "https://auth.example.com",
+              clientId: "opencode-client",
+              scopes: ["openid"],
+              responseApi: "yes"
+            }
+          }
+        }
+      }
+    };
+
+    await expect(hooks.config?.(config as never)).rejects.toThrow(/responseApi/);
+  });
 });
 
 describe("fromOpenCodeLogLevel", () => {

@@ -1,6 +1,6 @@
 {
   "name": "@vymalo/opencode-oauth2",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "OpenCode plugin for OAuth2/OIDC-secured, OpenAI-compatible model providers with periodic model sync.",
   "license": "MIT",
   "author": "vymalo contributors",
@@ -51,6 +51,7 @@
     "lint": "biome lint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "format": "biome format --write .",
     "format:check": "biome format ."
   },
@@ -58,6 +59,8 @@
     "@opencode-ai/plugin": "1.15.10"
   },
   "devDependencies": {
+    "@ai-sdk/openai": "^2.0.106",
+    "ai": "^5.0.199",
     "vite": "^8.0.14",
     "vitest": "^4.1.7"
   }

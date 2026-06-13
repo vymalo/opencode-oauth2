@@ -127,7 +127,7 @@ When changing the mapping in [`packages/opencode-models-info/src/mapping.ts`](pa
 
 ## Releasing
 
-Versions are bumped **manually** — there are no changesets and no release scripts. `@vymalo/opencode-oauth2`, `@vymalo/opencode-models-info`, and `@vymalo/opencode-ratelimit` are the three published packages; the workspace root and `@vymalo/opencode-oauth2-bundle` are `private`. The bundle depends on oauth2 via `workspace:*`, so a version bump touches only `package.json` `version` fields (no lockfile change). All five packages (the three published plus the two private) are kept on the **same version line** — currently `0.6.1` — and bumped together in one PR. The user runs the actual `npm publish` after the bump PR merges.
+Versions are bumped **manually** — there are no changesets and no release scripts. `@vymalo/opencode-oauth2`, `@vymalo/opencode-models-info`, and `@vymalo/opencode-ratelimit` are the three published packages; the workspace root and `@vymalo/opencode-oauth2-bundle` are `private`. The bundle depends on oauth2 via `workspace:*`, so a version bump touches only `package.json` `version` fields (no lockfile change). All five packages (the three published plus the two private) are kept on the **same version line** — currently `0.6.2` — and bumped together in one PR. The user runs the actual `npm publish` after the bump PR merges.
 
 ## Design docs and plans
 
