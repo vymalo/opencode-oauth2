@@ -1,4 +1,8 @@
+import type { ToolGroup } from "./schema.js";
+
 export type LogLevel = "debug" | "info" | "warn" | "error";
+
+export type { ToolGroup } from "./schema.js";
 
 /**
  * How the extension should drive the page. Mirrored into the extension, which
@@ -30,6 +34,13 @@ export interface BrowserPluginOptions {
   token?: string;
   /** Forwarded executor preference (see ExecutorMode). */
   executor?: ExecutorMode;
+  /**
+   * Which tool groups to register: `page` (observe), `control` (drive),
+   * `debug` (powerful/sensitive). Defaults to `["page","control"]` — `debug`
+   * is opt-in. Per-agent control is also possible via OpenCode's tool
+   * allow/deny on the `browser_*` names.
+   */
+  groups?: ToolGroup[];
   /** Per-command timeout in ms before the tool call rejects. */
   timeoutMs?: number;
   /**
@@ -46,6 +57,7 @@ export interface ResolvedBrowserOptions {
   port: number;
   token: string;
   executor: ExecutorMode;
+  groups: ToolGroup[];
   timeoutMs: number;
   screenshotDir: string;
 }

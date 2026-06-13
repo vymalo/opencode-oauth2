@@ -163,7 +163,14 @@ export class CommandRouter {
         const text = await runInPage(tabId, pageGetText, []);
         return { data: { text }, summary: `read ${text.length} chars` };
       }
+      case "release": {
+        await this.executor.releaseAll();
+        return { data: { ok: true }, summary: "released control" };
+      }
       case "wait": {
+        if (typeof params.ms !== "number" && !params.selector) {
+          throw new Error("wait requires either `ms` or `selector`");
+        }
         const tabId = this.registry.resolveTab(group, params.tabId as number | undefined);
         if (typeof params.ms === "number") {
           await new Promise((r) => setTimeout(r, params.ms as number));

@@ -18,6 +18,22 @@ export {
 export { createBrowserTools, type SaveScreenshot, type ToolDeps } from "./tools.js";
 
 export {
+  BROWSER_TOOLS,
+  DEFAULT_GROUPS,
+  type NeutralResult,
+  TOOL_GROUPS,
+  type ToolGroup,
+  type ToolSpec
+} from "./catalog.js";
+
+export {
+  type Field,
+  type JsonInput,
+  type JsonSchema,
+  toJsonSchema
+} from "./schema.js";
+
+export {
   createJsonConsoleLogger,
   DEFAULT_LOG_LEVEL,
   fromOpenCodeLogLevel,

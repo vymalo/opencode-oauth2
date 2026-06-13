@@ -19,6 +19,7 @@ function baseOptions(overrides: Partial<ResolvedBrowserOptions> = {}): ResolvedB
     port: 4517,
     token: "secret",
     executor: "auto",
+    groups: ["page", "control", "debug"],
     timeoutMs: 30_000,
     screenshotDir: ".opencode/browser",
     ...overrides
@@ -59,6 +60,20 @@ describe("tool arg schemas", () => {
     expect(schema.safeParse({ group: "g", fields: [{ selector: "#a" }] }).success).toBe(false);
   });
 
+  it("filters tools by enabled groups", () => {
+    const { bridge } = fakeBridge();
+    const pageOnly = createBrowserTools({
+      bridge,
+      options: baseOptions({ groups: ["page"] }),
+      logger: noopLogger
+    });
+    const names = Object.keys(pageOnly);
+    expect(names).toContain("browser_screenshot");
+    expect(names).toContain("browser_snapshot");
+    expect(names).not.toContain("browser_click"); // control group excluded
+    expect(names).not.toContain("browser_open");
+  });
+
   it("exposes the full action set", () => {
     expect(Object.keys(tools).sort()).toEqual(
       [
@@ -95,7 +110,7 @@ describe("tool → bridge action mapping", () => {
     expect(send).toHaveBeenCalledWith(
       "open",
       "research",
-      { url: "https://example.com", focus: undefined },
+      expect.objectContaining({ url: "https://example.com" }),
       c.abort
     );
     expect(typeof res === "object" ? res.output : res).toContain("research");

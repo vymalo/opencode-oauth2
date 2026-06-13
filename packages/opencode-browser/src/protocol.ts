@@ -35,7 +35,8 @@ export type BrowserAction =
   | "get_text"
   | "wait"
   | "tabs"
-  | "close";
+  | "close"
+  | "release";
 
 export const BROWSER_ACTIONS: readonly BrowserAction[] = [
   "open",
@@ -52,7 +53,8 @@ export const BROWSER_ACTIONS: readonly BrowserAction[] = [
   "get_text",
   "wait",
   "tabs",
-  "close"
+  "close",
+  "release"
 ] as const;
 
 /** Extension → server: first frame after the socket opens. */

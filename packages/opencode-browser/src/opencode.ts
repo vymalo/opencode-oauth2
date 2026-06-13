@@ -11,8 +11,18 @@ import {
   type Logger,
   type LogLevel
 } from "./logging.js";
+import { DEFAULT_GROUPS, TOOL_GROUPS } from "./catalog.js";
+import type { ToolGroup } from "./schema.js";
 import { createBrowserTools, type SaveScreenshot } from "./tools.js";
 import type { BrowserPluginOptions, ResolvedBrowserOptions } from "./types.js";
+
+function resolveGroups(raw: unknown): ToolGroup[] {
+  if (!Array.isArray(raw)) {
+    return [...DEFAULT_GROUPS];
+  }
+  const valid = raw.filter((g): g is ToolGroup => TOOL_GROUPS.includes(g as ToolGroup));
+  return valid.length > 0 ? valid : [...DEFAULT_GROUPS];
+}
 
 const PLUGIN_SERVICE_NAME = "opencode-browser-plugin";
 
@@ -78,6 +88,7 @@ function resolveOptions(
     port: opts.port ?? DEFAULTS.port,
     token,
     executor: opts.executor ?? DEFAULTS.executor,
+    groups: resolveGroups(opts.groups),
     timeoutMs: opts.timeoutMs ?? DEFAULTS.timeoutMs,
     screenshotDir: opts.screenshotDir ?? DEFAULTS.screenshotDir
   };

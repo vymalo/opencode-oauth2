@@ -1,9 +1,11 @@
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
-import { tool, type ToolDefinition } from "@opencode-ai/plugin";
+import { tool, type ToolContext, type ToolDefinition } from "@opencode-ai/plugin";
 
 import type { Bridge } from "./bridge.js";
+import { BROWSER_TOOLS, type NeutralResult } from "./catalog.js";
 import type { Logger } from "./logging.js";
+import type { Field, JsonInput } from "./schema.js";
 import type { ResolvedBrowserOptions, ScreenshotResult } from "./types.js";
 
 const z = tool.schema;
@@ -24,19 +26,6 @@ export interface ToolDeps {
 
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
-}
-
-function describeTarget(args: { ref?: string; selector?: string; x?: number; y?: number }): string {
-  if (args.ref) {
-    return `ref ${args.ref}`;
-  }
-  if (args.selector) {
-    return `selector ${args.selector}`;
-  }
-  if (typeof args.x === "number" && typeof args.y === "number") {
-    return `(${args.x}, ${args.y})`;
-  }
-  return "element";
 }
 
 /**
@@ -66,368 +55,133 @@ function makeSaveScreenshot(options: ResolvedBrowserOptions): SaveScreenshot {
   };
 }
 
+// ─── JSON-Schema → zod shape (OpenCode adapter only) ─────────────────────────
+// `tool()` wants a zod raw shape built with the host's zod (`tool.schema`).
+// A minimal structural builder type keeps the conversion honest without
+// dragging in a concrete zod version.
+interface ZodBuilder {
+  optional(): ZodBuilder;
+  describe(description: string): ZodBuilder;
+}
+
+function fieldToZod(field: Field): ZodBuilder {
+  let schema: ZodBuilder;
+  switch (field.type) {
+    case "string":
+      schema = (field.enum
+        ? z.enum(field.enum as [string, ...string[]])
+        : z.string()) as unknown as ZodBuilder;
+      break;
+    case "number":
+      schema = z.number() as unknown as ZodBuilder;
+      break;
+    case "boolean":
+      schema = z.boolean() as unknown as ZodBuilder;
+      break;
+    case "array":
+      schema = z.array(
+        fieldToZod(field.items) as unknown as Parameters<typeof z.array>[0]
+      ) as unknown as ZodBuilder;
+      break;
+    case "object":
+      schema = z.object(
+        buildShape(field.properties) as unknown as Parameters<typeof z.object>[0]
+      ) as unknown as ZodBuilder;
+      break;
+  }
+  if (field.description) {
+    schema = schema.describe(field.description);
+  }
+  if (field.optional) {
+    schema = schema.optional();
+  }
+  return schema;
+}
+
+function buildShape(input: JsonInput): Record<string, ZodBuilder> {
+  const shape: Record<string, ZodBuilder> = {};
+  for (const [key, field] of Object.entries(input)) {
+    shape[key] = fieldToZod(field);
+  }
+  return shape;
+}
+
+interface RenderDeps {
+  group: string;
+  worktree: string;
+  saveScreenshot: SaveScreenshot;
+  logger: Logger;
+}
+
+/** Render an adapter-neutral result into OpenCode's text-only ToolResult. */
+async function renderOpenCode(result: NeutralResult, deps: RenderDeps) {
+  if (result.kind === "text") {
+    return result.text;
+  }
+  if (result.kind === "json") {
+    return { output: result.text, metadata: asRecord(result.data) };
+  }
+  // image → write the PNG to disk and hand back the path (tool output is text).
+  const path = await deps.saveScreenshot({
+    group: deps.group,
+    worktree: deps.worktree,
+    shot: {
+      base64: result.base64,
+      width: result.width,
+      height: result.height,
+      partial: result.partial
+    }
+  });
+  deps.logger.info("browser_screenshot_saved", { group: deps.group, path });
+  const partialNote = result.partial
+    ? " Note: only the viewport was captured — this executor can't capture beyond it."
+    : "";
+  return {
+    output: `Saved screenshot to ${path} (${result.width}×${result.height}). Use the read tool to view it.${partialNote}`,
+    metadata: {
+      path,
+      width: result.width,
+      height: result.height,
+      partial: Boolean(result.partial),
+      group: deps.group
+    }
+  };
+}
+
 /**
- * Build the full `browser_*` tool map registered under `Hooks.tool`. Every tool
- * is a thin adapter: validate args (zod), forward to the bridge as a command,
- * shape the extension's reply into a ToolResult.
+ * Build the `browser_*` tool map registered under `Hooks.tool`, filtered to the
+ * enabled groups. Each tool is a thin adapter over the shared catalog: validate
+ * args (zod), forward to the bridge, render the neutral result.
  */
 export function createBrowserTools(deps: ToolDeps): Record<string, ToolDefinition> {
-  const { bridge } = deps;
+  const enabled = new Set(deps.options.groups);
   const saveScreenshot = deps.saveScreenshot ?? makeSaveScreenshot(deps.options);
+  const tools: Record<string, ToolDefinition> = {};
 
-  const group = z
-    .string()
-    .describe("Named tab group the action targets. Created on first browser_open.");
-
-  return {
-    browser_open: tool({
-      description:
-        "Open a new browser tab inside a named tab group (creates the group if it doesn't exist yet). Returns the tab id, final URL and page title.",
-      args: {
-        group,
-        url: z.string().optional().describe("URL to load. Omit to open a blank tab."),
-        focus: z.boolean().optional().describe("Bring the tab to the foreground (default true).")
-      },
-      async execute(args, ctx) {
-        const data = asRecord(
-          await bridge.send("open", args.group, { url: args.url, focus: args.focus }, ctx.abort)
-        );
-        const title = data.title ?? "(untitled)";
-        const url = data.url ?? args.url ?? "about:blank";
-        return {
-          output: `Opened tab in group "${args.group}": ${title} — ${url}`,
-          metadata: data
-        };
-      }
-    }),
-
-    browser_navigate: tool({
-      description: "Navigate an existing tab in the group to a new URL.",
-      args: {
-        group,
-        url: z.string().describe("URL to navigate to."),
-        tabId: z
-          .number()
-          .optional()
-          .describe("Specific tab id; defaults to the group's active tab.")
-      },
-      async execute(args, ctx) {
-        const data = asRecord(
-          await bridge.send("navigate", args.group, { url: args.url, tabId: args.tabId }, ctx.abort)
-        );
-        return {
-          output: `Navigated to ${data.url ?? args.url} (${data.title ?? ""})`.trim(),
-          metadata: data
-        };
-      }
-    }),
-
-    browser_click: tool({
-      description:
-        "Click an element. Target it by `ref` (from browser_snapshot, most reliable), by CSS `selector`, or by absolute `x`/`y` coordinates.",
-      args: {
-        group,
-        ref: z.string().optional().describe("Element ref from a prior browser_snapshot."),
-        selector: z.string().optional().describe("CSS selector."),
-        x: z.number().optional().describe("Absolute x coordinate (with y)."),
-        y: z.number().optional().describe("Absolute y coordinate (with x)."),
-        button: z
-          .enum(["left", "middle", "right"])
-          .optional()
-          .describe("Mouse button (default left)."),
-        tabId: z.number().optional()
-      },
-      async execute(args, ctx) {
-        await bridge.send(
-          "click",
-          args.group,
-          {
-            ref: args.ref,
-            selector: args.selector,
-            x: args.x,
-            y: args.y,
-            button: args.button,
-            tabId: args.tabId
-          },
-          ctx.abort
-        );
-        return `Clicked ${describeTarget(args)} in group "${args.group}".`;
-      }
-    }),
-
-    browser_double_click: tool({
-      description:
-        "Double-click an element, targeted by `ref`, CSS `selector`, or `x`/`y` coordinates.",
-      args: {
-        group,
-        ref: z.string().optional(),
-        selector: z.string().optional(),
-        x: z.number().optional(),
-        y: z.number().optional(),
-        tabId: z.number().optional()
-      },
-      async execute(args, ctx) {
-        await bridge.send(
-          "double_click",
-          args.group,
-          { ref: args.ref, selector: args.selector, x: args.x, y: args.y, tabId: args.tabId },
-          ctx.abort
-        );
-        return `Double-clicked ${describeTarget(args)} in group "${args.group}".`;
-      }
-    }),
-
-    browser_type: tool({
-      description:
-        "Type text into the focused element (or first focus `ref`/`selector`). Optionally press Enter after.",
-      args: {
-        group,
-        text: z.string().describe("Text to type."),
-        ref: z.string().optional(),
-        selector: z.string().optional(),
-        submit: z.boolean().optional().describe("Press Enter after typing."),
-        tabId: z.number().optional()
-      },
-      async execute(args, ctx) {
-        await bridge.send(
-          "type",
-          args.group,
-          {
-            text: args.text,
-            ref: args.ref,
-            selector: args.selector,
-            submit: args.submit,
-            tabId: args.tabId
-          },
-          ctx.abort
-        );
-        return `Typed ${args.text.length} character(s) into ${describeTarget(args)}${args.submit ? " and submitted" : ""}.`;
-      }
-    }),
-
-    browser_fill: tool({
-      description:
-        "Fill several form fields in one call. Each field targets a `ref` or CSS `selector` and sets its `value`.",
-      args: {
-        group,
-        fields: z
-          .array(
-            z.object({
-              ref: z.string().optional(),
-              selector: z.string().optional(),
-              value: z.string()
-            })
-          )
-          .describe("Fields to fill, in order."),
-        tabId: z.number().optional()
-      },
-      async execute(args, ctx) {
-        const data = asRecord(
-          await bridge.send(
-            "fill",
-            args.group,
-            { fields: args.fields, tabId: args.tabId },
-            ctx.abort
-          )
-        );
-        const filled = typeof data.filled === "number" ? data.filled : args.fields.length;
-        const missed = args.fields.length - filled;
-        const note = missed > 0 ? ` (${missed} target(s) not found)` : "";
-        return `Filled ${filled} of ${args.fields.length} field(s) in group "${args.group}".${note}`;
-      }
-    }),
-
-    browser_select: tool({
-      description: "Choose option(s) in a <select> element, or set the selection of a control.",
-      args: {
-        group,
-        ref: z.string().optional(),
-        selector: z.string().optional(),
-        value: z.string().optional().describe("Single value to select."),
-        values: z.array(z.string()).optional().describe("Multiple values (multi-select)."),
-        tabId: z.number().optional()
-      },
-      async execute(args, ctx) {
-        await bridge.send(
-          "select",
-          args.group,
-          {
-            ref: args.ref,
-            selector: args.selector,
-            value: args.value,
-            values: args.values,
-            tabId: args.tabId
-          },
-          ctx.abort
-        );
-        const chosen = args.values ? args.values.join(", ") : (args.value ?? "");
-        return `Selected ${chosen} in ${describeTarget(args)}.`;
-      }
-    }),
-
-    browser_scroll: tool({
-      description:
-        "Scroll the page (or an element). Provide `deltaX`/`deltaY`, or `to: 'top' | 'bottom'`.",
-      args: {
-        group,
-        deltaX: z.number().optional(),
-        deltaY: z.number().optional(),
-        ref: z.string().optional().describe("Scroll within this element instead of the page."),
-        to: z.enum(["top", "bottom"]).optional(),
-        tabId: z.number().optional()
-      },
-      async execute(args, ctx) {
-        await bridge.send(
-          "scroll",
-          args.group,
-          {
-            deltaX: args.deltaX,
-            deltaY: args.deltaY,
-            ref: args.ref,
-            to: args.to,
-            tabId: args.tabId
-          },
-          ctx.abort
-        );
-        return `Scrolled in group "${args.group}".`;
-      }
-    }),
-
-    browser_press_key: tool({
-      description: 'Press a single key or chord (e.g. "Enter", "Escape", "Control+a").',
-      args: {
-        group,
-        key: z.string().describe('Key name, e.g. "Enter".'),
-        tabId: z.number().optional()
-      },
-      async execute(args, ctx) {
-        await bridge.send("press_key", args.group, { key: args.key, tabId: args.tabId }, ctx.abort);
-        return `Pressed ${args.key} in group "${args.group}".`;
-      }
-    }),
-
-    browser_screenshot: tool({
-      description:
-        "Capture a screenshot of the group's active tab and save it to disk. Returns the file path — use the read tool to view the PNG.",
-      args: {
-        group,
-        fullPage: z
-          .boolean()
-          .optional()
-          .describe("Capture the full scrollable page, not just the viewport."),
-        tabId: z.number().optional()
-      },
-      async execute(args, ctx) {
-        const data = (await bridge.send(
-          "screenshot",
-          args.group,
-          { fullPage: args.fullPage, tabId: args.tabId },
-          ctx.abort
-        )) as ScreenshotResult;
-        const path = await saveScreenshot({
-          group: args.group,
+  for (const spec of BROWSER_TOOLS) {
+    if (!enabled.has(spec.group)) {
+      continue;
+    }
+    const definition = {
+      description: spec.description,
+      args: buildShape(spec.input),
+      async execute(args: Record<string, unknown>, ctx: ToolContext) {
+        const group = typeof args.group === "string" ? args.group : "";
+        const params = spec.params ? spec.params(args) : args;
+        const data = await deps.bridge.send(spec.action, group, params, ctx.abort);
+        const result: NeutralResult = spec.result
+          ? spec.result(data, args)
+          : { kind: "text", text: `${spec.name} ok` };
+        return renderOpenCode(result, {
+          group,
           worktree: ctx.worktree,
-          shot: data
+          saveScreenshot,
+          logger: deps.logger
         });
-        deps.logger.info("browser_screenshot_saved", { group: args.group, path });
-        const partialNote =
-          args.fullPage && data.partial
-            ? " Note: only the viewport was captured — this executor can't capture beyond it."
-            : "";
-        return {
-          output: `Saved screenshot to ${path} (${data.width}×${data.height}). Use the read tool to view it.${partialNote}`,
-          metadata: {
-            path,
-            width: data.width,
-            height: data.height,
-            group: args.group,
-            partial: Boolean(data.partial)
-          }
-        };
       }
-    }),
+    } as unknown as ToolDefinition;
+    tools[spec.name] = definition;
+  }
 
-    browser_snapshot: tool({
-      description:
-        "Capture an accessibility/DOM snapshot of the page with stable element refs. Prefer this over guessing selectors — pass the returned refs to browser_click/type/etc.",
-      args: { group, tabId: z.number().optional() },
-      async execute(args, ctx) {
-        const data = asRecord(
-          await bridge.send("snapshot", args.group, { tabId: args.tabId }, ctx.abort)
-        );
-        const snapshot =
-          typeof data.snapshot === "string" ? data.snapshot : JSON.stringify(data, null, 2);
-        return { output: snapshot, metadata: { group: args.group, refs: data.refs } };
-      }
-    }),
-
-    browser_get_text: tool({
-      description: "Extract the visible text / readable content of the group's active tab.",
-      args: { group, tabId: z.number().optional() },
-      async execute(args, ctx) {
-        const data = asRecord(
-          await bridge.send("get_text", args.group, { tabId: args.tabId }, ctx.abort)
-        );
-        return typeof data.text === "string" ? data.text : JSON.stringify(data);
-      }
-    }),
-
-    browser_wait: tool({
-      description:
-        "Wait for a fixed delay (`ms`) or until a `selector` reaches `state` (visible/hidden/attached).",
-      args: {
-        group,
-        ms: z.number().optional().describe("Fixed delay in milliseconds."),
-        selector: z.string().optional().describe("CSS selector to wait for."),
-        state: z.enum(["visible", "hidden", "attached"]).optional(),
-        tabId: z.number().optional()
-      },
-      async execute(args, ctx) {
-        if (args.ms === undefined && !args.selector) {
-          throw new Error("browser_wait requires either `ms` (a delay) or `selector`");
-        }
-        await bridge.send(
-          "wait",
-          args.group,
-          { ms: args.ms, selector: args.selector, state: args.state, tabId: args.tabId },
-          ctx.abort
-        );
-        return args.selector
-          ? `Waited for ${args.selector} (${args.state ?? "visible"}).`
-          : `Waited ${args.ms ?? 0}ms.`;
-      }
-    }),
-
-    browser_tabs: tool({
-      description: "List open tab groups and their tabs. Omit `group` to list everything.",
-      args: { group: z.string().optional().describe("Restrict to one group.") },
-      async execute(args, ctx) {
-        const data = await bridge.send("tabs", args.group ?? "", { group: args.group }, ctx.abort);
-        return { output: JSON.stringify(data, null, 2), metadata: asRecord(data) };
-      }
-    }),
-
-    browser_release: tool({
-      description:
-        "Release control of the browser: stop driving and detach the debugger (clears the 'being debugged' banner) without closing any tabs. The next browser_* call re-attaches automatically. Use this when you're done so the user gets their browser back.",
-      args: {},
-      async execute() {
-        const released = bridge.requestRelease();
-        return released
-          ? "Released browser control. Tabs are left open; the next browser_* action re-attaches."
-          : "No browser extension is connected — nothing to release.";
-      }
-    }),
-
-    browser_close: tool({
-      description: "Close a tab (pass `tabId`) or the whole group (omit `tabId`).",
-      args: { group, tabId: z.number().optional() },
-      async execute(args, ctx) {
-        await bridge.send("close", args.group, { tabId: args.tabId }, ctx.abort);
-        return args.tabId
-          ? `Closed tab ${args.tabId} in group "${args.group}".`
-          : `Closed group "${args.group}".`;
-      }
-    })
-  };
+  return tools;
 }
