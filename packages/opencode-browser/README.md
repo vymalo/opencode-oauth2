@@ -186,17 +186,88 @@ agents share one bridge.
 
 ## Scoping tools per agent
 
-Two complementary levers:
+There are **two independent levers**, and they answer different questions:
 
-- **`groups` option** — register only the groups you want exposed (e.g. drop `debug`, or expose
-  only `page` for a read-only research agent).
-- **OpenCode's per-agent tool allow/deny** — because tool names are stable `browser_*`, you can
-  enable/disable individual tools per agent in OpenCode's own config.
+| Lever | Scope | Use it to |
+| --- | --- | --- |
+| `groups` plugin option | **Global** — which tools are *registered* at all | Set the org-wide default surface. |
+| OpenCode agent `tools` map | **Per-agent** — which registered tools an agent may *call* | Give each agent only the tools it needs. |
+
+If your team keeps **all groups enabled by default** (`"groups": ["page","control","debug"]`),
+the `groups` option won't narrow anything — every `browser_*` tool is registered. To restrict an
+individual agent, use OpenCode's per-agent **`tools`** map (a `{ "<tool>": true|false }` record on
+the agent). The tool names are stable `browser_*` identifiers (see [the 33 tools](#the-33-tools)),
+so you target them directly. This is OpenCode's own mechanism — nothing plugin-specific.
+
+### Denylist — drop the sensitive tools (most common)
+
+Keep everything except the `debug` group and destructive actions for a general agent:
 
 ```jsonc
-// read-only browsing for one agent: observe, never drive
-{ "plugin": [["@vymalo/opencode-browser", { "groups": ["page"] }]] }
+// opencode.json
+{
+  "plugin": [["@vymalo/opencode-browser", {}]],   // all groups stay registered
+  "agent": {
+    "build": {
+      "tools": {
+        "browser_eval": false,
+        "browser_cookies": false,
+        "browser_console": false,
+        "browser_network": false,
+        "browser_handle_dialog": false,
+        "browser_set_viewport": false,
+        "browser_close": false
+      }
+    }
+  }
+}
 ```
+
+### Allowlist — a read-only research agent (observe, never drive)
+
+Disable the whole namespace with a wildcard, then re-enable only the `page` tools you want. A
+more specific key wins over the `browser_*` wildcard:
+
+```jsonc
+{
+  "agent": {
+    "researcher": {
+      "description": "Reads pages, never changes them.",
+      "tools": {
+        "browser_*": false,
+        "browser_open": true,
+        "browser_navigate": true,
+        "browser_snapshot": true,
+        "browser_get_text": true,
+        "browser_query": true,
+        "browser_screenshot": true,
+        "browser_tabs": true
+      }
+    }
+  }
+}
+```
+
+### Markdown agents
+
+The same `tools` map works in a `.opencode/agent/<name>.md` front-matter file:
+
+```markdown
+---
+description: Reads pages, never changes them.
+tools:
+  browser_*: false
+  browser_snapshot: true
+  browser_get_text: true
+  browser_screenshot: true
+---
+You are a read-only web researcher. Use browser_snapshot to get refs, then read.
+```
+
+> The plugin-level `groups` option is still useful as a hard floor — e.g. **never** register
+> `debug` org-wide with `{ "groups": ["page","control"] }`, then no agent can re-enable
+> `browser_eval` no matter its `tools` map. Use `groups` for "nobody gets this," and the agent
+> `tools` map for "this agent only gets these."
 
 ## Multiple browsers & agents
 
