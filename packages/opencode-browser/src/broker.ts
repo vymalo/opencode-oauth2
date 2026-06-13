@@ -282,11 +282,11 @@ export class Broker {
     const agent = this.agents.get(conn);
     if (agent) {
       this.agents.delete(conn);
-      for (const owner of this.groupOwner.values()) {
-        if (owner.agentId === agent.id) {
-          owner.agentId = null; // orphan — adoptable
-        }
-      }
+      // Orphan this agent's groups (adoptable by the next user) AND send a
+      // release frame to the executors it owned, so a guest agent dropping
+      // (MCP server / guest OpenCode exit) detaches the CDP debugger/banner
+      // instead of leaving it attached until a later manual release.
+      this.releaseForAgent(agent.id);
       for (const [reqId, p] of this.pending) {
         if (p.agentId === agent.id) {
           this.settleReject(reqId, new BrokerError("agent disconnected", "agent_gone"));
@@ -535,8 +535,10 @@ export class Broker {
         owner.agentId = null;
       }
     }
-    const targets = execIds.size > 0 ? [...execIds] : [...this.executorById.keys()];
-    for (const id of targets) {
+    // Only release the executors this agent actually owned. An agent that holds
+    // no groups must release nothing — broadcasting to every executor would
+    // detach CDP control from other clients' browsers in a shared bridge.
+    for (const id of execIds) {
       const exec = this.executorById.get(id);
       if (exec) {
         this.safeSend(exec.conn, { v: PROTOCOL_VERSION, type: "release" });

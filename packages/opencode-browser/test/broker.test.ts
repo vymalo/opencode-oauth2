@@ -239,6 +239,52 @@ describe("Broker ownership (multiple agents)", () => {
   });
 });
 
+describe("Broker release", () => {
+  const sawRelease = (sent: string[]): boolean =>
+    sent.map((s) => decodeFrame(s)).some((f) => f?.type === "release");
+
+  it("releases the owned executor when its agent disconnects", async () => {
+    const { h } = await setup();
+    const exec = connectExecutor(h, { id: "e1" });
+    const agentA = connectAgent(h);
+    h().onMessage(
+      agentA.conn,
+      encodeFrame({
+        v: PROTOCOL_VERSION,
+        type: "command",
+        id: "a1",
+        action: "open",
+        group: "g",
+        params: {}
+      })
+    );
+    replyOk(h, exec, { url: "u" });
+    await new Promise((r) => setTimeout(r, 0));
+
+    h().onClose(agentA.conn); // owner leaves
+    expect(sawRelease(exec.sent)).toBe(true);
+  });
+
+  it("does not broadcast release to executors an agent never owned", async () => {
+    const { h } = await setup();
+    const exec = connectExecutor(h, { id: "e1" });
+    const agentB = connectAgent(h); // owns no groups
+    h().onMessage(
+      agentB.conn,
+      encodeFrame({
+        v: PROTOCOL_VERSION,
+        type: "command",
+        id: "b1",
+        action: "release",
+        group: "",
+        params: {}
+      })
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sawRelease(exec.sent)).toBe(false);
+  });
+});
+
 describe("Broker failure modes", () => {
   it("rejects pending commands when the executor disconnects", async () => {
     const { broker, h } = await setup();
