@@ -134,18 +134,26 @@ function filterModalities(values: OpenRouterModality[] | undefined): OpenCodeMod
 
 /**
  * Merge a derived metadata snapshot onto an existing OpenCode model entry.
- * Upstream wins: any field already present is left untouched. Returns the
- * same object reference (mutated) for ergonomic chaining.
+ * Upstream wins by default: any field already present is left untouched.
+ * Returns the same object reference (mutated) for ergonomic chaining.
+ *
+ * `overwrite` opts specific fields *out* of upstream-wins, letting the derived
+ * (endpoint) value replace one that's already set. This exists because another
+ * plugin (e.g. `@vymalo/opencode-oauth2`) may auto-stamp a field such as `name`
+ * before this hook runs — to upstream-wins that looks like deliberate user
+ * config, so without an opt-out the endpoint's value can never land. A field
+ * named in `overwrite` only wins when the derived value is actually present.
  */
 export function mergeIntoModel<T extends Record<string, unknown>>(
   existing: T,
-  derived: ModelMetadata
+  derived: ModelMetadata,
+  overwrite?: ReadonlySet<string>
 ): T {
   for (const [key, value] of Object.entries(derived)) {
     if (value === undefined) {
       continue;
     }
-    if (existing[key] === undefined) {
+    if (existing[key] === undefined || overwrite?.has(key)) {
       (existing as Record<string, unknown>)[key] = value;
     }
   }

@@ -23,9 +23,31 @@ Because the host runs every plugin's `config` hook in registration order, by the
 1. **Opts in or skips.** Reads `options.meta.modelsInfoUrl`. No URL → the provider is left untouched. Safe to enable globally.
 2. **Resolves the URL** against `options.baseURL` (see [URL resolution](#url-resolution)).
 3. **Loads the catalog** — from the on-disk cache if fresh, otherwise fetches (see [Caching](#caching-and-failure-modes)).
-4. **Merges** derived metadata onto each model whose `id` (or declared `id`) matches an entry in the catalog. The merge is **upstream-wins**: any field already set on the model entry is never overwritten. Running the hook twice is a no-op.
+4. **Merges** derived metadata onto each model whose `id` (or declared `id`) matches an entry in the catalog. The merge is **upstream-wins**: any field already set on the model entry is never overwritten. Running the hook twice is a no-op. Fields listed in `meta.modelsInfoOverwrite` are exempt — see [Overriding upstream-wins](#overriding-upstream-wins).
 
 Providers run in parallel (`Promise.allSettled`); one bad endpoint never blocks another's enrichment, and any unexpected throw is surfaced as a `models_info_enrichment_failed` log event rather than silently swallowed.
+
+## Overriding upstream-wins
+
+Upstream-wins assumes a value already on a model entry is there on purpose — typically a handwritten `opencode.json`. That assumption breaks when **another plugin auto-stamps a field**. The canonical case: `@vymalo/opencode-oauth2`'s model discovery writes a *normalized* `name` (`kimi-k2.6` → `Kimi K2.6`) onto every model before this hook runs, so the endpoint's own `name` is frozen out and the UI shows the normalized label instead of what your metadata endpoint returns.
+
+`meta.modelsInfoOverwrite` is the escape hatch — an array of field names that the endpoint may overwrite even when already set:
+
+```jsonc
+{
+  "options": {
+    "baseURL": "https://api.example.com/v1",
+    "meta": {
+      "modelsInfoUrl": "models/info",
+      "modelsInfoOverwrite": ["name"]
+    }
+  }
+}
+```
+
+- Only the **mapped fields** are valid: `name`, `attachment`, `reasoning`, `temperature`, `tool_call`, `cost`, `limit`, `modalities`. Unknown names are silently ignored (so a typo can't clobber an unrelated field).
+- An overwrite field still only changes when the endpoint **actually provides** a value — a missing field never blanks an existing one.
+- Unlisted fields keep the default upstream-wins behavior, so a handwritten override you *do* want to keep stays safe.
 
 ## Auth composition
 

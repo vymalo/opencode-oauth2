@@ -72,6 +72,7 @@ async function enrichProvider(
     }
 
     const byId = new Map<string, OpenRouterModel>(record.models.map((m) => [m.id, m]));
+    const overwrite = opts.modelsInfoOverwrite ? new Set(opts.modelsInfoOverwrite) : undefined;
 
     let enrichedCount = 0;
     for (const [modelId, modelConfig] of Object.entries(models)) {
@@ -81,7 +82,7 @@ async function enrichProvider(
         continue;
       }
       const derived = mapOpenRouterEntry(match);
-      mergeIntoModel(modelConfig, derived);
+      mergeIntoModel(modelConfig, derived, overwrite);
       enrichedCount += 1;
     }
 

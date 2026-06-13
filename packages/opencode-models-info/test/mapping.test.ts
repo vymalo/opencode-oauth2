@@ -82,4 +82,17 @@ describe("mergeIntoModel", () => {
     mergeIntoModel(existing, { reasoning: false });
     expect(existing.reasoning).toBe(true);
   });
+
+  it("overwrites only the fields named in the overwrite set", () => {
+    const existing: Record<string, unknown> = { name: "Kimi K2.6", tool_call: true };
+    mergeIntoModel(existing, { name: "kimi-k2.6", tool_call: false }, new Set(["name"]));
+    expect(existing.name).toBe("kimi-k2.6");
+    expect(existing.tool_call).toBe(true);
+  });
+
+  it("does not write an overwrite field when the derived value is absent", () => {
+    const existing: Record<string, unknown> = { name: "Kimi K2.6" };
+    mergeIntoModel(existing, { tool_call: true }, new Set(["name"]));
+    expect(existing.name).toBe("Kimi K2.6");
+  });
 });

@@ -42,6 +42,7 @@ export interface MetaProviderOptions {
   modelsInfoTtlSeconds: number;
   modelsInfoTimeoutMs: number;
   modelsInfoHeaders?: Record<string, string>;
+  modelsInfoOverwrite?: string[];
   modelsInfoFormat: "openrouter";
 }
 
