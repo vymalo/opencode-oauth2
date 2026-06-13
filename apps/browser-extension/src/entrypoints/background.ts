@@ -35,7 +35,13 @@ export default defineBackground(() => {
   const client = new BridgeClient({
     getConfig: async () => {
       const s = await getSettings();
-      return { url: s.bridgeUrl, token: s.token };
+      return {
+        url: s.bridgeUrl,
+        token: s.token,
+        id: s.browserId,
+        label: s.label || s.browserId,
+        browser: import.meta.env.BROWSER
+      };
     },
     onCommand: (frame) => router.handle(frame),
     executorKind: () => executorKind,

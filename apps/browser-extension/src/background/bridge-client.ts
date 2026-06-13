@@ -17,6 +17,12 @@ const HEARTBEAT_MS = 25_000;
 export interface BridgeClientConfig {
   url: string;
   token: string;
+  /** Stable per-install id (routing target). */
+  id?: string;
+  /** Human-friendly label for this browser. */
+  label?: string;
+  /** "chrome" | "firefox" | … */
+  browser?: string;
 }
 
 export interface BridgeClientDeps {
@@ -114,7 +120,17 @@ export class BridgeClient {
       if (ws !== this.ws) {
         return;
       }
-      ws.send(encodeFrame(helloFrame(config.token, this.deps.clientName)));
+      ws.send(
+        encodeFrame(
+          helloFrame(config.token, {
+            role: "extension",
+            client: this.deps.clientName,
+            id: config.id,
+            label: config.label,
+            browser: config.browser
+          })
+        )
+      );
     });
     ws.addEventListener("message", (event) => this.onMessage(ws, String(event.data)));
     ws.addEventListener("close", () => this.onClose(ws));

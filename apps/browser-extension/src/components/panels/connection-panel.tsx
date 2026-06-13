@@ -16,17 +16,19 @@ export function ConnectionPanel() {
   const [bridgeUrl, setBridgeUrl] = useState(settings.bridgeUrl);
   const [token, setToken] = useState(settings.token);
   const [executorMode, setExecutorMode] = useState<ExecutorMode>(settings.executorMode);
+  const [label, setLabel] = useState(settings.label);
 
   // Re-seed when settings load or change out-of-band (only this panel writes them).
   useEffect(() => {
     setBridgeUrl(settings.bridgeUrl);
     setToken(settings.token);
     setExecutorMode(settings.executorMode);
+    setLabel(settings.label);
   }, [settings]);
 
   const save = useMutation({
     mutationFn: async () => {
-      await saveSettings({ bridgeUrl, token, executorMode });
+      await saveSettings({ bridgeUrl, token, executorMode, label });
       await sendToBackground({ type: "reconnect" });
     }
   });
@@ -63,6 +65,20 @@ export function ConnectionPanel() {
             <p className="text-xs text-muted">
               The plugin logs <code>browser_bridge_token_generated</code> on first run — copy that
               value here. If you set <code>token</code> in the plugin options, use that instead.
+            </p>
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="label">Browser label</Label>
+            <Input
+              id="label"
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="e.g. work-chrome (used as a routing target)"
+              spellCheck={false}
+            />
+            <p className="text-xs text-muted">
+              Shown in <code>browser_targets</code> and usable as <code>target</code> when several
+              browsers are connected. Defaults to a generated id.
             </p>
           </div>
           <div className="grid gap-1.5">

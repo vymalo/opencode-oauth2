@@ -1,7 +1,9 @@
 import { randomBytes } from "node:crypto";
 import type { Hooks, Plugin, PluginInput, PluginOptions } from "@opencode-ai/plugin";
 
-import { Bridge, type BridgeTransport, createBunTransport } from "./bridge.js";
+import type { AgentSocketFactory } from "./agent-client.js";
+import { DEFAULT_GROUPS, TOOL_GROUPS } from "./catalog.js";
+import { createEndpoint } from "./endpoint.js";
 import {
   createJsonConsoleLogger,
   DEFAULT_LOG_LEVEL,
@@ -11,10 +13,33 @@ import {
   type Logger,
   type LogLevel
 } from "./logging.js";
-import { DEFAULT_GROUPS, TOOL_GROUPS } from "./catalog.js";
 import type { ToolGroup } from "./schema.js";
+import { resolveSharedToken, writeBridgeFile } from "./token-file.js";
 import { createBrowserTools, type SaveScreenshot } from "./tools.js";
+import { type BridgeTransport, createBunTransport } from "./transport.js";
 import type { BrowserPluginOptions, ResolvedBrowserOptions } from "./types.js";
+
+interface WsLike {
+  send(data: string): void;
+  close(): void;
+  addEventListener(type: string, cb: (event: { data?: unknown }) => void): void;
+}
+
+/** Agent-socket factory using the runtime's global WebSocket (Bun provides one). */
+const bunAgentSocket: AgentSocketFactory = (url, handlers) => {
+  const Ctor = (globalThis as { WebSocket?: new (url: string) => WsLike }).WebSocket;
+  if (!Ctor) {
+    throw new Error("global WebSocket is not available in this runtime");
+  }
+  const ws = new Ctor(url);
+  ws.addEventListener("open", () => handlers.onOpen());
+  ws.addEventListener("message", (event) =>
+    handlers.onMessage(typeof event.data === "string" ? event.data : String(event.data))
+  );
+  ws.addEventListener("close", () => handlers.onClose());
+  ws.addEventListener("error", () => {});
+  return { send: (data) => ws.send(data), close: () => ws.close() };
+};
 
 function resolveGroups(raw: unknown): ToolGroup[] {
   if (!Array.isArray(raw)) {
@@ -39,8 +64,10 @@ type OpenCodeConfig = Parameters<NonNullable<Hooks["config"]>>[0];
 export interface BrowserPluginFactoryOptions {
   /** Inject a logger (defaults to the OpenCode-piped logger). */
   logger?: Logger;
-  /** Inject the WebSocket transport (defaults to the Bun-backed one). */
-  transport?: BridgeTransport;
+  /** Inject the server transport factory for host mode (defaults to Bun.serve). */
+  createServerTransport?: () => BridgeTransport;
+  /** Inject the agent-socket factory for guest mode (defaults to global WebSocket). */
+  createAgentSocket?: AgentSocketFactory;
   /** Inject the screenshot disk-writer (tests). */
   saveScreenshot?: SaveScreenshot;
   /** Inject token generation (tests). */
@@ -116,45 +143,53 @@ export function createBrowserPlugin(factoryOptions: BrowserPluginFactoryOptions 
       };
     }
 
-    const bridge = new Bridge(
+    // Share the token across adapters via the per-user state file (explicit wins).
+    const { token, source } = resolveSharedToken(
+      options.port,
+      tokenProvided ? options.token : undefined,
+      generateToken
+    );
+    writeBridgeFile(options.port, token);
+
+    // Auto-elect: host the broker (win the bind) or join an existing one as a guest.
+    const endpoint = await createEndpoint(
       {
         host: options.host,
         port: options.port,
-        token: options.token,
+        token,
+        executor: executorProvided ? options.executor : undefined,
         timeoutMs: options.timeoutMs,
-        executor: executorProvided ? options.executor : undefined
+        label: "opencode-plugin"
       },
-      { logger, transport: factoryOptions.transport ?? createBunTransport() }
+      {
+        logger,
+        createServerTransport: factoryOptions.createServerTransport ?? createBunTransport,
+        createAgentSocket: factoryOptions.createAgentSocket ?? bunAgentSocket
+      }
     );
 
     // When OpenCode exits, hand the browser back automatically — the user
-    // shouldn't have to click Disconnect. (Hard kills are also covered by the
-    // extension releasing on socket close; this is the graceful path.)
+    // shouldn't have to click Disconnect.
     process.once("exit", () => {
       try {
-        bridge.shutdown();
+        endpoint.shutdown();
       } catch {
         /* best-effort */
       }
     });
 
-    try {
-      bridge.start();
-      if (!tokenProvided) {
-        // Auto-generated token must be visible so it can be pasted into the
-        // extension. The `paste_into_extension` field name deliberately dodges
-        // the logger's token-redaction filter — printing it once is the point.
-        logger.info("browser_bridge_token_generated", { paste_into_extension: options.token });
-      }
-    } catch (err) {
-      logger.error("browser_bridge_start_failed", {
-        message: err instanceof Error ? err.message : String(err),
-        port: options.port
+    if (source !== "explicit") {
+      // Make the token visible so it can be pasted into the extension. The
+      // `paste_into_extension` field name dodges the logger's redaction filter.
+      logger.info("browser_bridge_token", {
+        paste_into_extension: token,
+        source,
+        mode: endpoint.mode()
       });
     }
 
     const tools = createBrowserTools({
-      bridge,
+      send: endpoint.send,
       options,
       logger,
       saveScreenshot: factoryOptions.saveScreenshot

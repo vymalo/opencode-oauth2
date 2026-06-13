@@ -1,0 +1,167 @@
+import { type AgentSocketFactory, AgentClient } from "./agent-client.js";
+import { type AgentEndpoint, Broker } from "./broker.js";
+import type { Logger } from "./logging.js";
+import type { BrowserAction } from "./protocol.js";
+import { type BridgeTransport, isAddrInUse } from "./transport.js";
+
+export type EndpointMode = "host" | "guest" | "electing";
+
+export interface EndpointOptions {
+  host: string;
+  port: number;
+  token: string;
+  executor?: "auto" | "cdp" | "content";
+  timeoutMs: number;
+  /** Descriptor sent in the agent hello (guest mode). */
+  label?: string;
+  /** Delay before retrying election after a drop. */
+  reelectMs?: number;
+}
+
+export interface EndpointDeps {
+  logger: Logger;
+  /** Server transport for host mode (Bun.serve / Node ws). */
+  createServerTransport: () => BridgeTransport;
+  /** Client socket factory for guest mode. */
+  createAgentSocket: AgentSocketFactory;
+  /** ws URL to dial as a guest; defaults to ws://host:port. */
+  url?: string;
+}
+
+export interface Endpoint {
+  send(
+    action: BrowserAction,
+    group: string,
+    params: Record<string, unknown>,
+    signal?: AbortSignal,
+    target?: string
+  ): Promise<unknown>;
+  release(): void;
+  shutdown(): void;
+  mode(): EndpointMode;
+  /** The broker, when this endpoint is the host (else null) — for tests/extras. */
+  broker(): Broker | null;
+}
+
+/**
+ * Unifies host and guest: tries to **bind** the port (election) — on success it
+ * hosts the broker and drives it via an in-process agent; on `EADDRINUSE` it
+ * connects to the existing broker as a guest agent. Re-elects on drop. Tools
+ * call `send()` and never know which mode they're in.
+ */
+export async function createEndpoint(opts: EndpointOptions, deps: EndpointDeps): Promise<Endpoint> {
+  const url = deps.url ?? `ws://${opts.host}:${opts.port}`;
+  const reelectMs = opts.reelectMs ?? 500;
+
+  let mode: EndpointMode = "electing";
+  let broker: Broker | null = null;
+  let agentClient: AgentClient | null = null;
+  let current: AgentEndpoint | null = null;
+  let closed = false;
+  let reelectTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const scheduleReelect = (): void => {
+    broker = null;
+    agentClient = null;
+    current = null;
+    mode = "electing";
+    if (closed || reelectTimer) {
+      return;
+    }
+    reelectTimer = setTimeout(() => {
+      reelectTimer = null;
+      void elect();
+    }, reelectMs);
+  };
+
+  async function elect(): Promise<void> {
+    if (closed) {
+      return;
+    }
+    mode = "electing";
+
+    // 1) Try to host (win the bind).
+    const transport = deps.createServerTransport();
+    const candidate = new Broker(
+      {
+        host: opts.host,
+        port: opts.port,
+        token: opts.token,
+        executor: opts.executor,
+        timeoutMs: opts.timeoutMs
+      },
+      { logger: deps.logger, transport }
+    );
+    try {
+      await candidate.start();
+      broker = candidate;
+      current = candidate.createLocalAgent();
+      mode = "host";
+      deps.logger.info("browser_endpoint_mode", { mode: "host" });
+      return;
+    } catch (err) {
+      try {
+        candidate.stop();
+      } catch {
+        /* never bound */
+      }
+      if (!isAddrInUse(err)) {
+        deps.logger.warn("browser_endpoint_bind_error", {
+          message: err instanceof Error ? err.message : String(err)
+        });
+      }
+    }
+
+    // 2) Someone else hosts — join as a guest.
+    const client = new AgentClient(
+      { url, token: opts.token, label: opts.label, timeoutMs: opts.timeoutMs },
+      {
+        logger: deps.logger,
+        createSocket: deps.createAgentSocket,
+        onClose: () => {
+          if (!closed) {
+            scheduleReelect();
+          }
+        }
+      }
+    );
+    try {
+      await client.connect();
+      agentClient = client;
+      current = client;
+      mode = "guest";
+      deps.logger.info("browser_endpoint_mode", { mode: "guest" });
+    } catch {
+      scheduleReelect();
+    }
+  }
+
+  await elect();
+
+  return {
+    send: (action, group, params, signal, target) =>
+      current
+        ? current.send(action, group, params, signal, target)
+        : Promise.reject(new Error("bridge is re-electing — retry shortly")),
+    release: () => current?.release(),
+    shutdown: () => {
+      closed = true;
+      if (reelectTimer) {
+        clearTimeout(reelectTimer);
+        reelectTimer = null;
+      }
+      try {
+        broker?.stop();
+      } catch {
+        /* ignore */
+      }
+      try {
+        agentClient?.stop();
+      } catch {
+        /* ignore */
+      }
+    },
+    mode: () => mode,
+    broker: () => broker
+  };
+}

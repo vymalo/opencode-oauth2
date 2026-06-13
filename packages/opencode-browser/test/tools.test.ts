@@ -4,10 +4,9 @@ import { join } from "node:path";
 import { tool } from "@opencode-ai/plugin";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { Bridge } from "../src/bridge.js";
 import { BROWSER_TOOLS } from "../src/catalog.js";
 import type { Logger } from "../src/logging.js";
-import { createBrowserTools } from "../src/tools.js";
+import { createBrowserTools, type SendFn } from "../src/tools.js";
 import type { ResolvedBrowserOptions } from "../src/types.js";
 
 const z = tool.schema;
@@ -27,10 +26,10 @@ function baseOptions(overrides: Partial<ResolvedBrowserOptions> = {}): ResolvedB
   };
 }
 
-/** Fake bridge whose send() is a spy. */
-function fakeBridge(result: unknown = {}) {
-  const send = vi.fn().mockResolvedValue(result);
-  return { bridge: { send } as unknown as Bridge, send };
+/** Fake endpoint send() spy. */
+function fakeSend(result: unknown = {}) {
+  const send = vi.fn().mockResolvedValue(result) as unknown as SendFn & ReturnType<typeof vi.fn>;
+  return send;
 }
 
 function ctx(worktree = "/tmp") {
@@ -40,8 +39,11 @@ function ctx(worktree = "/tmp") {
 }
 
 describe("tool arg schemas", () => {
-  const { bridge } = fakeBridge();
-  const tools = createBrowserTools({ bridge, options: baseOptions(), logger: noopLogger });
+  const tools = createBrowserTools({
+    send: fakeSend(),
+    options: baseOptions(),
+    logger: noopLogger
+  });
 
   it("requires group on browser_open", () => {
     const schema = z.object(tools.browser_open.args);
@@ -62,9 +64,8 @@ describe("tool arg schemas", () => {
   });
 
   it("filters tools by enabled groups", () => {
-    const { bridge } = fakeBridge();
     const pageOnly = createBrowserTools({
-      bridge,
+      send: fakeSend(),
       options: baseOptions({ groups: ["page"] }),
       logger: noopLogger
     });
@@ -99,38 +100,40 @@ describe("tool arg schemas", () => {
 });
 
 describe("tool → bridge action mapping", () => {
-  it("maps browser_open to the open action", async () => {
-    const { bridge, send } = fakeBridge({ title: "Example", url: "https://example.com" });
-    const tools = createBrowserTools({ bridge, options: baseOptions(), logger: noopLogger });
+  it("maps browser_open to the open action (with target)", async () => {
+    const send = fakeSend({ title: "Example", url: "https://example.com" });
+    const tools = createBrowserTools({ send, options: baseOptions(), logger: noopLogger });
     const c = ctx();
     const res = await tools.browser_open.execute(
-      { group: "research", url: "https://example.com" },
+      { group: "research", url: "https://example.com", target: "work-chrome" },
       c
     );
     expect(send).toHaveBeenCalledWith(
       "open",
       "research",
       expect.objectContaining({ url: "https://example.com" }),
-      c.abort
+      c.abort,
+      "work-chrome"
     );
     expect(typeof res === "object" ? res.output : res).toContain("research");
   });
 
   it("maps browser_click target params through", async () => {
-    const { bridge, send } = fakeBridge();
-    const tools = createBrowserTools({ bridge, options: baseOptions(), logger: noopLogger });
+    const send = fakeSend();
+    const tools = createBrowserTools({ send, options: baseOptions(), logger: noopLogger });
     await tools.browser_click.execute({ group: "g", ref: "e7" }, ctx());
     expect(send).toHaveBeenCalledWith(
       "click",
       "g",
       expect.objectContaining({ ref: "e7" }),
-      expect.anything()
+      expect.anything(),
+      undefined
     );
   });
 
   it("returns page text directly for browser_get_text", async () => {
-    const { bridge } = fakeBridge({ text: "hello world" });
-    const tools = createBrowserTools({ bridge, options: baseOptions(), logger: noopLogger });
+    const send = fakeSend({ text: "hello world" });
+    const tools = createBrowserTools({ send, options: baseOptions(), logger: noopLogger });
     const res = await tools.browser_get_text.execute({ group: "g" }, ctx());
     expect(res).toBe("hello world");
   });
@@ -146,9 +149,9 @@ describe("browser_screenshot disk write", () => {
     const dir = await mkdtemp(join(tmpdir(), "ocb-shot-"));
     tmpDirs.push(dir);
     const png = Buffer.from("fake-png-bytes");
-    const { bridge } = fakeBridge({ base64: png.toString("base64"), width: 1280, height: 800 });
+    const send = fakeSend({ base64: png.toString("base64"), width: 1280, height: 800 });
     const tools = createBrowserTools({
-      bridge,
+      send,
       // absolute screenshotDir → written there directly
       options: baseOptions({ screenshotDir: dir }),
       logger: noopLogger

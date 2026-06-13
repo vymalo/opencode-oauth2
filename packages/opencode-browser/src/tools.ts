@@ -2,13 +2,16 @@ import { mkdir, rename, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { tool, type ToolContext, type ToolDefinition } from "@opencode-ai/plugin";
 
-import type { Bridge } from "./bridge.js";
+import type { AgentEndpoint } from "./broker.js";
 import { BROWSER_TOOLS, type NeutralResult } from "./catalog.js";
 import type { Logger } from "./logging.js";
 import type { Field, JsonInput } from "./schema.js";
 import type { ResolvedBrowserOptions, ScreenshotResult } from "./types.js";
 
 const z = tool.schema;
+
+/** How a tool reaches the bridge — the endpoint's `send` (host or guest). */
+export type SendFn = AgentEndpoint["send"];
 
 /** Where the screenshot tool gets its disk-write behavior; swappable in tests. */
 export type SaveScreenshot = (input: {
@@ -18,7 +21,7 @@ export type SaveScreenshot = (input: {
 }) => Promise<string>;
 
 export interface ToolDeps {
-  bridge: Bridge;
+  send: SendFn;
   options: ResolvedBrowserOptions;
   logger: Logger;
   saveScreenshot?: SaveScreenshot;
@@ -167,8 +170,9 @@ export function createBrowserTools(deps: ToolDeps): Record<string, ToolDefinitio
       args: buildShape(spec.input),
       async execute(args: Record<string, unknown>, ctx: ToolContext) {
         const group = typeof args.group === "string" ? args.group : "";
+        const target = typeof args.target === "string" ? args.target : undefined;
         const params = spec.params ? spec.params(args) : args;
-        const data = await deps.bridge.send(spec.action, group, params, ctx.abort);
+        const data = await deps.send(spec.action, group, params, ctx.abort, target);
         const result: NeutralResult = spec.result
           ? spec.result(data, args)
           : { kind: "text", text: `${spec.name} ok` };

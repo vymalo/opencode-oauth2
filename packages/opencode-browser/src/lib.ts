@@ -5,17 +5,48 @@ export {
 } from "./opencode.js";
 
 export {
-  Bridge,
-  BridgeError,
-  type BridgeDeps,
-  type BridgeOptions,
+  type AgentEndpoint,
+  Broker,
+  BrokerError,
+  type BrokerDeps,
+  type BrokerOptions
+} from "./broker.js";
+
+export {
+  AgentClient,
+  AgentClientError,
+  type AgentClientDeps,
+  type AgentClientOptions,
+  type AgentSocket,
+  type AgentSocketFactory,
+  type AgentSocketHandlers
+} from "./agent-client.js";
+
+export {
+  createEndpoint,
+  type Endpoint,
+  type EndpointDeps,
+  type EndpointMode,
+  type EndpointOptions
+} from "./endpoint.js";
+
+export {
   type BridgeTransport,
   type ClientConnection,
   createBunTransport,
+  isAddrInUse,
   type TransportHandlers
-} from "./bridge.js";
+} from "./transport.js";
 
-export { createBrowserTools, type SaveScreenshot, type ToolDeps } from "./tools.js";
+export {
+  type BridgeFile,
+  readBridgeFile,
+  resolveSharedToken,
+  type TokenSource,
+  writeBridgeFile
+} from "./token-file.js";
+
+export { createBrowserTools, type SaveScreenshot, type SendFn, type ToolDeps } from "./tools.js";
 
 export {
   BROWSER_TOOLS,
@@ -26,12 +57,7 @@ export {
   type ToolSpec
 } from "./catalog.js";
 
-export {
-  type Field,
-  type JsonInput,
-  type JsonSchema,
-  toJsonSchema
-} from "./schema.js";
+export { type Field, type JsonInput, type JsonSchema, toJsonSchema } from "./schema.js";
 
 export {
   createJsonConsoleLogger,
@@ -46,12 +72,14 @@ export {
   BROWSER_ACTIONS,
   type BrowserAction,
   type BrowserEventName,
+  type ClientRole,
   type CommandFrame,
   decodeFrame,
   encodeFrame,
   type EventFrame,
   type Frame,
   type HelloFrame,
+  helloFrame,
   nextId,
   PROTOCOL_VERSION,
   type ReadyFrame,

@@ -5,9 +5,9 @@ import {
   ListToolsRequestSchema
 } from "@modelcontextprotocol/sdk/types.js";
 import {
-  type Bridge,
   BROWSER_TOOLS,
   type NeutralResult,
+  type SendFn,
   toJsonSchema,
   type ToolGroup,
   type ToolSpec
@@ -23,9 +23,9 @@ export function selectTools(groups: ToolGroup[]): ToolSpec[] {
 
 /**
  * Build an MCP server that exposes the group-filtered browser_* catalog and
- * routes tools/call through the bridge to the connected extension.
+ * routes tools/call through the bridge endpoint to the connected extension.
  */
-export function createMcpServer(bridge: Bridge, groups: ToolGroup[]): Server {
+export function createMcpServer(send: SendFn, groups: ToolGroup[]): Server {
   const specs = selectTools(groups);
   const byName = new Map(specs.map((spec) => [spec.name, spec]));
 
@@ -53,7 +53,8 @@ export function createMcpServer(bridge: Bridge, groups: ToolGroup[]): Server {
     try {
       const params = spec.params ? spec.params(args) : args;
       const group = typeof args.group === "string" ? args.group : "";
-      const data = await bridge.send(spec.action, group, params);
+      const target = typeof args.target === "string" ? args.target : undefined;
+      const data = await send(spec.action, group, params, undefined, target);
       const result: NeutralResult = spec.result
         ? spec.result(data, args)
         : { kind: "text", text: `${spec.name} ok` };

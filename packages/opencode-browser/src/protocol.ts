@@ -52,6 +52,7 @@ export type BrowserAction =
   | "handle_dialog"
   | "set_viewport"
   | "cookies"
+  | "targets"
   | "release";
 
 export const BROWSER_ACTIONS: readonly BrowserAction[] = [
@@ -86,26 +87,42 @@ export const BROWSER_ACTIONS: readonly BrowserAction[] = [
   "handle_dialog",
   "set_viewport",
   "cookies",
+  "targets",
   "release"
 ] as const;
 
-/** Extension → server: first frame after the socket opens. */
+/** A connection's role on the bridge. Absent → "extension" (back-compat). */
+export type ClientRole = "agent" | "extension";
+
+/** Client → broker: first frame after the socket opens. */
 export interface HelloFrame {
   v: number;
   type: "hello";
   /** Shared secret; must equal the bridge token. */
   token: string;
-  /** Free-form client descriptor for logging (browser name/version). */
+  /** "extension" (executor) or "agent" (producer). Default extension. */
+  role?: ClientRole;
+  /** Free-form client descriptor for logging (browser name/version, agent name). */
   client?: string;
+  /** Extensions: stable per-install id (persisted), usable as a routing target. */
+  id?: string;
+  /** Extensions: user-editable label from the dashboard (defaults to id). */
+  label?: string;
+  /** Extensions: "chrome" | "firefox" | UA hint. */
+  browser?: string;
 }
 
-/** Server → extension: handshake accepted. */
+/** Broker → client: handshake accepted. */
 export interface ReadyFrame {
   v: number;
   type: "ready";
   server: "opencode-browser";
   protocol: number;
-  /** Operator's executor preference, if configured plugin-side. */
+  /** Role the broker accepted this connection as. */
+  role?: ClientRole;
+  /** Id the broker assigned/echoed for this client. */
+  clientId?: string;
+  /** Operator's executor preference, if configured plugin-side (extensions only). */
   executor?: "auto" | "cdp" | "content";
 }
 
@@ -120,6 +137,11 @@ export interface CommandFrame {
   group: string;
   /** Action-specific arguments (already validated plugin-side). */
   params: Record<string, unknown>;
+  /**
+   * Optional executor selector (browser label or id) used by the broker when a
+   * command creates a new group; ignored by executors.
+   */
+  target?: string;
 }
 
 /** Extension → server: response to a `command`. */
@@ -240,4 +262,19 @@ let idCounter = 0;
 export function nextId(): string {
   idCounter = (idCounter + 1) % Number.MAX_SAFE_INTEGER;
   return `c${idCounter.toString(36)}`;
+}
+
+export function helloFrame(
+  token: string,
+  opts: { role?: ClientRole; client?: string; id?: string; label?: string; browser?: string } = {}
+): HelloFrame {
+  return { v: PROTOCOL_VERSION, type: "hello", token, ...opts };
+}
+
+export function resultFrame(id: string, data: unknown): ResultFrame {
+  return { v: PROTOCOL_VERSION, type: "result", id, ok: true, data };
+}
+
+export function errorFrame(id: string, message: string, code?: string): ResultFrame {
+  return { v: PROTOCOL_VERSION, type: "result", id, ok: false, error: { message, code } };
 }

@@ -93,6 +93,12 @@ export const BROWSER_TOOLS: readonly ToolSpec[] = [
         type: "boolean",
         optional: true,
         description: "Bring the tab to the foreground (default true)."
+      },
+      target: {
+        type: "string",
+        optional: true,
+        description:
+          "Which browser to open in (label or id from browser_targets). Omit unless several browsers are connected."
       }
     },
     result: (data, args) => {
@@ -329,6 +335,15 @@ export const BROWSER_TOOLS: readonly ToolSpec[] = [
     description: "List open tab groups and their tabs. Omit `group` to list everything.",
     input: { group: { type: "string", optional: true, description: "Restrict to one group." } },
     params: (args) => ({ group: args.group }),
+    result: (data) => ({ kind: "json", data, text: JSON.stringify(data, null, 2) })
+  },
+  {
+    name: "browser_targets",
+    group: "page",
+    action: "targets",
+    description:
+      "List the browsers (extensions) currently connected to the bridge, with their id, label, browser and owned groups. Use a returned id/label as `target` in browser_open when several are connected.",
+    input: {},
     result: (data) => ({ kind: "json", data, text: JSON.stringify(data, null, 2) })
   },
   {

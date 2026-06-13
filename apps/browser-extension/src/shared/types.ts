@@ -19,13 +19,19 @@ export interface Settings {
   bridgeUrl: string;
   token: string;
   executorMode: ExecutorMode;
+  /** Stable per-install id advertised to the broker as a routing target. */
+  browserId: string;
+  /** User-editable label for this browser (defaults to the id). */
+  label: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   id: "singleton",
   bridgeUrl: "ws://127.0.0.1:4517",
   token: "",
-  executorMode: "auto"
+  executorMode: "auto",
+  browserId: "",
+  label: ""
 };
 
 /** Live status the background publishes for the UI to render. */

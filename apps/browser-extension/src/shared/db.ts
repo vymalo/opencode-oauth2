@@ -41,7 +41,14 @@ export const db = new OcbDatabase();
 
 export async function getSettings(): Promise<Settings> {
   const row = await db.settings.get("singleton");
-  return row ?? DEFAULT_SETTINGS;
+  const settings = row ?? DEFAULT_SETTINGS;
+  // Mint a stable per-install id the first time it's needed (routing target).
+  if (!settings.browserId) {
+    const next: Settings = { ...settings, browserId: crypto.randomUUID() };
+    await db.settings.put(next).catch(() => {});
+    return next;
+  }
+  return settings;
 }
 
 export async function saveSettings(patch: Partial<Omit<Settings, "id">>): Promise<Settings> {
