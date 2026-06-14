@@ -32,18 +32,20 @@ export function App() {
         <StatusBadge state={status.state} />
       </header>
 
-      <nav className="tabs tabs-border mt-6">
+      <div className="tabs tabs-border mt-6" role="tablist">
         {TABS.map((t) => (
           <button
             type="button"
             key={t.id}
+            role="tab"
+            aria-selected={tab === t.id}
             onClick={() => setTab(t.id)}
             className={`tab ${tab === t.id ? "tab-active" : ""}`}
           >
             {t.label}
           </button>
         ))}
-      </nav>
+      </div>
 
       <main className="mt-6">
         {tab === "guide" ? <GuidePanel /> : null}

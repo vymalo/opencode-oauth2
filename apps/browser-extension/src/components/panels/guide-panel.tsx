@@ -1,6 +1,8 @@
+import type { ReactNode } from "react";
+
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 
-const STEPS: Array<{ title: string; body: React.ReactNode }> = [
+const STEPS: Array<{ title: string; body: ReactNode }> = [
   {
     title: "Start the agent with the plugin",
     body: (
@@ -32,7 +34,7 @@ const STEPS: Array<{ title: string; body: React.ReactNode }> = [
   }
 ];
 
-const CONCEPTS: Array<{ term: string; desc: React.ReactNode }> = [
+const CONCEPTS: Array<{ term: string; desc: ReactNode }> = [
   {
     term: "Tab groups",
     desc: "Each task gets a named group of tabs, kept isolated and inspectable. Chromium shows them as real tab groups; Firefox tracks them logically."
@@ -62,8 +64,10 @@ export function GuidePanel() {
             screenshot — against real pages.
           </p>
           <p>
-            Nothing leaves your machine: the bridge is localhost-only, and settings and history stay
-            on-device.
+            The bridge itself is localhost-only, and your settings and history stay on-device. Keep
+            in mind the agent <b className="font-medium opacity-100">sees what it opens</b> — page
+            text and screenshots are sent to whatever model/provider you run the agent on, so prefer
+            a profile you're comfortable exposing.
           </p>
         </CardContent>
       </Card>
