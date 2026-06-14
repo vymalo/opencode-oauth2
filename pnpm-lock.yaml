@@ -78,7 +78,13 @@ importers:
       '@opencode-ai/plugin':
         specifier: 1.15.10
         version: 1.15.10
+      ws:
+        specifier: ^8.21.0
+        version: 8.21.0
     devDependencies:
+      '@types/ws':
+        specifier: ^8.18.0
+        version: 8.18.1
       vite:
         specifier: ^8.0.14
         version: 8.0.14(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0)(yaml@2.9.0)
@@ -94,13 +100,7 @@ importers:
       '@vymalo/opencode-browser':
         specifier: workspace:*
         version: link:../opencode-browser
-      ws:
-        specifier: ^8.21.0
-        version: 8.21.0
     devDependencies:
-      '@types/ws':
-        specifier: ^8.18.0
-        version: 8.18.1
       vite:
         specifier: ^8.0.14
         version: 8.0.14(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0)(yaml@2.9.0)

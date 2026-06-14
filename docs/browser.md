@@ -14,8 +14,9 @@ This is a **dual plugin**:
 
 Browser extensions **cannot host servers**, but a background service worker *can* open an
 outbound WebSocket to `127.0.0.1`. So an **agent** (the plugin or the MCP server) hosts the
-bridge and the extension connects out to it. OpenCode runs on **Bun**, so the bridge uses
-`Bun.serve`; the MCP server uses Node `ws`.
+bridge and the extension connects out to it. The bridge is served with the Node `ws` package,
+which runs under **both** runtimes OpenCode uses — Bun (the CLI / `opencode web`) and Node (the
+desktop app) — so the plugin hosts the bridge in either.
 
 The bridge is a **broker** with two roles: **agents** (producers — the plugin, the MCP server,
 extra sessions) and **executors** (the browser extensions). The first agent to start wins the
@@ -24,11 +25,11 @@ port bind and runs the broker in-process; later agents detect the bound port and
 plugin and the MCP server (or several sessions) at once — see [Multiple browsers & agents](#multiple-browsers--agents).
 
 ```
-OpenCode (Bun)                                   Browser (Chromium / Firefox)
+OpenCode (Bun or Node)                           Browser (Chromium / Firefox)
 ┌────────────────────────────┐                   ┌─────────────────────────────────┐
 │ @vymalo/opencode-browser   │                   │ extension background worker     │
 │  • browser_* tools         │   ws://127.0.0.1  │  • BridgeClient (dials out)     │
-│  • Bridge (Bun.serve) ◀────┼───────────────────┼──▶ CommandRouter                │
+│  • Bridge (ws server)  ◀───┼───────────────────┼──▶ CommandRouter                │
 │      command  ───────────▶ │     :4517         │     • GroupRegistry (tab groups)│
 │      ◀─────────── result   │                   │     • CdpExecutor / Content…    │
 └────────────────────────────┘                   │  • IndexedDB (Dexie) ◀─ dashboard│

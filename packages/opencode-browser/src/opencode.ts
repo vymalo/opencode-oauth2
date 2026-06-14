@@ -15,31 +15,10 @@ import {
 } from "./logging.js";
 import type { ToolGroup } from "./schema.js";
 import { resolveSharedToken, writeBridgeFile } from "./token-file.js";
+import { createNodeAgentSocket, createNodeTransport } from "./node-transport.js";
 import { createBrowserTools, type SaveScreenshot } from "./tools.js";
-import { type BridgeTransport, createBunTransport } from "./transport.js";
+import type { BridgeTransport } from "./transport.js";
 import type { BrowserPluginOptions, ResolvedBrowserOptions } from "./types.js";
-
-interface WsLike {
-  send(data: string): void;
-  close(): void;
-  addEventListener(type: string, cb: (event: { data?: unknown }) => void): void;
-}
-
-/** Agent-socket factory using the runtime's global WebSocket (Bun provides one). */
-const bunAgentSocket: AgentSocketFactory = (url, handlers) => {
-  const Ctor = (globalThis as { WebSocket?: new (url: string) => WsLike }).WebSocket;
-  if (!Ctor) {
-    throw new Error("global WebSocket is not available in this runtime");
-  }
-  const ws = new Ctor(url);
-  ws.addEventListener("open", () => handlers.onOpen());
-  ws.addEventListener("message", (event) =>
-    handlers.onMessage(typeof event.data === "string" ? event.data : String(event.data))
-  );
-  ws.addEventListener("close", () => handlers.onClose());
-  ws.addEventListener("error", () => {});
-  return { send: (data) => ws.send(data), close: () => ws.close() };
-};
 
 function resolveGroups(raw: unknown): ToolGroup[] {
   if (!Array.isArray(raw)) {
@@ -163,6 +142,17 @@ export function createBrowserPlugin(factoryOptions: BrowserPluginFactoryOptions 
     );
     writeBridgeFile(options.port, token);
 
+    // Only the host advertises the token (guests reuse the same one from the
+    // shared file — reprinting it per session is just noise, and re-emits the
+    // secret). Fired via onHost so a host reached by failover re-election still
+    // advertises it, not only the initial host. The `paste_into_extension` field
+    // name dodges the logger's redaction filter so the value stays copyable.
+    const advertiseToken = () => {
+      if (source !== "explicit") {
+        logger.info("browser_bridge_token", { paste_into_extension: token, source, mode: "host" });
+      }
+    };
+
     // Auto-elect: host the broker (win the bind) or join an existing one as a guest.
     const endpoint = await createEndpoint(
       {
@@ -171,12 +161,13 @@ export function createBrowserPlugin(factoryOptions: BrowserPluginFactoryOptions 
         token,
         executor: executorProvided ? options.executor : undefined,
         timeoutMs: options.timeoutMs,
-        label: "opencode-plugin"
+        label: "opencode-plugin",
+        onHost: advertiseToken
       },
       {
         logger,
-        createServerTransport: factoryOptions.createServerTransport ?? createBunTransport,
-        createAgentSocket: factoryOptions.createAgentSocket ?? bunAgentSocket
+        createServerTransport: factoryOptions.createServerTransport ?? createNodeTransport,
+        createAgentSocket: factoryOptions.createAgentSocket ?? createNodeAgentSocket
       }
     );
 
@@ -189,18 +180,6 @@ export function createBrowserPlugin(factoryOptions: BrowserPluginFactoryOptions 
         /* best-effort */
       }
     });
-
-    if (endpoint.mode() === "host" && source !== "explicit") {
-      // Only the host advertises the token (guests reuse the same one from the
-      // shared file — reprinting it per session is just noise, and re-emits the
-      // secret). The `paste_into_extension` field name dodges the logger's
-      // redaction filter so the value stays copyable.
-      logger.info("browser_bridge_token", {
-        paste_into_extension: token,
-        source,
-        mode: "host"
-      });
-    }
 
     const tools = createBrowserTools({
       send: endpoint.send,

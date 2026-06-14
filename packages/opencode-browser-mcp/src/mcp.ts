@@ -3,6 +3,8 @@ import { randomBytes } from "node:crypto";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   createEndpoint,
+  createNodeAgentSocket,
+  createNodeTransport,
   DEFAULT_GROUPS,
   type Logger,
   resolveSharedToken,
@@ -11,7 +13,6 @@ import {
   writeBridgeFile
 } from "@vymalo/opencode-browser/lib";
 
-import { createNodeAgentSocket, createNodeTransport } from "./node-transport.js";
 import { createMcpServer } from "./server.js";
 
 // IMPORTANT: stdout carries the MCP JSON-RPC stream — all logging goes to stderr.
