@@ -2,7 +2,7 @@
   "name": "opencode-oauth2-workspace",
   "version": "0.7.3",
   "private": true,
-  "description": "Workspace for @vymalo/opencode-oauth2 — OAuth2/OIDC-secured OpenAI-compatible providers for OpenCode.",
+  "description": "OpenCode Toolbelt — the @vymalo plugin suite for OpenCode: OAuth2/OIDC auth, model-metadata enrichment, rate-limit awareness, and browser automation.",
   "packageManager": "pnpm@11.3.0",
   "scripts": {
     "build": "pnpm -r build",
