@@ -322,9 +322,13 @@ bridge:
   the agent that created it**: another agent gets `group "X" is owned by another client`, so give
   your agents distinct group names. When an agent exits, its groups become **orphaned** and the
   next agent to use one adopts it (tabs survive).
-- **Token sharing.** Adapters auto-share a token via a per-user `bridge.json` state file (set an
-  explicit `token` / `OCB_TOKEN` to be deterministic on a simultaneous cold start). The extension
-  still needs the token pasted in once.
+- **Token sharing.** Adapters auto-share a token via a per-user `bridge.json` state file in the
+  persistent app-data dir (`~/Library/Application Support/opencode-browser/` on macOS,
+  `%APPDATA%\opencode-browser\` on Windows, `$XDG_STATE_HOME` or `~/.local/state/opencode-browser/`
+  on Linux), so a generated token **persists across sessions** — you paste it into the extension
+  once, not every launch. Set an explicit `token` / `OCB_TOKEN` to be deterministic (and to win a
+  simultaneous cold start). On a non-explicit launch the token is re-logged as `browser_bridge_token`
+  if you need to copy it again.
 - **Failover.** If the hosting agent quits, a guest re-binds and rebuilds group→browser ownership
   by re-querying each extension's tabs. During the brief re-election window commands fail fast with
   `bridge is re-electing` and the model retries.
