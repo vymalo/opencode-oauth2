@@ -130,7 +130,9 @@ export async function createEndpoint(opts: EndpointOptions, deps: EndpointDeps):
       agentClient = client;
       current = client;
       mode = "guest";
-      deps.logger.info("browser_endpoint_mode", { mode: "guest" });
+      // Guest election is routine and happens once per plugin load (every
+      // session) — keep it at debug so it doesn't dominate the log stream.
+      deps.logger.debug("browser_endpoint_mode", { mode: "guest" });
     } catch {
       scheduleReelect();
     }

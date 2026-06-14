@@ -1,6 +1,6 @@
 {
   "name": "opencode-oauth2-workspace",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "private": true,
   "description": "Workspace for @vymalo/opencode-oauth2 — OAuth2/OIDC-secured OpenAI-compatible providers for OpenCode.",
   "packageManager": "pnpm@11.3.0",
