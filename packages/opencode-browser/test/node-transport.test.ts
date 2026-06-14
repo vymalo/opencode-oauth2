@@ -44,10 +44,11 @@ describe("createNodeTransport (ws)", () => {
       }
     );
 
+    let sock: ReturnType<typeof createNodeAgentSocket> | undefined;
     const reply = await new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("timed out")), 2000);
-      const sock = createNodeAgentSocket(`ws://${host}:${port}`, {
-        onOpen: () => sock.send("ping"),
+      sock = createNodeAgentSocket(`ws://${host}:${port}`, {
+        onOpen: () => sock?.send("ping"),
         onMessage: (msg) => {
           clearTimeout(timer);
           resolve(msg);
@@ -57,6 +58,7 @@ describe("createNodeTransport (ws)", () => {
     });
 
     expect(reply).toBe("pong");
+    sock?.close();
   });
 
   it("rejects with an addr-in-use error when the port is taken", async () => {

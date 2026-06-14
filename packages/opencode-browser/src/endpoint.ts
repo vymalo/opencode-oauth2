@@ -108,7 +108,15 @@ export async function createEndpoint(opts: EndpointOptions, deps: EndpointDeps):
       current = candidate.createLocalAgent();
       mode = "host";
       deps.logger.info("browser_endpoint_mode", { mode: "host" });
-      opts.onHost?.();
+      // Isolate the side-effect callback: a throw here must NOT reach the outer
+      // catch, which would stop the freshly-started broker and degrade to guest.
+      try {
+        opts.onHost?.();
+      } catch (onHostErr) {
+        deps.logger.error("browser_endpoint_onhost_error", {
+          message: onHostErr instanceof Error ? onHostErr.message : String(onHostErr)
+        });
+      }
       return;
     } catch (err) {
       try {
