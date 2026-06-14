@@ -62,7 +62,7 @@ export function ConnectionPanel() {
               placeholder="paste the token printed by the plugin"
               spellCheck={false}
             />
-            <p className="text-xs text-muted">
+            <p className="text-xs opacity-60">
               The plugin logs <code>browser_bridge_token_generated</code> on first run — copy that
               value here. If you set <code>token</code> in the plugin options, use that instead.
             </p>
@@ -76,7 +76,7 @@ export function ConnectionPanel() {
               placeholder="e.g. work-chrome (used as a routing target)"
               spellCheck={false}
             />
-            <p className="text-xs text-muted">
+            <p className="text-xs opacity-60">
               Shown in <code>browser_targets</code> and usable as <code>target</code> when several
               browsers are connected. Defaults to a generated id.
             </p>
@@ -102,7 +102,7 @@ export function ConnectionPanel() {
                 Disconnect
               </Button>
             ) : null}
-            {save.isSuccess ? <span className="text-xs text-ok">Saved</span> : null}
+            {save.isSuccess ? <span className="text-xs text-success">Saved</span> : null}
           </div>
         </CardContent>
       </Card>
@@ -125,8 +125,8 @@ export function ConnectionPanel() {
 function Row({ label, value, danger }: { label: string; value: string; danger?: boolean }) {
   return (
     <div className="flex items-center justify-between gap-4">
-      <span className="text-muted">{label}</span>
-      <span className={danger ? "text-right text-danger" : "text-right text-fg"}>{value}</span>
+      <span className="opacity-60">{label}</span>
+      <span className={danger ? "text-right text-error" : "text-right"}>{value}</span>
     </div>
   );
 }

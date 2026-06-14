@@ -18,21 +18,24 @@ export function App() {
   });
 
   return (
-    <div className="w-[360px] p-4 text-fg">
-      <header className="mb-3 flex items-center justify-between">
+    <div className="w-[360px] bg-base-100 p-4 text-base-content">
+      <header className="mb-1 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Logo />
           <span className="text-sm font-semibold">OpenCode Browser</span>
         </div>
         <StatusBadge state={status.state} />
       </header>
+      <p className="mb-3 text-xs opacity-60">
+        An OpenCode agent drives this browser through a localhost bridge.
+      </p>
 
-      <div className="rounded-lg border border-border bg-surface px-3 py-2 text-xs text-muted">
+      <div className="rounded-box border border-base-300 bg-base-200 px-3 py-2 text-xs opacity-80">
         <div className="flex items-center justify-between">
           <span>Bridge</span>
-          <code className="text-fg">{status.executor ? `${status.executor} executor` : "—"}</code>
+          <code>{status.executor ? `${status.executor} executor` : "—"}</code>
         </div>
-        {status.lastError ? <p className="mt-1 text-danger">{status.lastError}</p> : null}
+        {status.lastError ? <p className="mt-1 text-error">{status.lastError}</p> : null}
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-2">
@@ -41,13 +44,19 @@ export function App() {
       </div>
 
       {lastAction ? (
-        <p className="mt-2 truncate text-xs text-muted">
-          <span className={lastAction.ok ? "text-ok" : "text-danger"}>{lastAction.action}</span> ·{" "}
-          {lastAction.summary} · {timeAgo(lastAction.ts)}
+        <p className="mt-2 truncate text-xs opacity-60">
+          <span className={lastAction.ok ? "text-success" : "text-error"}>{lastAction.action}</span>{" "}
+          · {lastAction.summary} · {timeAgo(lastAction.ts)}
         </p>
       ) : (
-        <p className="mt-2 text-xs text-muted">No actions yet.</p>
+        <p className="mt-2 text-xs opacity-60">No actions yet.</p>
       )}
+
+      {!online ? (
+        <p className="mt-2 text-xs opacity-60">
+          First time? Open the Dashboard for the bridge URL, token and setup steps.
+        </p>
+      ) : null}
 
       <div className="mt-4 flex gap-2">
         <Button
@@ -68,9 +77,9 @@ export function App() {
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-border bg-surface px-3 py-2">
+    <div className="rounded-box border border-base-300 bg-base-200 px-3 py-2">
       <div className="text-lg font-semibold tabular-nums">{value}</div>
-      <div className="text-[11px] uppercase tracking-wide text-muted">{label}</div>
+      <div className="text-[11px] uppercase tracking-wide opacity-60">{label}</div>
     </div>
   );
 }
@@ -84,11 +93,11 @@ function Logo() {
         width="19"
         height="15"
         rx="2.5"
-        className="stroke-accent"
+        className="stroke-primary"
         strokeWidth="1.6"
       />
-      <path d="M2.5 8.5h19" className="stroke-accent" strokeWidth="1.6" />
-      <circle cx="5.5" cy="6.5" r="0.8" className="fill-accent" />
+      <path d="M2.5 8.5h19" className="stroke-primary" strokeWidth="1.6" />
+      <circle cx="5.5" cy="6.5" r="0.8" className="fill-primary" />
     </svg>
   );
 }

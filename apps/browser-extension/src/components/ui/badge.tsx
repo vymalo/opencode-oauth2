@@ -3,21 +3,19 @@ import type { HTMLAttributes } from "react";
 
 import { cn } from "../../lib/utils";
 
-const badge = cva(
-  "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium",
-  {
-    variants: {
-      tone: {
-        neutral: "bg-border/60 text-muted",
-        ok: "bg-ok/15 text-ok",
-        warn: "bg-warn/15 text-warn",
-        danger: "bg-danger/15 text-danger",
-        accent: "bg-accent/15 text-accent"
-      }
-    },
-    defaultVariants: { tone: "neutral" }
-  }
-);
+// daisyUI `badge` with soft tones — calm tinted pills rather than solid fills.
+const badge = cva("badge badge-soft gap-1.5", {
+  variants: {
+    tone: {
+      neutral: "badge-neutral",
+      ok: "badge-success",
+      warn: "badge-warning",
+      danger: "badge-error",
+      accent: "badge-primary"
+    }
+  },
+  defaultVariants: { tone: "neutral" }
+});
 
 export interface BadgeProps extends HTMLAttributes<HTMLSpanElement>, VariantProps<typeof badge> {}
 
