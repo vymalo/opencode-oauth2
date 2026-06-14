@@ -5,9 +5,10 @@ import { CdpExecutor } from "../background/cdp-executor";
 import { CommandRouter } from "../background/command-router";
 import { ContentExecutor } from "../background/content-executor";
 import { detectCapabilities, type Executor, resolveExecutorKind } from "../background/executor";
+import { getActiveFeedbackSession } from "../background/feedback-side-panel";
 import { GroupRegistry } from "../background/group-registry";
 import { getSettings, getStatus, saveSettings, setStatus } from "../shared/db";
-import type { UiMessage, UiMessageResponse } from "../shared/messages";
+import type { FeedbackPendingResponse, UiMessage, UiMessageResponse } from "../shared/messages";
 import type { ExecutorKind, ExecutorMode } from "../shared/types";
 
 export default defineBackground(() => {
@@ -71,19 +72,30 @@ export default defineBackground(() => {
     await client.connect();
   })();
 
-  // Control channel from the popup / dashboard.
-  chrome.runtime.onMessage.addListener((message: UiMessage, _sender, sendResponse) => {
-    void (async () => {
-      if (message.type === "reconnect") {
-        await rebuild();
-        await client.reconnect();
-      } else if (message.type === "disconnect") {
-        client.disconnect();
-      }
-      const status = await getStatus();
-      sendResponse({ status } satisfies UiMessageResponse);
-    })();
-    return true; // keep the message channel open for the async response
+  // Control channel from the popup / dashboard / side panel.
+  chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
+    const type = (message as { type?: string })?.type;
+    // Side panel asks what request (if any) it should render.
+    if (type === "feedback:get-pending") {
+      sendResponse({ session: getActiveFeedbackSession() } satisfies FeedbackPendingResponse);
+      return true;
+    }
+    if (type === "reconnect" || type === "disconnect" || type === "get_status") {
+      void (async () => {
+        const m = message as UiMessage;
+        if (m.type === "reconnect") {
+          await rebuild();
+          await client.reconnect();
+        } else if (m.type === "disconnect") {
+          client.disconnect();
+        }
+        const status = await getStatus();
+        sendResponse({ status } satisfies UiMessageResponse);
+      })();
+      return true; // keep the message channel open for the async response
+    }
+    // Not ours (e.g. ocb-feedback-result) — handled by the per-request listener.
+    return false;
   });
 
   // Keep the registry honest when the user closes a driven tab by hand.

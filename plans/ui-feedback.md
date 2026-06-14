@@ -11,14 +11,21 @@ Status: **Phases 0–2 implemented** (PR #49). Greenfield follow-up to the brows
   in-page overlay (background owns the timeout; the page reports back via `chrome.runtime.sendMessage`
   rather than the originally-sketched long-lived port — simpler and survives the same MV3 lifetime as
   the bridge's heartbeat), ref resolution, badge + tab-focus attention signal: shipped.
-- **Phase 2** — element/region/comment modes: shipped. **Deferred, deliberately:**
-  - *Marker-annotated screenshot return* — `NeutralResult` carries text **or** json **or** image, not
-    a combination; the resolved element refs are more actionable to the agent than burned-in pixels,
-    so the json-with-refs result wins. Revisit only if a real need to return both appears (would mean
-    widening `NeutralResult` + both adapter renderers).
-  - *Side-panel-over-screenshot fallback* — a sizeable separate UI feature. Today an overlay-blocked
-    page (restricted / CSP) returns `{ responded: false, error }`, distinct from a timeout, so the
-    agent falls back to screenshot/snapshot reasoning. The side panel remains a future enhancement.
+- **Phase 2** — element/region/comment modes: shipped.
+- **Side-panel fallback** — shipped (fallback-only, docked). When overlay injection fails
+  (restricted / CSP page) the extension captures a screenshot and routes the request to a real side
+  panel (Chromium `chrome.sidePanel` / Firefox `sidebar_action`). Neither browser allows an
+  extension to force the panel open, so we raise the badge and — only while a request is pending —
+  flip `openPanelOnActionClick` so the toolbar click opens the panel (restored afterward, preserving
+  the normal popup). The panel reuses the same `ocb-feedback-result` message shape as the overlay, so
+  the background's correlation/timeout/cancel path is unchanged. No live DOM on these pages, so
+  `point`/`region` return screenshot-pixel coords (no refs); `confirm`/`choose` work fully. If even a
+  screenshot can't be captured, the tool returns `{ responded: false, error }`.
+
+  **Deferred, deliberately:** the *marker-annotated screenshot return* — `NeutralResult` carries text
+  **or** json **or** image, not a combination; the resolved element refs are more actionable than
+  burned-in pixels, so the json-with-refs result wins. Revisit only if a real need to return both
+  appears (would mean widening `NeutralResult` + both adapter renderers).
 
 ---
 

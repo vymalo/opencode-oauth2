@@ -14,6 +14,7 @@ import {
   hideFeedbackOverlay,
   showFeedbackOverlay
 } from "./feedback-overlay";
+import { clearFeedbackSession, openSidePanelFallback } from "./feedback-side-panel";
 
 export interface FeedbackResult {
   responded: boolean;
@@ -105,17 +106,26 @@ export function startFeedback(tabId: number, id: string, req: FeedbackRequest): 
     clearTimeout(timer);
     chrome.runtime.onMessage.removeListener(onMessage);
     void hideFeedbackOverlay(tabId, id);
+    clearFeedbackSession(id);
     void clearAttention();
     settle(r);
   }
 
   void flagAttention(tabId);
-  // Injection failure (e.g. a restricted or CSP-locked page) ends the request
-  // immediately with a distinct error rather than hanging until the timeout, so
-  // the agent can fall back to a screenshot instead of silently re-asking.
-  void showFeedbackOverlay(tabId, id, req).catch((err: unknown) => {
-    const reason = err instanceof Error ? err.message : "the overlay could not be shown";
-    finish({ responded: false, error: reason, annotations: [] });
+  // Overlay injection failed (restricted / CSP page). Fall back to the side
+  // panel over a screenshot; only if that can't be set up either do we settle
+  // with a distinct error so the agent falls back to a screenshot/snapshot.
+  void showFeedbackOverlay(tabId, id, req).catch(async (err: unknown) => {
+    if (done) {
+      return;
+    }
+    const ok = await openSidePanelFallback(tabId, id, req);
+    if (!ok && !done) {
+      const reason = err instanceof Error ? err.message : "the overlay could not be shown";
+      finish({ responded: false, error: reason, annotations: [] });
+    }
+    // When ok: keep waiting — the user opens the panel and the existing message
+    // listener / timeout settle the request.
   });
 
   return {

@@ -16,7 +16,9 @@ export default defineConfig({
   imports: false,
   manifest: ({ browser }) => {
     const isFirefox = browser === "firefox";
-    const chromiumOnly = isFirefox ? [] : ["debugger", "tabGroups"];
+    // `sidePanel` is the Chromium permission for the feedback side panel; on
+    // Firefox the sidepanel entrypoint maps to `sidebar_action` (no permission).
+    const chromiumOnly = isFirefox ? [] : ["debugger", "tabGroups", "sidePanel"];
     return {
       name: "OpenCode Browser",
       description:

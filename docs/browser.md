@@ -174,17 +174,24 @@ point/element/region resolve to element **refs** so you can immediately `browser
 
 The overlay is clearly branded as opencode-browser (so a page can't spoof the prompt), dismissible
 (Esc / Skip), and raises the toolbar badge + focuses the tab to get the user's attention. On no
-response it returns `{ responded: false, timedOut: true }`; on a page that blocks the overlay
-(restricted / CSP) it returns `{ responded: false, error }` — distinct from a timeout — so the
-agent falls back to a screenshot/snapshot instead of re-asking. The wait uses a long per-command
+response it returns `{ responded: false, timedOut: true }`. The wait uses a long per-command
 timeout (default 120 s, max ~290 s, capped broker-side at 10 min); if the agent's turn is aborted
 or times out, the broker sends a `cancel` frame that tears the overlay down — a blocking prompt
 never orphans state in the page. Meaningless in headless/CI routing (no human at the browser),
 where it simply times out.
 
+**Side-panel fallback (overlay-blocked pages).** On pages where the overlay can't be injected
+(`chrome://`, the Web Store, CSP-locked origins), the extension captures a screenshot and routes the
+request to its **side panel** (Chromium `chrome.sidePanel` / Firefox sidebar) instead. Since neither
+browser lets an extension force the panel open, the badge turns to `?` and — while a request is
+pending — clicking the toolbar icon opens the panel (normal popup behavior is restored once it
+resolves). The panel shows the screenshot with the same modes; because there's no live DOM on these
+pages, `point`/`region` return **screenshot-pixel** coordinates (no element refs) and `confirm` /
+`choose` work fully. Only if a screenshot can't be taken either does the tool return
+`{ responded: false, error }` so the agent falls back to its own reasoning.
+
 > Not yet implemented: a marker-annotated **screenshot** return (deferred — the structured refs are
-> more actionable than pixels, and a single tool result can't carry both) and a **side-panel**
-> annotation fallback for overlay-blocked pages (today such pages return the `error` above).
+> more actionable than pixels, and a single tool result can't carry both).
 
 ### Scoping tools and token cost
 
