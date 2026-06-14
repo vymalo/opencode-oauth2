@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository. [`AGENTS.md`](AGENTS.md) is a mirror of this file for other AI agents — keep the two in sync; when you edit one, copy the change across in the same PR.
+This file provides guidance to AI coding agents (Claude Code, Cursor, Codex, Cline, …) when working with code in this repository. It mirrors [`CLAUDE.md`](CLAUDE.md) — keep the two in sync; when you edit one, copy the change across in the same PR.
 
 ## What this repo is
 
