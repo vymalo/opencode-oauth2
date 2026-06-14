@@ -15,6 +15,8 @@ interface FakeState {
   sidePanelSetOptions: Array<Record<string, unknown>>;
   panelBehavior: Array<{ openPanelOnActionClick: boolean }>;
   activatedTabs: number[];
+  removedTabs: number[];
+  tabIdSeq: number;
   focusedWindows: number[];
   captures: number;
   /** Make captureVisibleTab reject (simulate an un-capturable page). */
@@ -31,6 +33,8 @@ export const chromeState: FakeState = {
   sidePanelSetOptions: [],
   panelBehavior: [],
   activatedTabs: [],
+  removedTabs: [],
+  tabIdSeq: 100,
   focusedWindows: [],
   captures: 0,
   captureShouldFail: false,
@@ -44,6 +48,8 @@ export function resetChromeState(): void {
   chromeState.sidePanelSetOptions = [];
   chromeState.panelBehavior = [];
   chromeState.activatedTabs = [];
+  chromeState.removedTabs = [];
+  chromeState.tabIdSeq = 100;
   chromeState.focusedWindows = [];
   chromeState.captures = 0;
   chromeState.captureShouldFail = false;
@@ -79,12 +85,29 @@ const fakeChrome = {
     setBadgeBackgroundColor: (): Promise<void> => Promise.resolve()
   },
   tabs: {
-    get: (tabId: number): Promise<{ id: number; windowId: number }> =>
-      Promise.resolve({ id: tabId, windowId: 1 }),
-    update: (tabId: number): Promise<void> => {
+    create: ({ url }: { url?: string; active?: boolean }) => {
+      const id = ++chromeState.tabIdSeq;
+      return Promise.resolve({
+        id,
+        windowId: 1,
+        status: "complete",
+        url: url ?? "about:blank",
+        title: ""
+      });
+    },
+    get: (tabId: number) =>
+      Promise.resolve({ id: tabId, windowId: 1, status: "complete", url: "https://x", title: "X" }),
+    update: (tabId: number) => {
       chromeState.activatedTabs.push(tabId);
+      return Promise.resolve({ id: tabId, windowId: 1 });
+    },
+    remove: (tabId: number): Promise<void> => {
+      chromeState.removedTabs.push(tabId);
       return Promise.resolve();
     },
+    goBack: (): Promise<void> => Promise.resolve(),
+    goForward: (): Promise<void> => Promise.resolve(),
+    reload: (): Promise<void> => Promise.resolve(),
     captureVisibleTab: (): Promise<string> => {
       chromeState.captures++;
       return chromeState.captureShouldFail

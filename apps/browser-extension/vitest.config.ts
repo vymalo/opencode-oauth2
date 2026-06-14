@@ -18,11 +18,11 @@ export default defineConfig({
       provider: "v8",
       include: ["src/**"],
       reporter: ["text-summary"],
-      // Raised in phase 2 once a fake-chrome harness made the background logic
-      // (feedback orchestration, side-panel store, command router) testable.
-      // Still climbing — bridge-client, group-registry, page-actions (jsdom) and
-      // the React panels remain follow-ups.
-      thresholds: { statements: 13, branches: 9, functions: 11, lines: 13 }
+      // Raised in phase 2 as the fake-chrome harness made the background logic
+      // testable: feedback orchestration, side-panel store, command router,
+      // bridge-client, group-registry. Still climbing — page-actions (needs
+      // jsdom) and the React panels (jsdom + testing-library) remain follow-ups.
+      thresholds: { statements: 23, branches: 16, functions: 21, lines: 23 }
     }
   }
 });
