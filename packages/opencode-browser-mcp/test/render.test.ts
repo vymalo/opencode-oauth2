@@ -64,4 +64,13 @@ describe("selectTools", () => {
     expect(selectTools(["page", "control"]).some((s) => s.name === "browser_eval")).toBe(false);
     expect(selectTools(["debug"]).some((s) => s.name === "browser_eval")).toBe(true);
   });
+
+  it("includes the interactive feedback tool only when asked", () => {
+    expect(
+      selectTools(["page", "control"]).some((s) => s.name === "browser_request_feedback")
+    ).toBe(false);
+    expect(selectTools(["interactive"]).some((s) => s.name === "browser_request_feedback")).toBe(
+      true
+    );
+  });
 });

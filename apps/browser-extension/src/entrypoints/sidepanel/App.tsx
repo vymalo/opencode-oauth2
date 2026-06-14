@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "../../components/ui/button";
+import { naturalRect, type Rect, rectFromCorners, toNatural } from "../../lib/annotate";
 import type {
   FeedbackPendingResponse,
   FeedbackResultMessage,
@@ -140,13 +141,6 @@ function defaultPrompt(mode: string): string {
   return "Click the element you mean.";
 }
 
-interface Rect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
 /** Click/drag over the captured screenshot; coordinates map to screenshot pixels. */
 function ScreenshotAnnotator({
   session,
@@ -162,16 +156,16 @@ function ScreenshotAnnotator({
   const drag = useRef<{ x: number; y: number } | null>(null);
   const [note, setNote] = useState("");
 
-  // Display px (relative to the image box) → natural screenshot px.
-  const toNatural = (dx: number, dy: number): { x: number; y: number } => {
+  // Live image box + natural dimensions, fed to the pure mapping helpers.
+  const metrics = (): {
+    box: { width: number; height: number };
+    natural: { width: number; height: number };
+  } => {
     const img = imgRef.current;
-    if (!img) {
-      return { x: dx, y: dy };
-    }
-    const r = img.getBoundingClientRect();
+    const r = img?.getBoundingClientRect();
     return {
-      x: Math.round((dx / r.width) * img.naturalWidth),
-      y: Math.round((dy / r.height) * img.naturalHeight)
+      box: { width: r?.width ?? 0, height: r?.height ?? 0 },
+      natural: { width: img?.naturalWidth ?? 0, height: img?.naturalHeight ?? 0 }
     };
   };
   const local = (e: { clientX: number; clientY: number }): { dx: number; dy: number } => {
@@ -194,12 +188,7 @@ function ScreenshotAnnotator({
     }
     const { dx, dy } = local(e);
     const s = drag.current;
-    setBand({
-      x: Math.min(s.x, dx),
-      y: Math.min(s.y, dy),
-      width: Math.abs(dx - s.x),
-      height: Math.abs(dy - s.y)
-    });
+    setBand(rectFromCorners(s.x, s.y, dx, dy));
   };
   const onUp = (): void => {
     drag.current = null;
@@ -209,19 +198,12 @@ function ScreenshotAnnotator({
 
   const submit = (): void => {
     const text = note.trim();
+    const { box, natural } = metrics();
     if (isRegion && band) {
-      const tl = toNatural(band.x, band.y);
-      const br = toNatural(band.x + band.width, band.y + band.height);
-      onFinish(true, [
-        {
-          kind: "region",
-          rect: { x: tl.x, y: tl.y, width: br.x - tl.x, height: br.y - tl.y },
-          refs: [],
-          ...(text ? { text } : {})
-        }
-      ]);
+      const rect = naturalRect(band, box, natural);
+      onFinish(true, [{ kind: "region", rect, refs: [], ...(text ? { text } : {}) }]);
     } else if (point) {
-      const p = toNatural(point.dx, point.dy);
+      const p = toNatural({ dx: point.dx, dy: point.dy }, box, natural);
       onFinish(true, [{ kind: "point", x: p.x, y: p.y, ...(text ? { text } : {}) }]);
     }
   };
