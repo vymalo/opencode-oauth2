@@ -81,12 +81,20 @@ export interface BrowserPluginFactoryOptions {
  */
 function createOpenCodeLogger(client: PluginInput["client"], getMinLevel: () => LogLevel): Logger {
   const fallback = createJsonConsoleLogger("debug");
+  // OpenCode already captures plugin logs via client.app.log (and filters them
+  // by its own log level). Mirroring every event to stdout on top of that is
+  // what floods the terminal (e.g. `opencode web` re-loads the plugin per
+  // session). So only mirror warn/error to the JSON console by default; set
+  // VYMALO_PLUGIN_CONSOLE_LOG=1 to restore full console output for debugging.
+  const consoleAll = /^(1|true|yes|on)$/i.test(process.env.VYMALO_PLUGIN_CONSOLE_LOG ?? "");
 
   const write = (level: LogLevel, event: string, fields?: LogFields) => {
     if (LOG_LEVEL_PRIORITY[level] < LOG_LEVEL_PRIORITY[getMinLevel()]) {
       return;
     }
-    fallback[level](event, fields);
+    if (consoleAll || level === "warn" || level === "error") {
+      fallback[level](event, fields);
+    }
     void client.app
       .log({ body: { service: PLUGIN_SERVICE_NAME, level, message: event, extra: fields } })
       .catch(() => {
@@ -182,13 +190,15 @@ export function createBrowserPlugin(factoryOptions: BrowserPluginFactoryOptions 
       }
     });
 
-    if (source !== "explicit") {
-      // Make the token visible so it can be pasted into the extension. The
-      // `paste_into_extension` field name dodges the logger's redaction filter.
+    if (endpoint.mode() === "host" && source !== "explicit") {
+      // Only the host advertises the token (guests reuse the same one from the
+      // shared file — reprinting it per session is just noise, and re-emits the
+      // secret). The `paste_into_extension` field name dodges the logger's
+      // redaction filter so the value stays copyable.
       logger.info("browser_bridge_token", {
         paste_into_extension: token,
         source,
-        mode: endpoint.mode()
+        mode: "host"
       });
     }
 

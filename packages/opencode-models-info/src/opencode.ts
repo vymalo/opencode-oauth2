@@ -30,12 +30,19 @@ export interface OpenCodePluginFactoryOptions {
  */
 function createOpenCodeLogger(client: PluginInput["client"], getMinLevel: () => LogLevel): Logger {
   const fallback = createJsonConsoleLogger("debug");
+  // OpenCode already captures plugin logs via client.app.log (and filters them
+  // by its own log level). Mirroring every event to stdout on top of that just
+  // floods the terminal, so only mirror warn/error to the JSON console by
+  // default; set VYMALO_PLUGIN_CONSOLE_LOG=1 to restore full console output.
+  const consoleAll = /^(1|true|yes|on)$/i.test(process.env.VYMALO_PLUGIN_CONSOLE_LOG ?? "");
 
   const write = (level: LogLevel, event: string, fields?: LogFields) => {
     if (LOG_LEVEL_PRIORITY[level] < LOG_LEVEL_PRIORITY[getMinLevel()]) {
       return;
     }
-    fallback[level](event, fields);
+    if (consoleAll || level === "warn" || level === "error") {
+      fallback[level](event, fields);
+    }
     void client.app
       .log({
         body: {
