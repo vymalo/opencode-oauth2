@@ -10,6 +10,7 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["test/**/*.test.ts"],
+    setupFiles: ["./test/helpers/setup.ts"],
     passWithNoTests: true,
     clearMocks: true,
     restoreMocks: true,
@@ -17,8 +18,11 @@ export default defineConfig({
       provider: "v8",
       include: ["src/**"],
       reporter: ["text-summary"],
-      // TODO(phase-2): raise once chrome/DOM glue is testable via a fake-browser harness.
-      thresholds: { statements: 3, branches: 3, functions: 2, lines: 3 }
+      // Raised in phase 2 once a fake-chrome harness made the background logic
+      // (feedback orchestration, side-panel store, command router) testable.
+      // Still climbing — bridge-client, group-registry, page-actions (jsdom) and
+      // the React panels remain follow-ups.
+      thresholds: { statements: 13, branches: 9, functions: 11, lines: 13 }
     }
   }
 });
