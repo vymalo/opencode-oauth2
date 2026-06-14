@@ -64,6 +64,12 @@ On first run with no `token`, the plugin generates one and logs it once
 (`browser_bridge_token_generated`). Paste that into the extension's dashboard along with the
 bridge URL (`ws://127.0.0.1:4517`).
 
+The generated token is persisted (with the port) to a per-user `bridge.json` so it survives
+restarts — `~/Library/Application Support/opencode-browser/bridge.json` (macOS),
+`~/.local/state/opencode-browser/bridge.json` (Linux), `%APPDATA%\opencode-browser\bridge.json`
+(Windows). Read it from there any time instead of digging through the log; see
+[docs/browser.md → The bridge state file](../../docs/browser.md#the-bridge-state-file-bridgejson).
+
 Get the extension from the [Releases page](https://github.com/vymalo/opencode-oauth2/releases)
 (`opencode-browser-extension-<version>-chrome.zip` / `-firefox.zip`), from the Chrome Web Store /
 Firefox Add-ons, or build it from
