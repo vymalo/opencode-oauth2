@@ -113,7 +113,8 @@ describe("tool → bridge action mapping", () => {
       "research",
       expect.objectContaining({ url: "https://example.com" }),
       c.abort,
-      "work-chrome"
+      "work-chrome",
+      undefined
     );
     expect(typeof res === "object" ? res.output : res).toContain("research");
   });
@@ -127,6 +128,7 @@ describe("tool → bridge action mapping", () => {
       "g",
       expect.objectContaining({ ref: "e7" }),
       expect.anything(),
+      undefined,
       undefined
     );
   });

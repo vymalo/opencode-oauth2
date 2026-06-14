@@ -44,6 +44,7 @@ export default defineBackground(() => {
       };
     },
     onCommand: (frame) => router.handle(frame),
+    onCancel: (id) => router.cancel(id),
     executorKind: () => executorKind,
     // The plugin-side `executor` option (when set) wins over the dashboard
     // choice on each connect — rebuild the stack if it differs.

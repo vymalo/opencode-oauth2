@@ -36,6 +36,12 @@ export interface ToolSpec {
   params?: (args: Record<string, unknown>) => Record<string, unknown>;
   /** Shape the extension's reply into a neutral result (default: a short ack). */
   result?: (data: unknown, args: Record<string, unknown>) => NeutralResult;
+  /**
+   * Per-command timeout (ms) for this tool, overriding the bridge's global
+   * default. Used by long-running, human-paced tools (e.g. feedback prompts).
+   * Clamped broker-side to `maxCommandMs`. Omit for the normal fast-fail default.
+   */
+  timeoutMs?: number;
 }
 
 // ─── reusable fields ─────────────────────────────────────────────────────────

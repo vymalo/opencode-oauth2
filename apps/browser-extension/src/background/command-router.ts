@@ -19,10 +19,33 @@ function target(params: Record<string, unknown>): Target {
  * (and screenshot) to IndexedDB for the dashboard — including failures.
  */
 export class CommandRouter {
+  /**
+   * Teardown callbacks for in-flight cancellable commands, keyed by command id.
+   * Long-running interactive commands (e.g. a feedback overlay) register here so
+   * a broker `cancel` can abort them; ordinary commands never register.
+   */
+  private readonly cancellers = new Map<string, () => void>();
+
   constructor(
     private readonly registry: GroupRegistry,
     private readonly executor: Executor
   ) {}
+
+  /** Register a teardown for a cancellable command; returns a disposer. */
+  registerCanceller(id: string, teardown: () => void): () => void {
+    this.cancellers.set(id, teardown);
+    return () => this.cancellers.delete(id);
+  }
+
+  /** Broker abandoned command `id` — run and drop its teardown if present. */
+  cancel(id: string): void {
+    const teardown = this.cancellers.get(id);
+    if (!teardown) {
+      return;
+    }
+    this.cancellers.delete(id);
+    teardown();
+  }
 
   async handle(frame: CommandFrame): Promise<unknown> {
     const start = Date.now();
@@ -48,6 +71,9 @@ export class CommandRouter {
         durationMs: Date.now() - start
       });
       throw err;
+    } finally {
+      // The command settled on its own; drop any teardown it registered.
+      this.cancellers.delete(frame.id);
     }
   }
 

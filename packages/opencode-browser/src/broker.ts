@@ -1,6 +1,7 @@
 import type { Logger } from "./logging.js";
 import {
   type BrowserAction,
+  cancelFrame,
   type CommandFrame,
   decodeFrame,
   encodeFrame,
@@ -23,6 +24,12 @@ export class BrokerError extends Error {
   }
 }
 
+/**
+ * Hard ceiling for any per-command timeout, so a tool requesting a long
+ * human-paced deadline can't pin a command open indefinitely. 10 minutes.
+ */
+export const DEFAULT_MAX_COMMAND_MS = 600_000;
+
 /** What an agent (local or remote) uses to drive browsers through the broker. */
 export interface AgentEndpoint {
   send(
@@ -30,7 +37,9 @@ export interface AgentEndpoint {
     group: string,
     params: Record<string, unknown>,
     signal?: AbortSignal,
-    target?: string
+    target?: string,
+    /** Per-command timeout override (ms), clamped to the broker's `maxCommandMs`. */
+    timeoutMs?: number
   ): Promise<unknown>;
   /** Release this agent's browsers (detach the debugger) without closing tabs. */
   release(): void;
@@ -42,8 +51,10 @@ export interface BrokerOptions {
   token: string;
   /** Executor preference forwarded to extensions in `ready`. */
   executor?: "auto" | "cdp" | "content";
-  /** Per-command timeout in ms; `<= 0` disables. */
+  /** Default per-command timeout in ms; `<= 0` disables. */
   timeoutMs: number;
+  /** Ceiling a per-command override can request (default `DEFAULT_MAX_COMMAND_MS`). */
+  maxCommandMs?: number;
 }
 
 export interface BrokerDeps {
@@ -141,8 +152,8 @@ export class Broker {
   createLocalAgent(): AgentEndpoint {
     const id = `local:${++this.agentSeq}`;
     return {
-      send: (action, group, params, signal, target) =>
-        this.route(id, { action, group, params, target }, signal),
+      send: (action, group, params, signal, target, timeoutMs) =>
+        this.route(id, { action, group, params, target, timeoutMs }, signal),
       release: () => this.releaseForAgent(id)
     };
   }
@@ -289,7 +300,9 @@ export class Broker {
       this.releaseForAgent(agent.id);
       for (const [reqId, p] of this.pending) {
         if (p.agentId === agent.id) {
-          this.settleReject(reqId, new BrokerError("agent disconnected", "agent_gone"));
+          // The executor may still be running this command — cancel it so any
+          // open UI (e.g. a feedback overlay) is torn down, not just orphaned.
+          this.abandon(reqId, new BrokerError("agent disconnected", "agent_gone"));
         }
       }
       this.deps.logger.info("browser_agent_disconnected", { id: agent.id });
@@ -299,7 +312,13 @@ export class Broker {
   // ─── routing ───────────────────────────────────────────────────────────────
   private route(
     agentId: string,
-    cmd: { action: BrowserAction; group: string; params: Record<string, unknown>; target?: string },
+    cmd: {
+      action: BrowserAction;
+      group: string;
+      params: Record<string, unknown>;
+      target?: string;
+      timeoutMs?: number;
+    },
     signal?: AbortSignal
   ): Promise<unknown> {
     if (cmd.action === "targets") {
@@ -389,10 +408,25 @@ export class Broker {
     throw new BrokerError("no browser extension is connected", "not_connected");
   }
 
+  /** Effective per-command timeout: the override (or global), clamped to the ceiling. */
+  private timeoutFor(override?: number): number {
+    const requested = override !== undefined ? override : this.opts.timeoutMs;
+    if (requested <= 0) {
+      return 0;
+    }
+    const ceiling = this.opts.maxCommandMs ?? DEFAULT_MAX_COMMAND_MS;
+    return Math.min(requested, ceiling);
+  }
+
   private sendToExecutor(
     executor: ExecutorInfo,
     agentId: string,
-    cmd: { action: BrowserAction; group: string; params: Record<string, unknown> },
+    cmd: {
+      action: BrowserAction;
+      group: string;
+      params: Record<string, unknown>;
+      timeoutMs?: number;
+    },
     signal?: AbortSignal
   ): Promise<unknown> {
     if (signal?.aborted) {
@@ -407,24 +441,25 @@ export class Broker {
       group: cmd.group,
       params: cmd.params
     };
+    const timeoutMs = this.timeoutFor(cmd.timeoutMs);
     return new Promise<unknown>((resolve, reject) => {
       const timer =
-        this.opts.timeoutMs > 0
+        timeoutMs > 0
           ? setTimeout(
               () =>
-                this.settleReject(
+                this.abandon(
                   reqId,
                   new BrokerError(
-                    `command '${cmd.action}' timed out after ${this.opts.timeoutMs}ms`,
+                    `command '${cmd.action}' timed out after ${timeoutMs}ms`,
                     "timeout"
                   )
                 ),
-              this.opts.timeoutMs
+              timeoutMs
             )
           : null;
       let detachAbort: (() => void) | null = null;
       if (signal) {
-        const onAbort = () => this.settleReject(reqId, new BrokerError("aborted", "aborted"));
+        const onAbort = () => this.abandon(reqId, new BrokerError("aborted", "aborted"));
         signal.addEventListener("abort", onAbort, { once: true });
         detachAbort = () => signal.removeEventListener("abort", onAbort);
       }
@@ -473,7 +508,8 @@ export class Broker {
         action: frame.action,
         group: frame.group,
         params: frame.params,
-        target: frame.target
+        target: frame.target,
+        timeoutMs: frame.timeoutMs
       });
       this.safeSend(conn, resultFrame(frame.id, data));
     } catch (err) {
@@ -574,6 +610,24 @@ export class Broker {
     }
     this.clearPending(reqId);
     p.reject(err);
+  }
+
+  /**
+   * Give up on a command the executor may still be running (abort, timeout, or
+   * the requesting agent vanishing): tell the still-connected executor to tear
+   * down via a `cancel` frame, then reject the pending promise. For an executor
+   * that's already gone the cancel is skipped — there's nothing to tear down.
+   */
+  private abandon(reqId: string, err: Error): void {
+    const p = this.pending.get(reqId);
+    if (!p) {
+      return;
+    }
+    const exec = this.executorById.get(p.executorId);
+    if (exec) {
+      this.safeSend(exec.conn, cancelFrame(reqId));
+    }
+    this.settleReject(reqId, err);
   }
 
   private rejectAllPending(err: Error): void {

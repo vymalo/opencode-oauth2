@@ -320,3 +320,101 @@ describe("Broker timeout", () => {
     await expectation;
   });
 });
+
+/** Does `sent` contain a `cancel` frame for command `id`? */
+function hasCancel(sent: string[], id: string): boolean {
+  return sent.some((s) => {
+    const f = decodeFrame(s);
+    return f?.type === "cancel" && f.id === id;
+  });
+}
+
+describe("Broker cancellation (Phase 0)", () => {
+  it("sends a cancel frame to the executor when a command is aborted", async () => {
+    const { broker, h } = await setup();
+    const exec = connectExecutor(h, { id: "e1" });
+    const agent = broker.createLocalAgent();
+    const ac = new AbortController();
+    const open = agent.send("open", "g", {}, ac.signal);
+    const cmd = lastCommand(exec.sent);
+    ac.abort();
+    await expect(open).rejects.toThrow(/aborted/);
+    expect(hasCancel(exec.sent, cmd.id)).toBe(true);
+  });
+
+  it("cancels in-flight commands on the executor when the agent disconnects", async () => {
+    const { h } = await setup();
+    const exec = connectExecutor(h, { id: "e1" });
+    const agent = connectAgent(h);
+    // Remote agent issues an open; the broker forwards it to the executor.
+    h().onMessage(
+      agent.conn,
+      encodeFrame({
+        v: PROTOCOL_VERSION,
+        type: "command",
+        id: "a1",
+        action: "open",
+        group: "g",
+        params: {}
+      })
+    );
+    const cmd = lastCommand(exec.sent);
+    h().onClose(agent.conn);
+    expect(hasCancel(exec.sent, cmd.id)).toBe(true);
+  });
+
+  it("does not emit a cancel when a command completes normally", async () => {
+    const { broker, h } = await setup();
+    const exec = connectExecutor(h, { id: "e1" });
+    const agent = broker.createLocalAgent();
+    const open = agent.send("open", "g", {});
+    const cmd = replyOk(h, exec, { url: "u" });
+    await open;
+    expect(hasCancel(exec.sent, cmd.id)).toBe(false);
+  });
+});
+
+describe("Broker per-command timeout (Phase 0)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("honors a per-command override longer than the global timeout", async () => {
+    const { broker, h } = await setup(); // global timeoutMs: 1000
+    connectExecutor(h, { id: "e1" });
+    const agent = broker.createLocalAgent();
+    let settled = false;
+    const open = agent.send("open", "g", {}, undefined, undefined, 5000).catch(() => {
+      settled = true;
+    });
+    // Past the global deadline but inside the override — still pending.
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(settled).toBe(false);
+    // Past the override — now it times out.
+    await vi.advanceTimersByTimeAsync(4000);
+    await open;
+    expect(settled).toBe(true);
+  });
+
+  it("clamps a per-command override to maxCommandMs", async () => {
+    const transport = new FakeTransport();
+    const broker = new Broker(
+      { host: "127.0.0.1", port: 4517, token: "secret", timeoutMs: 1000, maxCommandMs: 2000 },
+      { logger: noopLogger, transport }
+    );
+    await broker.start();
+    const h = () => {
+      if (!transport.handlers) {
+        throw new Error("no handlers");
+      }
+      return transport.handlers;
+    };
+    const exec = connectExecutor(h, { id: "e1" });
+    const agent = broker.createLocalAgent();
+    const open = agent.send("open", "g", {}, undefined, undefined, 999_999);
+    const cmd = lastCommand(exec.sent);
+    const expectation = expect(open).rejects.toThrow(/timed out after 2000ms/);
+    await vi.advanceTimersByTimeAsync(2001);
+    await expectation;
+    expect(hasCancel(exec.sent, cmd.id)).toBe(true);
+  });
+});

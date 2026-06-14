@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  cancelFrame,
   type CommandFrame,
   decodeFrame,
   encodeFrame,
@@ -66,6 +67,29 @@ describe("protocol encode/decode", () => {
       v: PROTOCOL_VERSION,
       type: "release"
     });
+  });
+
+  it("round-trips a cancel frame", () => {
+    const frame = cancelFrame("c7");
+    expect(frame).toEqual({ v: PROTOCOL_VERSION, type: "cancel", id: "c7" });
+    expect(decodeFrame(encodeFrame(frame))).toEqual(frame);
+  });
+
+  it("rejects a cancel frame without an id", () => {
+    expect(decodeFrame(JSON.stringify({ v: 1, type: "cancel" }))).toBeNull();
+  });
+
+  it("preserves a per-command timeoutMs on a command frame", () => {
+    const frame: CommandFrame = {
+      v: PROTOCOL_VERSION,
+      type: "command",
+      id: "c2",
+      action: "snapshot",
+      group: "g",
+      params: {},
+      timeoutMs: 120_000
+    };
+    expect(decodeFrame(encodeFrame(frame))).toEqual(frame);
   });
 });
 

@@ -29,6 +29,15 @@ export interface AgentClientOptions {
   timeoutMs: number;
 }
 
+/**
+ * Grace added to the guest's local per-command timer over the requested
+ * deadline. The host broker enforces the real timeout and can tell the executor
+ * to tear down (a `cancel` frame); the guest's timer is only a backstop for a
+ * silently unresponsive broker, so it must fire *after* the broker's, never
+ * before — otherwise the guest rejects locally while the executor keeps running.
+ */
+const AGENT_TIMEOUT_GRACE_MS = 5_000;
+
 export interface AgentClientDeps {
   logger: Logger;
   createSocket: AgentSocketFactory;
@@ -130,7 +139,8 @@ export class AgentClient implements AgentEndpoint {
     group: string,
     params: Record<string, unknown>,
     signal?: AbortSignal,
-    target?: string
+    target?: string,
+    timeoutMs?: number
   ): Promise<unknown> {
     if (signal?.aborted) {
       throw new AgentClientError("aborted", "aborted");
@@ -148,18 +158,24 @@ export class AgentClient implements AgentEndpoint {
       action,
       group,
       params,
-      target
+      target,
+      // Forward the override so the host broker applies (and clamps) it.
+      timeoutMs
     };
+    // Backstop only — let the broker's deadline fire first (it can cancel the
+    // executor); fall back to the global timeout when no override is given.
+    const requested = timeoutMs !== undefined ? timeoutMs : this.opts.timeoutMs;
+    const localTimeout = requested > 0 ? requested + AGENT_TIMEOUT_GRACE_MS : 0;
     return new Promise<unknown>((resolve, reject) => {
       const timer =
-        this.opts.timeoutMs > 0
+        localTimeout > 0
           ? setTimeout(
               () =>
                 this.settleReject(
                   id,
                   new AgentClientError(`command '${action}' timed out`, "timeout")
                 ),
-              this.opts.timeoutMs
+              localTimeout
             )
           : null;
       let detachAbort: (() => void) | null = null;
