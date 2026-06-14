@@ -186,46 +186,74 @@ agents share one bridge.
 
 ## Scoping tools and token cost
 
-> **Important:** OpenCode loads every *registered* tool's schema into **every agent's context** —
-> it can't scope tool schemas per agent. So the `groups` option isn't just a feature toggle, it's
-> your **token-budget control**: each registered tool's JSON schema costs context tokens in every
-> agent, everywhere. Register the **minimum union** your agents collectively need.
+Two levers, and they compose:
 
-Approximate context cost of each group (the tool name + description + args JSON schema that the
-model sees — rough, ≈chars/4):
+- **`groups` (global)** — which tools are *registered* at all. The ceiling: an agent can only ever
+  be granted tools that are registered.
+- **Per-agent `permission` (per agent)** — which registered tools each agent actually gets. **In
+  the flat string form this trims the agent's injected tool list, so it genuinely cuts context
+  tokens** — not just execution.
 
-| Registered `groups` | Tools | ≈ tokens / agent |
+Approximate context cost of the full surface (tool name + description + args JSON schema the model
+sees — rough, ≈chars/4):
+
+| Registered `groups` | Tools | ≈ tokens (an agent granted all of them) |
 | --- | --- | --- |
 | `["page"]` | 8 | ~1,000 |
 | `["page","control"]` *(default)* | 27 | ~3,700 |
 | `["page","control","debug"]` | 33 | ~4,560 |
 | `debug` adds | 6 | ~830 |
 
-These schemas normally sit in the cached prefix, so with prompt caching the per-request **dollar**
-cost is softened — but they still occupy the context window and count on every cache write. Fewer
-registered groups is the only way to shrink the footprint.
+> ### ⚠️ Flat string vs nested — the token footgun
+> Per-agent scoping only reclaims tokens in the **flat string** `permission` form. The other forms
+> gate *execution* but still inject the schema (so they flood context):
+>
+> | Form | Example | Trims context? |
+> | --- | --- | --- |
+> | flat string `permission` | `"browser_eval": "deny"` | ✅ removed from the agent's tools |
+> | nested `permission` | `"browser_eval": { "*": "deny" }` | ❌ execution gate only |
+> | `tools` map (deprecated) | `"browser_eval": false` (≡ nested `{"*":"deny"}`) | ❌ execution gate only |
+>
+> Verified on OpenCode **1.17.6** — confirm on your version by checking an agent's actual context
+> token count with tools denied. (This is exactly the trap behind "registering a group floods every
+> agent": that observation comes from the `tools`-boolean / nested form.)
 
-**Recommendation:**
+### Recommended: register everything, scope per agent
 
-- **`["page","control"]` (default)** — if agents need to both read and drive the browser.
-- **`["page"]`** — if the dominant use is read-only research/scraping; saves ~2,700 tokens
-  everywhere by dropping the 19 `control` tools.
-- **Never register `debug` org-wide** unless a specific workflow needs `eval`/`cookies`/`network`
-  — it's ~830 tokens of permanent overhead *and* the most sensitive surface.
+If your org wants the full surface available but **not** flooding every agent's context, register
+all groups once and give each agent only the tools it needs with **flat string** `permission`:
 
 ```jsonc
-// register only what your agents actually use — this is global
-{ "plugin": [["@vymalo/opencode-browser", { "groups": ["page"] }]] }
+{
+  // full surface registered once — global
+  "plugin": [["@vymalo/opencode-browser", { "groups": ["page", "control", "debug"] }]],
+  "agent": {
+    "researcher": {
+      // FLAT STRING form → denied tools are dropped from this agent's injected
+      // tools, so its context carries only the allowed ones.
+      "permission": {
+        "browser_*": "deny",          // start from nothing…
+        "browser_open": "allow",      // …allow only what this agent needs
+        "browser_navigate": "allow",
+        "browser_snapshot": "allow",
+        "browser_get_text": "allow",
+        "browser_query": "allow",
+        "browser_screenshot": "allow"
+      }
+    },
+    "automator": { "permission": { "browser_*": "allow" } }   // full drive
+  }
+}
 ```
 
-### Per-agent config gates *calls*, not tokens
+(Specific keys override the `browser_*` wildcard. If you'd rather not rely on that precedence,
+list explicit `"deny"`s for the tools an agent shouldn't have instead of a wildcard.)
 
-OpenCode's per-agent `tools` map (deprecated; prefer the agent **`permission`** field) and the
-`permission` deny rules control whether an agent may *invoke* a tool — `false` is equivalent to a
-`"deny"` permission. That's a useful **safety guardrail** (e.g. deny `browser_eval` for a research
-agent), but it does **not** remove the tool's schema from that agent's context, so it **saves no
-tokens**. Use it for "this agent may not *use* X," and `groups` for "shrink what everyone *sees*."
-See OpenCode's [agent docs](https://opencode.ai/docs/agents/) for the current `permission` syntax.
+If you don't need per-agent differences, just register the minimum union globally — `["page"]` for
+read-only research, `["page","control"]` to drive — and skip `debug` unless a workflow needs
+`eval`/`cookies`/`network`. Either way the schemas sit in the cached prefix, so prompt caching
+softens the per-request **dollar** cost; trimming still helps the context window and cache writes.
+See OpenCode's [agent docs](https://opencode.ai/docs/agents/) for the `permission` field.
 
 ## Multiple browsers & agents
 

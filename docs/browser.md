@@ -148,35 +148,50 @@ stable, so OpenCode's per-agent tool allow/deny works on them directly too.
 | `browser_set_viewport` | `group, width, height, mobile?, deviceScaleFactor?` | Emulate a viewport (CDP only). |
 | `browser_cookies` | `op, url?, name?, value?` | Read/modify cookies. |
 
-### Scoping tools — `groups` is the token lever
+### Scoping tools and token cost
 
-OpenCode loads every **registered** tool's schema into **every agent's context** — it cannot scope
-tool schemas per agent. So `groups` / `OCB_GROUPS` is your token-budget control, not just a feature
-toggle: each registered tool costs context tokens in every agent. **Register the minimum union your
-agents collectively need.** Approximate per-agent context cost (name + description + args schema,
-≈chars/4):
+Two composable levers: **`groups` / `OCB_GROUPS`** (global — what's *registered*; the ceiling) and
+**per-agent `permission`** (which registered tools each agent gets). Approximate cost of the full
+surface (name + description + args schema, ≈chars/4):
 
-| Registered groups | Tools | ≈ tokens / agent |
+| Registered groups | Tools | ≈ tokens (agent granted all) |
 | --- | --- | --- |
 | `page` | 8 | ~1,000 |
 | `page` + `control` (default) | 27 | ~3,700 |
 | all three | 33 | ~4,560 |
 
-(They sit in the cached prefix, so prompt caching softens the per-request dollar cost — but they
-still occupy the window and count on cache writes.) Recommendation: `page`+`control` if agents
-drive; `page` only for read-only research; never register `debug` org-wide unless a workflow needs
-`eval`/`cookies`/`network`.
+**Per-agent scoping CAN cut context tokens — but only in the flat string `permission` form.** The
+nested form and the deprecated `tools` boolean map gate *execution* but still inject the schema:
+
+| Form | Example | Trims context? |
+| --- | --- | --- |
+| flat string `permission` | `"browser_eval": "deny"` | ✅ dropped from the agent's tools |
+| nested `permission` | `"browser_eval": { "*": "deny" }` | ❌ execution gate only |
+| `tools` map (deprecated) | `"browser_eval": false` (≡ nested `{"*":"deny"}`) | ❌ execution gate only |
+
+Verified on OpenCode **1.17.6**; confirm on your version via an agent's actual context token count.
+(The "registering a group floods every agent" observation comes from the nested/`tools`-boolean
+form.) Recommended pattern — register the full surface once, scope per agent with flat strings:
 
 ```jsonc
-{ "plugin": [["@vymalo/opencode-browser", { "groups": ["page"] }]] }   // global
+{
+  "plugin": [["@vymalo/opencode-browser", { "groups": ["page", "control", "debug"] }]],   // global
+  "agent": {
+    "researcher": {
+      "permission": {
+        "browser_*": "deny",                                   // start from nothing…
+        "browser_open": "allow", "browser_navigate": "allow",  // …allow only what's needed
+        "browser_snapshot": "allow", "browser_get_text": "allow",
+        "browser_query": "allow", "browser_screenshot": "allow"
+      }
+    },
+    "automator": { "permission": { "browser_*": "allow" } }
+  }
+}
 ```
 
-**Per-agent config gates *calls*, not tokens.** OpenCode's per-agent `tools` map (deprecated; prefer
-the agent `permission` field) denies an agent the *use* of a tool — `false` ≡ a `"deny"` permission
-— but it does **not** remove the tool's schema from context, so it saves no tokens. Use it as a
-safety guardrail (e.g. deny `browser_eval` for a research agent); use `groups` to shrink what every
-agent *sees*. See OpenCode's [agent docs](https://opencode.ai/docs/agents/) for the `permission`
-syntax.
+(Schemas sit in the cached prefix, so prompt caching softens the per-request dollar cost; trimming
+still helps the window + cache writes.) See OpenCode's [agent docs](https://opencode.ai/docs/agents/).
 
 ### Targeting elements — prefer refs
 
