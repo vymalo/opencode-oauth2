@@ -303,7 +303,7 @@ extension disconnects.
 | --- | --- |
 | Tool error: *no browser extension is connected* | Extension isn't connected. Open the dashboard, check the URL/token, *Save & reconnect*. |
 | Dashboard stuck *connecting* | Wrong port or the plugin didn't start the bridge. Check the OpenCode log for `browser_bridge_listening`. |
-| *no token set* in the dashboard | Paste the `paste_into_extension` token from the plugin log (or set `token` in plugin options and use that). |
+| *no token set* in the dashboard | Paste the `paste_into_extension` token from the plugin log, read it from [`bridge.json`](#the-bridge-state-file-bridgejson), or set `token` in plugin options and use that. |
 | `debugger attach failed` | Another debugger (DevTools) is attached, or you forced `cdp` on Firefox. Switch executor to `content`. |
 | Screenshot path returned but model can't see it | Use the `read` tool on the returned path — tool output can't carry images. |
 | Clicks ignored on a strict site | You're on the content-script executor (synthetic events). Switch to `cdp` on Chromium for trusted input. |
@@ -323,18 +323,62 @@ bridge:
   the agent that created it**: another agent gets `group "X" is owned by another client`, so give
   your agents distinct group names. When an agent exits, its groups become **orphaned** and the
   next agent to use one adopts it (tabs survive).
-- **Token sharing.** Adapters auto-share a token via a per-user `bridge.json` state file in the
-  persistent app-data dir (`~/Library/Application Support/opencode-browser/` on macOS,
-  `%APPDATA%\opencode-browser\` on Windows, `$XDG_STATE_HOME` or `~/.local/state/opencode-browser/`
-  on Linux), so a generated token **persists across sessions** — you paste it into the extension
-  once, not every launch. Set an explicit `token` / `OCB_TOKEN` to be deterministic (and to win a
-  simultaneous cold start). On a non-explicit launch the token is re-logged as `browser_bridge_token`
-  if you need to copy it again.
+- **Token sharing.** The plugin and the MCP server auto-share the port + token through a per-user
+  [`bridge.json`](#the-bridge-state-file-bridgejson) state file, so a generated token **persists
+  across sessions** — you paste it into the extension once, not every launch. Set an explicit
+  `token` / `OCB_TOKEN` to be deterministic (and to win a simultaneous cold start). On a
+  non-explicit launch the token is also re-logged as `browser_bridge_token` if you need it again.
 - **Failover.** If the hosting agent quits, a guest re-binds and rebuilds group→browser ownership
   by re-querying each extension's tabs. During the brief re-election window commands fail fast with
   `bridge is re-electing` and the model retries.
 
 Full design notes: [`plans/multi-client-routing.md`](../plans/multi-client-routing.md).
+
+### The bridge state file (`bridge.json`)
+
+The plugin and the MCP server persist the bridge **port + token** to a small per-user JSON file
+so you paste the token into the extension **once**, not every launch (and so a second adapter on
+the same machine picks up the same secret). It lives in the persistent per-OS app-data directory —
+**not** the temp dir, so it survives reboots:
+
+| OS | Path |
+| --- | --- |
+| **macOS** | `~/Library/Application Support/opencode-browser/bridge.json` |
+| **Linux** | `$XDG_STATE_HOME/opencode-browser/bridge.json` — default `~/.local/state/opencode-browser/bridge.json` |
+| **Windows** | `%APPDATA%\opencode-browser\bridge.json` — default `%USERPROFILE%\AppData\Roaming\opencode-browser\bridge.json` |
+
+The contents are just the active port and shared secret:
+
+```json
+{ "port": 4517, "token": "a1b2c3d4…" }
+```
+
+The file is written owner-only (`0600`, in a `0700` directory). To read the current token without
+hunting through the OpenCode log:
+
+```sh
+# macOS
+cat "$HOME/Library/Application Support/opencode-browser/bridge.json"
+# Linux
+cat "${XDG_STATE_HOME:-$HOME/.local/state}/opencode-browser/bridge.json"
+```
+
+```powershell
+# Windows (PowerShell)
+Get-Content "$env:APPDATA\opencode-browser\bridge.json"
+```
+
+Notes:
+
+- **Reset the token.** Delete `bridge.json` (or set an explicit `token` / `OCB_TOKEN`). The next
+  launch generates a fresh token, rewrites the file, and logs it once as `browser_bridge_token` —
+  re-paste it into the extension dashboard.
+- **Explicit token wins.** An explicit `token` (plugin option) / `OCB_TOKEN` (MCP) overrides
+  whatever is in the file; it's still written back so other adapters on the host converge on it.
+- **Legacy location (≤ 0.7.x).** Older builds kept this in the temp dir
+  (`$TMPDIR/opencode-browser-bridge.json` / `%TEMP%\opencode-browser-bridge.json`), which the OS
+  clears on reboot — that's why the token used to change every restart. It's still read **once** as
+  a fallback so upgrading doesn't force a re-paste, then migrated to the path above on the next write.
 
 ## Use it from other agents (MCP)
 
