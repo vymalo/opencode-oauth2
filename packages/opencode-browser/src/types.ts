@@ -36,9 +36,10 @@ export interface BrowserPluginOptions {
   executor?: ExecutorMode;
   /**
    * Which tool groups to register: `page` (observe), `control` (drive),
-   * `debug` (powerful/sensitive). Defaults to `["page","control"]` — `debug`
-   * is opt-in. Per-agent control is also possible via OpenCode's tool
-   * allow/deny on the `browser_*` names.
+   * `debug` (powerful/sensitive), `interactive` (ask the human on the page and
+   * block on them). Defaults to `["page","control"]` — `debug` and
+   * `interactive` are opt-in. Per-agent control is also possible via OpenCode's
+   * tool allow/deny on the `browser_*` names.
    */
   groups?: ToolGroup[];
   /** Per-command timeout in ms before the tool call rejects. */

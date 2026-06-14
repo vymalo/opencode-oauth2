@@ -45,7 +45,8 @@ export type BrowserAction =
   | "set_viewport"
   | "cookies"
   | "targets"
-  | "release";
+  | "release"
+  | "request_feedback";
 
 export const BROWSER_ACTIONS: readonly BrowserAction[] = [
   "open",
@@ -80,7 +81,8 @@ export const BROWSER_ACTIONS: readonly BrowserAction[] = [
   "set_viewport",
   "cookies",
   "targets",
-  "release"
+  "release",
+  "request_feedback"
 ] as const;
 
 /** A connection's role on the bridge. Absent → "extension" (back-compat). */

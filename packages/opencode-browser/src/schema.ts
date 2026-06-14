@@ -10,7 +10,7 @@
  * package boundary while still covering every tool's args.
  */
 
-export type ToolGroup = "page" | "control" | "debug";
+export type ToolGroup = "page" | "control" | "debug" | "interactive";
 
 export interface StringField {
   type: "string";

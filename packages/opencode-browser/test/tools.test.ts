@@ -19,7 +19,7 @@ function baseOptions(overrides: Partial<ResolvedBrowserOptions> = {}): ResolvedB
     port: 4517,
     token: "secret",
     executor: "auto",
-    groups: ["page", "control", "debug"],
+    groups: ["page", "control", "debug", "interactive"],
     timeoutMs: 30_000,
     screenshotDir: ".opencode/browser",
     ...overrides
@@ -169,5 +169,107 @@ describe("browser_screenshot disk write", () => {
     expect(files[0]).toMatch(/\.png$/);
     const written = await readFile(join(dir, "my-group", files[0]));
     expect(written.equals(png)).toBe(true);
+  });
+});
+
+describe("browser_request_feedback (interactive group)", () => {
+  it("is gated behind the opt-in interactive group", () => {
+    const off = createBrowserTools({
+      send: fakeSend(),
+      options: baseOptions({ groups: ["page", "control", "debug"] }),
+      logger: noopLogger
+    });
+    expect(Object.keys(off)).not.toContain("browser_request_feedback");
+
+    const on = createBrowserTools({
+      send: fakeSend(),
+      options: baseOptions({ groups: ["page", "control", "interactive"] }),
+      logger: noopLogger
+    });
+    expect(Object.keys(on)).toContain("browser_request_feedback");
+  });
+
+  it("sends the request_feedback action with a long per-command timeout", async () => {
+    const send = fakeSend({ responded: true, annotations: [{ kind: "confirm", value: true }] });
+    const tools = createBrowserTools({
+      send,
+      options: baseOptions({ groups: ["interactive"] }),
+      logger: noopLogger
+    });
+    await tools.browser_request_feedback.execute(
+      { group: "g", mode: "confirm", prompt: "ok?" },
+      ctx()
+    );
+    expect(send).toHaveBeenCalledWith(
+      "request_feedback",
+      "g",
+      expect.objectContaining({ mode: "confirm", prompt: "ok?", timeoutMs: 120_000 }),
+      expect.anything(),
+      undefined,
+      300_000
+    );
+  });
+
+  it("clamps a user timeout to the overlay ceiling", async () => {
+    const send = fakeSend({ responded: true, annotations: [] });
+    const tools = createBrowserTools({
+      send,
+      options: baseOptions({ groups: ["interactive"] }),
+      logger: noopLogger
+    });
+    await tools.browser_request_feedback.execute(
+      { group: "g", mode: "confirm", timeoutMs: 999_999 },
+      ctx()
+    );
+    expect(send).toHaveBeenCalledWith(
+      "request_feedback",
+      "g",
+      expect.objectContaining({ timeoutMs: 290_000 }),
+      expect.anything(),
+      undefined,
+      300_000
+    );
+  });
+
+  it("summarizes a confirm response", async () => {
+    const send = fakeSend({ responded: true, annotations: [{ kind: "confirm", value: true }] });
+    const tools = createBrowserTools({
+      send,
+      options: baseOptions({ groups: ["interactive"] }),
+      logger: noopLogger
+    });
+    const res = await tools.browser_request_feedback.execute(
+      { group: "g", mode: "confirm" },
+      ctx()
+    );
+    expect(typeof res === "object" ? res.output : res).toMatch(/confirmed/i);
+  });
+
+  it("reports a timeout as no response", async () => {
+    const send = fakeSend({ responded: false, timedOut: true, annotations: [] });
+    const tools = createBrowserTools({
+      send,
+      options: baseOptions({ groups: ["interactive"] }),
+      logger: noopLogger
+    });
+    const res = await tools.browser_request_feedback.execute(
+      { group: "g", mode: "confirm" },
+      ctx()
+    );
+    expect(typeof res === "object" ? res.output : res).toMatch(/no response/i);
+  });
+
+  it("resolves a point response to its element ref in the summary", async () => {
+    const send = fakeSend({
+      responded: true,
+      annotations: [{ kind: "point", x: 10, y: 20, ref: "e42", selector: "#x" }]
+    });
+    const tools = createBrowserTools({
+      send,
+      options: baseOptions({ groups: ["interactive"] }),
+      logger: noopLogger
+    });
+    const res = await tools.browser_request_feedback.execute({ group: "g", mode: "point" }, ctx());
+    expect(typeof res === "object" ? res.output : res).toMatch(/ref e42/);
   });
 });

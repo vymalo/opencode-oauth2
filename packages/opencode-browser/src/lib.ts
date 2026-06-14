@@ -50,8 +50,10 @@ export {
 export { createBrowserTools, type SaveScreenshot, type SendFn, type ToolDeps } from "./tools.js";
 
 export {
+  type Annotation,
   BROWSER_TOOLS,
   DEFAULT_GROUPS,
+  type FeedbackResult,
   type NeutralResult,
   TOOL_GROUPS,
   type ToolGroup,

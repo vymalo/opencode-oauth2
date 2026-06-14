@@ -64,8 +64,8 @@ Options (all optional):
 | `port` | `4517` | WebSocket bridge port. |
 | `token` | _generated_ | Shared secret the extension must present. If omitted, a random token is generated and **logged once** (`browser_bridge_token_generated`) — copy it into the extension. |
 | `executor` | `"auto"` | Forwarded executor preference: `auto` \| `cdp` \| `content`. |
-| `groups` | `["page","control"]` | Which tool groups to register (`page` \| `control` \| `debug`). `debug` is opt-in. |
-| `timeoutMs` | `30000` | Per-command timeout before the tool call rejects. |
+| `groups` | `["page","control"]` | Which tool groups to register (`page` \| `control` \| `debug` \| `interactive`). `debug` and `interactive` are opt-in. |
+| `timeoutMs` | `30000` | Default per-command timeout before the tool call rejects. A tool may request a longer per-command deadline (e.g. `browser_request_feedback`), capped at 10 min. |
 | `screenshotDir` | `".opencode/browser"` | Where screenshots are written (relative paths resolve against the session worktree). |
 
 On first run with no `token`, watch the log for:
@@ -99,9 +99,9 @@ and dashboard show **Connected** once the handshake succeeds.
 `group` is the primary handle on every tool — it names the tab group the action targets, and
 the extension creates it on the first `browser_open`.
 
-The 33 tools are organized into three **groups**, gated by the `groups` option (plugin) /
-`OCB_GROUPS` (MCP). Default: `page` + `control` (`debug` is opt-in). The `browser_*` names are
-stable, so OpenCode's per-agent tool allow/deny works on them directly too.
+The 34 tools are organized into four **groups**, gated by the `groups` option (plugin) /
+`OCB_GROUPS` (MCP). Default: `page` + `control` (`debug` and `interactive` are opt-in). The
+`browser_*` names are stable, so OpenCode's per-agent tool allow/deny works on them directly too.
 
 **`page`** — observe (read-mostly):
 
@@ -148,6 +148,29 @@ stable, so OpenCode's per-agent tool allow/deny works on them directly too.
 | `browser_handle_dialog` | `group, accept?, promptText?` | Accept/dismiss a JS dialog (CDP only). |
 | `browser_set_viewport` | `group, width, height, mobile?, deviceScaleFactor?` | Emulate a viewport (CDP only). |
 | `browser_cookies` | `op, url?, name?, value?` | Read/modify cookies. |
+
+**`interactive`** — ask the human on the page and block on them (**off by default**):
+
+| Tool | Key args | Result |
+| --- | --- | --- |
+| `browser_request_feedback` | `group, mode, prompt?, options?, timeoutMs?` | Paints a branded overlay and blocks until the user responds. |
+
+This is the one tool that **waits on a human** rather than acting autonomously — use it when a
+screenshot or snapshot isn't enough to know what the user means ("which of these did you mean?").
+`mode`:
+
+- `confirm` — a yes/no bar; returns `{ kind: "confirm", value }`.
+- `choose` — buttons for each `options[]` entry; returns `{ kind: "choice", value }`.
+- `point` — the user clicks one spot; the reply resolves to the **element ref** under the click
+  (plus a CSS selector and pixel coords) so you can immediately `browser_click ref:…` it.
+
+The overlay is clearly branded as opencode-browser (so a page can't spoof the prompt), dismissible
+(Esc / Skip), and raises the toolbar badge + focuses the tab to get the user's attention. On no
+response it returns `{ responded: false, timedOut: true }` so the agent can fall back rather than
+hang. The wait uses a long per-command timeout (default 120 s, max ~290 s, capped broker-side at
+10 min); if the agent's turn is aborted or times out, the broker sends a `cancel` frame that tears
+the overlay down — a blocking prompt never orphans state in the page. Meaningless in headless/CI
+routing (no human at the browser), where it simply times out.
 
 ### Scoping tools and token cost
 
