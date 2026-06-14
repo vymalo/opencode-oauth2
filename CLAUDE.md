@@ -24,13 +24,16 @@ The plugins are deliberately decoupled: `opencode-models-info`, `opencode-rateli
 pnpm install                 # bootstrap workspace
 pnpm -r build                # compile all packages (tsc → dist/)
 pnpm -r typecheck            # tsc --noEmit across packages
-pnpm -r test                 # vitest run in each package that has tests
+pnpm -r test                 # vitest run in each package that has tests (fast, no coverage)
+pnpm coverage                # vitest run --coverage per package; FAILS below per-package thresholds
 pnpm lint                    # biome lint (full repo)
 pnpm format                  # biome format --write
 pnpm format:check            # biome format (no write) — part of the pre-push gate
 ```
 
-Pre-push gate (run all five before opening a PR): `pnpm -r build && pnpm -r typecheck && pnpm -r test && pnpm lint && pnpm format:check`.
+Pre-push gate (run all five before opening a PR): `pnpm -r build && pnpm -r typecheck && pnpm coverage && pnpm lint && pnpm format:check`. (`pnpm coverage` runs the tests **and** enforces coverage; CI runs the same. Use the faster `pnpm -r test` for local iteration.)
+
+Coverage thresholds are per-package, declared in each `vitest.config.ts` (`test.coverage.thresholds`), set a few points below current so a regression fails CI without exact-match churn. `@vymalo/opencode-browser` is the bar (~88%+); `opencode-browser-mcp` excludes its stdio `bin` (`mcp.ts`) from the metric (it's e2e-only); the **browser extension floor is intentionally low** (chrome/DOM/React glue is verified manually — raise it once a fake-browser harness lands).
 
 Per-package iteration (much faster):
 
@@ -119,7 +122,7 @@ When changing the mapping in [`packages/opencode-models-info/src/mapping.ts`](pa
 
 - **Biome, not ESLint/Prettier.** Config in [`biome.json`](biome.json) — double quotes, 100-col, no trailing commas, semicolons always. `noNonNullAssertion` is a warning the existing code stays clean of; mirror that in new code (`@vymalo/opencode-oauth2` has 0 warnings, treat that as the bar).
 - **Strict TS.** Base config is in [`tsconfig.base.json`](tsconfig.base.json) — `ES2022` + `NodeNext` + `strict: true`. Per-package tsconfig only sets `rootDir`/`outDir`. `lib.ts` re-exports are the public surface.
-- **Vitest** is the test runner; each package owns a `vitest.config.ts`. Tests live in `test/`, not co-located.
+- **Vitest** is the test runner; each package owns a `vitest.config.ts` (with a `coverage` block + per-package thresholds enforced by `pnpm coverage`). Tests live in `test/`, not co-located. Coverage uses the v8 provider (`@vitest/coverage-v8`).
 - **Node ≥ 22** for the runtime packages (set in each package.json `engines`). Use `node:` prefixed imports for built-ins (`node:fs/promises`, `node:crypto`).
 - **Logging pattern**: every plugin emits structured events through both a JSON console fallback and `client.app.log` (so the host log stream picks them up). Event names use `snake_case` (`models_info_cache_hit`, `oauth2_token_refreshed`). Add new events to that pattern, not ad-hoc `console.log`.
 - **Cache layout** mirrors per-OS conventions — `~/Library/Caches/<ns>/` on macOS, `XDG_CACHE_HOME` on Linux, `LOCALAPPDATA` on Windows. Each plugin uses its own namespace (`opencode-oauth2`, `opencode-models-info`). Disk writes are atomic-rename + `0o600`.

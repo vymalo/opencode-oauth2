@@ -15,6 +15,7 @@
     "submit:firefox": "wxt submit --firefox-zip .output/*-firefox.zip --firefox-sources-zip .output/*-sources.zip",
     "typecheck": "wxt prepare && tsc --noEmit",
     "test": "vitest run",
+    "coverage": "vitest run --coverage",
     "lint": "biome lint .",
     "format": "biome format --write .",
     "format:check": "biome format ."
