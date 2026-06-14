@@ -31,7 +31,7 @@ flowchart LR
 - [Targeting elements](#targeting-elements--prefer-refs)
 - [Screenshots](#screenshots)
 - [Named groups](#named-groups)
-- [Scoping tools per agent](#scoping-tools-per-agent)
+- [Scoping tools and token cost](#scoping-tools-and-token-cost)
 - [Multiple browsers & agents](#multiple-browsers--agents)
 - [Executors: CDP vs content-script](#executors-cdp-vs-content-script)
 - [Stopping / releasing control](#stopping--releasing-control)
@@ -184,90 +184,76 @@ map to real `chrome.tabGroups` (titled, colored); on Firefox they're a logical r
 keep each task's tabs isolated and inspectable, and are the unit of ownership when multiple
 agents share one bridge.
 
-## Scoping tools per agent
+## Scoping tools and token cost
 
-There are **two independent levers**, and they answer different questions:
+Two levers, and they compose:
 
-| Lever | Scope | Use it to |
+- **`groups` (global)** — which tools are *registered* at all. The ceiling: an agent can only ever
+  be granted tools that are registered.
+- **Per-agent `permission` (per agent)** — which registered tools each agent actually gets. **In
+  the flat string form this trims the agent's injected tool list, so it genuinely cuts context
+  tokens** — not just execution.
+
+Approximate context cost of the full surface (tool name + description + args JSON schema the model
+sees — rough, ≈chars/4):
+
+| Registered `groups` | Tools | ≈ tokens (an agent granted all of them) |
 | --- | --- | --- |
-| `groups` plugin option | **Global** — which tools are *registered* at all | Set the org-wide default surface. |
-| OpenCode agent `tools` map | **Per-agent** — which registered tools an agent may *call* | Give each agent only the tools it needs. |
+| `["page"]` | 8 | ~1,000 |
+| `["page","control"]` *(default)* | 27 | ~3,700 |
+| `["page","control","debug"]` | 33 | ~4,560 |
+| `debug` adds | 6 | ~830 |
 
-If your team keeps **all groups enabled by default** (`"groups": ["page","control","debug"]`),
-the `groups` option won't narrow anything — every `browser_*` tool is registered. To restrict an
-individual agent, use OpenCode's per-agent **`tools`** map (a `{ "<tool>": true|false }` record on
-the agent). The tool names are stable `browser_*` identifiers (see [the 33 tools](#the-33-tools)),
-so you target them directly. This is OpenCode's own mechanism — nothing plugin-specific.
+> ### ⚠️ Flat string vs nested — the token footgun
+> Per-agent scoping only reclaims tokens in the **flat string** `permission` form. The other forms
+> gate *execution* but still inject the schema (so they flood context):
+>
+> | Form | Example | Trims context? |
+> | --- | --- | --- |
+> | flat string `permission` | `"browser_eval": "deny"` | ✅ removed from the agent's tools |
+> | nested `permission` | `"browser_eval": { "*": "deny" }` | ❌ execution gate only |
+> | `tools` map (deprecated) | `"browser_eval": false` (≡ nested `{"*":"deny"}`) | ❌ execution gate only |
+>
+> Verified on OpenCode **1.17.6** — confirm on your version by checking an agent's actual context
+> token count with tools denied. (This is exactly the trap behind "registering a group floods every
+> agent": that observation comes from the `tools`-boolean / nested form.)
 
-### Denylist — drop the sensitive tools (most common)
+### Recommended: register everything, scope per agent
 
-Keep everything except the `debug` group and destructive actions for a general agent:
-
-```jsonc
-// opencode.json
-{
-  "plugin": [["@vymalo/opencode-browser", {}]],   // all groups stay registered
-  "agent": {
-    "build": {
-      "tools": {
-        "browser_eval": false,
-        "browser_cookies": false,
-        "browser_console": false,
-        "browser_network": false,
-        "browser_handle_dialog": false,
-        "browser_set_viewport": false,
-        "browser_close": false
-      }
-    }
-  }
-}
-```
-
-### Allowlist — a read-only research agent (observe, never drive)
-
-Disable the whole namespace with a wildcard, then re-enable only the `page` tools you want. A
-more specific key wins over the `browser_*` wildcard:
+If your org wants the full surface available but **not** flooding every agent's context, register
+all groups once and give each agent only the tools it needs with **flat string** `permission`:
 
 ```jsonc
 {
+  // full surface registered once — global
+  "plugin": [["@vymalo/opencode-browser", { "groups": ["page", "control", "debug"] }]],
   "agent": {
     "researcher": {
-      "description": "Reads pages, never changes them.",
-      "tools": {
-        "browser_*": false,
-        "browser_open": true,
-        "browser_navigate": true,
-        "browser_snapshot": true,
-        "browser_get_text": true,
-        "browser_query": true,
-        "browser_screenshot": true,
-        "browser_tabs": true
+      // FLAT STRING form → denied tools are dropped from this agent's injected
+      // tools, so its context carries only the allowed ones.
+      "permission": {
+        "browser_*": "deny",          // start from nothing…
+        "browser_open": "allow",      // …allow only what this agent needs
+        "browser_navigate": "allow",
+        "browser_snapshot": "allow",
+        "browser_get_text": "allow",
+        "browser_query": "allow",
+        "browser_screenshot": "allow"
       }
-    }
+    },
+    "automator": { "permission": { "browser_*": "allow" } }   // full drive
   }
 }
 ```
 
-### Markdown agents
+(Specific keys override the `browser_*` wildcard. If you'd rather not rely on that precedence,
+list explicit `"deny"`s for the tools an agent shouldn't have instead of a wildcard.)
 
-The same `tools` map works in a `.opencode/agent/<name>.md` front-matter file:
-
-```markdown
----
-description: Reads pages, never changes them.
-tools:
-  browser_*: false
-  browser_snapshot: true
-  browser_get_text: true
-  browser_screenshot: true
----
-You are a read-only web researcher. Use browser_snapshot to get refs, then read.
-```
-
-> The plugin-level `groups` option is still useful as a hard floor — e.g. **never** register
-> `debug` org-wide with `{ "groups": ["page","control"] }`, then no agent can re-enable
-> `browser_eval` no matter its `tools` map. Use `groups` for "nobody gets this," and the agent
-> `tools` map for "this agent only gets these."
+If you don't need per-agent differences, just register the minimum union globally — `["page"]` for
+read-only research, `["page","control"]` to drive — and skip `debug` unless a workflow needs
+`eval`/`cookies`/`network`. Either way the schemas sit in the cached prefix, so prompt caching
+softens the per-request **dollar** cost; trimming still helps the context window and cache writes.
+See OpenCode's [agent docs](https://opencode.ai/docs/agents/) for the `permission` field.
 
 ## Multiple browsers & agents
 
