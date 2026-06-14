@@ -5,7 +5,7 @@ export function ScreenshotsPanel() {
   const shots = useScreenshots();
 
   if (shots.length === 0) {
-    return <p className="text-sm text-muted">No screenshots captured yet.</p>;
+    return <p className="text-sm opacity-60">No screenshots captured yet.</p>;
   }
 
   return (
@@ -13,7 +13,7 @@ export function ScreenshotsPanel() {
       {shots.map((shot) => (
         <figure
           key={shot.id}
-          className="overflow-hidden rounded-xl border border-border bg-surface"
+          className="overflow-hidden rounded-box border border-base-300 bg-base-200"
         >
           <button
             type="button"
@@ -27,8 +27,8 @@ export function ScreenshotsPanel() {
               className="aspect-video w-full object-cover object-top"
             />
           </button>
-          <figcaption className="flex items-center justify-between px-3 py-2 text-xs text-muted">
-            <code className="truncate text-fg">{shot.group}</code>
+          <figcaption className="flex items-center justify-between px-3 py-2 text-xs opacity-70">
+            <code className="truncate">{shot.group}</code>
             <span>{timeAgo(shot.ts)}</span>
           </figcaption>
         </figure>

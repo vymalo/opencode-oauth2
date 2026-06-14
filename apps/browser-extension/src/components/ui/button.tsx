@@ -3,24 +3,23 @@ import type { ButtonHTMLAttributes } from "react";
 
 import { cn } from "../../lib/utils";
 
-const button = cva(
-  "inline-flex items-center justify-center gap-2 rounded-lg text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:opacity-50 disabled:pointer-events-none",
-  {
-    variants: {
-      variant: {
-        default: "bg-accent text-accent-fg hover:bg-accent/90",
-        outline: "border border-border bg-transparent text-fg hover:bg-surface",
-        ghost: "bg-transparent text-muted hover:bg-surface hover:text-fg",
-        danger: "bg-danger text-white hover:bg-danger/90"
-      },
-      size: {
-        sm: "h-8 px-3",
-        md: "h-9 px-4"
-      }
+// Thin typed wrapper over daisyUI's `btn` — variants map straight to daisyUI
+// modifier classes so there's no bespoke styling to maintain.
+const button = cva("btn", {
+  variants: {
+    variant: {
+      default: "btn-primary",
+      outline: "btn-outline",
+      ghost: "btn-ghost",
+      danger: "btn-error"
     },
-    defaultVariants: { variant: "default", size: "md" }
-  }
-);
+    size: {
+      sm: "btn-sm",
+      md: ""
+    }
+  },
+  defaultVariants: { variant: "default", size: "md" }
+});
 
 export interface ButtonProps
   extends ButtonHTMLAttributes<HTMLButtonElement>,
