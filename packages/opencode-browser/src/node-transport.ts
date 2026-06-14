@@ -1,15 +1,14 @@
-import type {
-  AgentSocket,
-  AgentSocketHandlers,
-  BridgeTransport,
-  ClientConnection
-} from "@vymalo/opencode-browser/lib";
 import { WebSocket, WebSocketServer } from "ws";
 
+import type { AgentSocket, AgentSocketHandlers } from "./agent-client.js";
+import type { BridgeTransport, ClientConnection } from "./transport.js";
+
 /**
- * `BridgeTransport` backed by the Node `ws` package, so the MCP server can host
- * the broker under plain Node. `listen` resolves once bound and rejects on
- * `EADDRINUSE` — that drives the endpoint's host-vs-guest election.
+ * `BridgeTransport` backed by the Node `ws` package. This is the bridge's single
+ * host transport: `ws` runs under both Node *and* Bun, so it covers every
+ * runtime OpenCode loads the plugin in — the Bun CLI/web *and* the Node desktop
+ * app — without a Bun-specific code path. `listen` resolves once bound and
+ * rejects on `EADDRINUSE`, which drives the endpoint's host-vs-guest election.
  */
 export function createNodeTransport(): BridgeTransport {
   let server: WebSocketServer | null = null;

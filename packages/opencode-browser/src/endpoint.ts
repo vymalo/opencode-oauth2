@@ -16,6 +16,13 @@ export interface EndpointOptions {
   label?: string;
   /** Delay before retrying election after a drop. */
   reelectMs?: number;
+  /**
+   * Fired whenever this endpoint becomes the host — on the initial election AND
+   * on any later failover re-election. Use it for host-only side effects like
+   * advertising the bridge token, so they recur on every host transition rather
+   * than only once at startup.
+   */
+  onHost?: () => void;
 }
 
 export interface EndpointDeps {
@@ -80,28 +87,40 @@ export async function createEndpoint(opts: EndpointOptions, deps: EndpointDeps):
     }
     mode = "electing";
 
-    // 1) Try to host (win the bind).
-    const transport = deps.createServerTransport();
-    const candidate = new Broker(
-      {
-        host: opts.host,
-        port: opts.port,
-        token: opts.token,
-        executor: opts.executor,
-        timeoutMs: opts.timeoutMs
-      },
-      { logger: deps.logger, transport }
-    );
+    // 1) Try to host (win the bind). Everything is inside the try so a transport
+    // that throws at construction (or a Broker that fails to start) degrades to
+    // guest instead of crashing the plugin load.
+    let candidate: Broker | null = null;
     try {
+      const transport = deps.createServerTransport();
+      candidate = new Broker(
+        {
+          host: opts.host,
+          port: opts.port,
+          token: opts.token,
+          executor: opts.executor,
+          timeoutMs: opts.timeoutMs
+        },
+        { logger: deps.logger, transport }
+      );
       await candidate.start();
       broker = candidate;
       current = candidate.createLocalAgent();
       mode = "host";
       deps.logger.info("browser_endpoint_mode", { mode: "host" });
+      // Isolate the side-effect callback: a throw here must NOT reach the outer
+      // catch, which would stop the freshly-started broker and degrade to guest.
+      try {
+        opts.onHost?.();
+      } catch (onHostErr) {
+        deps.logger.error("browser_endpoint_onhost_error", {
+          message: onHostErr instanceof Error ? onHostErr.message : String(onHostErr)
+        });
+      }
       return;
     } catch (err) {
       try {
-        candidate.stop();
+        candidate?.stop();
       } catch {
         /* never bound */
       }

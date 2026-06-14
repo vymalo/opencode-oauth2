@@ -12,7 +12,8 @@ can call and hosts a localhost WebSocket **bridge**. A companion **browser exten
 (Chromium MV3 + Firefox) connects to the bridge and drives real tabs.
 
 > Browser extensions can't host servers, so the plugin is the server and the extension dials
-> out to it. The plugin runs on Bun (inside OpenCode) and serves the bridge with `Bun.serve`.
+> out to it. The bridge is served with the `ws` package, which runs under both runtimes OpenCode
+> uses — Bun (CLI / `opencode web`) and Node (the desktop app) — so it works in either.
 
 ```mermaid
 flowchart LR

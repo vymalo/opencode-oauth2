@@ -33,10 +33,11 @@ export {
 export {
   type BridgeTransport,
   type ClientConnection,
-  createBunTransport,
   isAddrInUse,
   type TransportHandlers
 } from "./transport.js";
+
+export { createNodeAgentSocket, createNodeTransport } from "./node-transport.js";
 
 export {
   type BridgeFile,

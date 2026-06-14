@@ -1,6 +1,6 @@
 {
   "name": "@vymalo/opencode-browser-mcp",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "description": "MCP server for @vymalo/opencode-browser — exposes the browser_* tools (open, click, type, scroll, screenshot, snapshot, …) over the Model Context Protocol so any MCP client (Claude Code, Cursor, Cline, …) can drive the companion browser extension. Hosts the same localhost bridge; screenshots are returned inline as image content.",
   "license": "MIT",
   "author": "vymalo contributors",
@@ -53,11 +53,9 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@vymalo/opencode-browser": "workspace:*",
-    "ws": "^8.21.0"
+    "@vymalo/opencode-browser": "workspace:*"
   },
   "devDependencies": {
-    "@types/ws": "^8.18.0",
     "vite": "^8.0.14",
     "vitest": "^4.1.7"
   }
