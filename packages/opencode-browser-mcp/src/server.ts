@@ -54,7 +54,7 @@ export function createMcpServer(send: SendFn, groups: ToolGroup[]): Server {
       const params = spec.params ? spec.params(args) : args;
       const group = typeof args.group === "string" ? args.group : "";
       const target = typeof args.target === "string" ? args.target : undefined;
-      const data = await send(spec.action, group, params, undefined, target);
+      const data = await send(spec.action, group, params, undefined, target, spec.timeoutMs);
       const result: NeutralResult = spec.result
         ? spec.result(data, args)
         : { kind: "text", text: `${spec.name} ok` };

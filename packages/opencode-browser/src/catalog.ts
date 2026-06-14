@@ -3,9 +3,47 @@ import type { Field, JsonInput, ToolGroup } from "./schema.js";
 
 export type { ToolGroup } from "./schema.js";
 
-export const TOOL_GROUPS: readonly ToolGroup[] = ["page", "control", "debug"] as const;
-/** Groups registered when the operator doesn't specify — `debug` is opt-in. */
+export const TOOL_GROUPS: readonly ToolGroup[] = [
+  "page",
+  "control",
+  "debug",
+  "interactive"
+] as const;
+/** Groups registered when the operator doesn't specify — `debug` and `interactive` are opt-in. */
 export const DEFAULT_GROUPS: readonly ToolGroup[] = ["page", "control"] as const;
+
+/**
+ * Structured result of an `interactive` feedback request — what the user marked
+ * on the page. Spatial annotations resolve to a `data-ocb-ref` element ref where
+ * possible (so the agent can act with `browser_click ref:…`), plus pixels as a
+ * fallback. `comment` carries an optional free-text note attached to the mark.
+ */
+export type Annotation =
+  | { kind: "confirm"; value: boolean }
+  | { kind: "choice"; value: string }
+  | { kind: "point"; x: number; y: number; ref?: string; selector?: string; text?: string }
+  | { kind: "element"; ref?: string; selector?: string; text?: string }
+  | {
+      kind: "region";
+      rect: { x: number; y: number; width: number; height: number };
+      refs: string[];
+      text?: string;
+    };
+
+export interface FeedbackResult {
+  /** Whether a human responded before the timeout. */
+  responded: boolean;
+  /** True when the request timed out with no response. */
+  timedOut?: boolean;
+  /**
+   * Set when the overlay couldn't be shown at all (e.g. a restricted or
+   * CSP-locked page) — distinct from a plain timeout, so the agent can fall back
+   * to screenshot/snapshot reasoning rather than re-asking.
+   */
+  error?: string;
+  /** The marks the user made (empty when `timedOut`/`error`). */
+  annotations: Annotation[];
+}
 
 /**
  * Adapter-neutral result of a tool call. The OpenCode adapter renders these to
@@ -36,6 +74,12 @@ export interface ToolSpec {
   params?: (args: Record<string, unknown>) => Record<string, unknown>;
   /** Shape the extension's reply into a neutral result (default: a short ack). */
   result?: (data: unknown, args: Record<string, unknown>) => NeutralResult;
+  /**
+   * Per-command timeout (ms) for this tool, overriding the bridge's global
+   * default. Used by long-running, human-paced tools (e.g. feedback prompts).
+   * Clamped broker-side to `maxCommandMs`. Omit for the normal fast-fail default.
+   */
+  timeoutMs?: number;
 }
 
 // ─── reusable fields ─────────────────────────────────────────────────────────
@@ -608,5 +652,98 @@ export const BROWSER_TOOLS: readonly ToolSpec[] = [
       path: args.path
     }),
     result: (data) => json(rec(data), JSON.stringify(rec(data), null, 2))
+  },
+  {
+    name: "browser_request_feedback",
+    group: "interactive",
+    action: "request_feedback",
+    description:
+      "Ask the human at the browser to respond on the page, and block until they do (or it times out). Use when you're unsure what the user means and a screenshot or snapshot isn't enough — e.g. 'which of these did you mean?'. `mode`: confirm (yes/no bar), choose (pick one of `options`), point (click one spot), element (hover-highlight then click one element), region (drag a box over an area), comment (point + a free-text note). point/element/region resolve to element ref(s) you can then click/snapshot. Returns the user's response; on timeout returns `{ timedOut: true }` so you can fall back. interactive group (opt-in).",
+    timeoutMs: 300_000,
+    input: {
+      group,
+      mode: {
+        type: "string",
+        enum: ["confirm", "choose", "point", "element", "region", "comment"],
+        description: "Kind of prompt: confirm | choose | point | element | region | comment."
+      },
+      prompt: {
+        type: "string",
+        optional: true,
+        description: "Question/instruction shown to the user above the controls."
+      },
+      options: {
+        type: "array",
+        optional: true,
+        items: { type: "string" },
+        description: "Choices for `choose` mode (ignored otherwise)."
+      },
+      timeoutMs: {
+        type: "number",
+        optional: true,
+        description: "How long to wait for the user, in ms (default 120000, max 290000)."
+      },
+      tabId
+    },
+    params: (args) => {
+      const requested = typeof args.timeoutMs === "number" ? args.timeoutMs : 120_000;
+      return {
+        mode: args.mode,
+        prompt: args.prompt,
+        options: Array.isArray(args.options) ? args.options : undefined,
+        // Keep the overlay's own countdown below the broker deadline (300s) so it
+        // self-resolves into a clean `timedOut` result rather than being cancelled.
+        timeoutMs: Math.min(Math.max(requested, 1_000), 290_000),
+        tabId: args.tabId
+      };
+    },
+    result: (data) => {
+      const d = data as Partial<FeedbackResult>;
+      if (d?.error) {
+        return json(
+          { responded: false, error: d.error, annotations: [] } satisfies FeedbackResult,
+          `Couldn't ask the user on this page: ${d.error}. Fall back to a screenshot/snapshot.`
+        );
+      }
+      if (!d || d.responded === false || d.timedOut) {
+        return json(
+          { responded: false, timedOut: true, annotations: [] } satisfies FeedbackResult,
+          "No response from the user within the time limit."
+        );
+      }
+      const annotations = Array.isArray(d.annotations) ? d.annotations : [];
+      return json(
+        { responded: true, annotations } satisfies FeedbackResult,
+        summarizeAnnotations(annotations)
+      );
+    }
   }
 ];
+
+/** A short human-readable line describing what the user marked. */
+function summarizeAnnotations(annotations: Annotation[]): string {
+  if (annotations.length === 0) {
+    return "User responded with no marks.";
+  }
+  return annotations
+    .map((a) => {
+      const note = "text" in a && a.text ? ` — "${a.text}"` : "";
+      if (a.kind === "confirm") {
+        return `User ${a.value ? "confirmed" : "declined"}.`;
+      }
+      if (a.kind === "choice") {
+        return `User chose "${a.value}".`;
+      }
+      if (a.kind === "element") {
+        const what = a.ref ? `ref ${a.ref}` : (a.selector ?? "an element");
+        return `User selected ${what}${note}.`;
+      }
+      if (a.kind === "region") {
+        const refs = a.refs.length ? ` covering ${a.refs.join(", ")}` : "";
+        return `User boxed a ${Math.round(a.rect.width)}×${Math.round(a.rect.height)} region${refs}${note}.`;
+      }
+      const where = a.ref ? `ref ${a.ref}` : `(${Math.round(a.x)}, ${Math.round(a.y)})`;
+      return `User pointed at ${where}${note}.`;
+    })
+    .join(" ");
+}

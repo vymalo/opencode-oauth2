@@ -49,8 +49,10 @@ jobs:
       - name: Typecheck
         run: pnpm -r typecheck
 
-      - name: Test
-        run: pnpm -r test
+      # Runs every package's tests under v8 coverage and fails if any package
+      # drops below its per-package thresholds (see each vitest.config.ts).
+      - name: Test + coverage
+        run: pnpm coverage
 
       - name: Lint
         run: pnpm lint

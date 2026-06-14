@@ -9,6 +9,7 @@
     "lint": "biome lint packages apps test-env *.json",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
+    "coverage": "pnpm -r --if-present coverage",
     "test:env:up": "docker compose -f test-env/docker-compose.yml up -d --wait",
     "test:env:down": "docker compose -f test-env/docker-compose.yml down -v",
     "test:integration:run": "INTEGRATION_MODELS_INFO_URL=${INTEGRATION_MODELS_INFO_URL:-http://127.0.0.1:18080/v1/models} pnpm -r --if-present test:integration",
@@ -19,6 +20,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.4.15",
     "@types/node": "^25.9.1",
+    "@vitest/coverage-v8": "4.1.7",
     "typescript": "^6.0.3"
   }
 }

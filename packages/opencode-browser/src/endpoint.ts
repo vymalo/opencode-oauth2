@@ -12,6 +12,8 @@ export interface EndpointOptions {
   token: string;
   executor?: "auto" | "cdp" | "content";
   timeoutMs: number;
+  /** Ceiling for a per-command timeout override (host mode). */
+  maxCommandMs?: number;
   /** Descriptor sent in the agent hello (guest mode). */
   label?: string;
   /** Delay before retrying election after a drop. */
@@ -41,7 +43,8 @@ export interface Endpoint {
     group: string,
     params: Record<string, unknown>,
     signal?: AbortSignal,
-    target?: string
+    target?: string,
+    timeoutMs?: number
   ): Promise<unknown>;
   release(): void;
   shutdown(): void;
@@ -99,7 +102,8 @@ export async function createEndpoint(opts: EndpointOptions, deps: EndpointDeps):
           port: opts.port,
           token: opts.token,
           executor: opts.executor,
-          timeoutMs: opts.timeoutMs
+          timeoutMs: opts.timeoutMs,
+          maxCommandMs: opts.maxCommandMs
         },
         { logger: deps.logger, transport }
       );
@@ -160,9 +164,9 @@ export async function createEndpoint(opts: EndpointOptions, deps: EndpointDeps):
   await elect();
 
   return {
-    send: (action, group, params, signal, target) =>
+    send: (action, group, params, signal, target, timeoutMs) =>
       current
-        ? current.send(action, group, params, signal, target)
+        ? current.send(action, group, params, signal, target, timeoutMs)
         : Promise.reject(new Error("bridge is re-electing — retry shortly")),
     release: () => current?.release(),
     shutdown: () => {

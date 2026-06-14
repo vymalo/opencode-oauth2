@@ -53,7 +53,8 @@ export type BrowserAction =
   | "set_viewport"
   | "cookies"
   | "targets"
-  | "release";
+  | "release"
+  | "request_feedback";
 
 export const BROWSER_ACTIONS: readonly BrowserAction[] = [
   "open",
@@ -88,7 +89,8 @@ export const BROWSER_ACTIONS: readonly BrowserAction[] = [
   "set_viewport",
   "cookies",
   "targets",
-  "release"
+  "release",
+  "request_feedback"
 ] as const;
 
 /** A connection's role on the bridge. Absent → "extension" (back-compat). */
@@ -142,6 +144,13 @@ export interface CommandFrame {
    * command creates a new group; ignored by executors.
    */
   target?: string;
+  /**
+   * Optional per-command timeout in ms. Broker-only: a guest agent puts it here
+   * so the host broker honors a longer (or shorter) deadline than its global
+   * `timeoutMs` for this one command (clamped to the broker's `maxCommandMs`).
+   * Executors ignore it — they rely on a `cancel` frame for early teardown.
+   */
+  timeoutMs?: number;
 }
 
 /** Extension → server: response to a `command`. */
@@ -178,6 +187,21 @@ export interface ReleaseFrame {
   type: "release";
 }
 
+/**
+ * Server → extension: abandon an in-flight command. The `id` matches a prior
+ * `command`; the executor should tear down any UI/work for it (e.g. an open
+ * feedback overlay) and need not send a `result`. Sent when the broker gives up
+ * on a command early — agent abort, per-command timeout, or the requesting
+ * agent disconnecting — so a blocking command never orphans state in the page.
+ * A `cancel` for an unknown/completed id is a harmless no-op.
+ */
+export interface CancelFrame {
+  v: number;
+  type: "cancel";
+  /** The id of the command being abandoned. */
+  id: string;
+}
+
 export interface PingFrame {
   v: number;
   type: "ping";
@@ -195,6 +219,7 @@ export type Frame =
   | ResultFrame
   | EventFrame
   | ReleaseFrame
+  | CancelFrame
   | PingFrame
   | PongFrame;
 
@@ -243,6 +268,8 @@ export function decodeFrame(raw: string): Frame | null {
       return typeof parsed.name === "string" ? (parsed as unknown as EventFrame) : null;
     case "release":
       return { v: PROTOCOL_VERSION, type: "release" };
+    case "cancel":
+      return typeof parsed.id === "string" ? (parsed as unknown as CancelFrame) : null;
     case "ping":
       return { v: PROTOCOL_VERSION, type: "ping" };
     case "pong":
@@ -277,4 +304,8 @@ export function resultFrame(id: string, data: unknown): ResultFrame {
 
 export function errorFrame(id: string, message: string, code?: string): ResultFrame {
   return { v: PROTOCOL_VERSION, type: "result", id, ok: false, error: { message, code } };
+}
+
+export function cancelFrame(id: string): CancelFrame {
+  return { v: PROTOCOL_VERSION, type: "cancel", id };
 }

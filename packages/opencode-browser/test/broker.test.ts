@@ -320,3 +320,212 @@ describe("Broker timeout", () => {
     await expectation;
   });
 });
+
+/** Does `sent` contain a `cancel` frame for command `id`? */
+function hasCancel(sent: string[], id: string): boolean {
+  return sent.some((s) => {
+    const f = decodeFrame(s);
+    return f?.type === "cancel" && f.id === id;
+  });
+}
+
+describe("Broker cancellation (Phase 0)", () => {
+  it("sends a cancel frame to the executor when a command is aborted", async () => {
+    const { broker, h } = await setup();
+    const exec = connectExecutor(h, { id: "e1" });
+    const agent = broker.createLocalAgent();
+    const ac = new AbortController();
+    const open = agent.send("open", "g", {}, ac.signal);
+    const cmd = lastCommand(exec.sent);
+    ac.abort();
+    await expect(open).rejects.toThrow(/aborted/);
+    expect(hasCancel(exec.sent, cmd.id)).toBe(true);
+  });
+
+  it("cancels in-flight commands on the executor when the agent disconnects", async () => {
+    const { h } = await setup();
+    const exec = connectExecutor(h, { id: "e1" });
+    const agent = connectAgent(h);
+    // Remote agent issues an open; the broker forwards it to the executor.
+    h().onMessage(
+      agent.conn,
+      encodeFrame({
+        v: PROTOCOL_VERSION,
+        type: "command",
+        id: "a1",
+        action: "open",
+        group: "g",
+        params: {}
+      })
+    );
+    const cmd = lastCommand(exec.sent);
+    h().onClose(agent.conn);
+    expect(hasCancel(exec.sent, cmd.id)).toBe(true);
+  });
+
+  it("does not emit a cancel when a command completes normally", async () => {
+    const { broker, h } = await setup();
+    const exec = connectExecutor(h, { id: "e1" });
+    const agent = broker.createLocalAgent();
+    const open = agent.send("open", "g", {});
+    const cmd = replyOk(h, exec, { url: "u" });
+    await open;
+    expect(hasCancel(exec.sent, cmd.id)).toBe(false);
+  });
+});
+
+describe("Broker per-command timeout (Phase 0)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("honors a per-command override longer than the global timeout", async () => {
+    const { broker, h } = await setup(); // global timeoutMs: 1000
+    connectExecutor(h, { id: "e1" });
+    const agent = broker.createLocalAgent();
+    let settled = false;
+    const open = agent.send("open", "g", {}, undefined, undefined, 5000).catch(() => {
+      settled = true;
+    });
+    // Past the global deadline but inside the override — still pending.
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(settled).toBe(false);
+    // Past the override — now it times out.
+    await vi.advanceTimersByTimeAsync(4000);
+    await open;
+    expect(settled).toBe(true);
+  });
+
+  it("clamps a per-command override to maxCommandMs", async () => {
+    const transport = new FakeTransport();
+    const broker = new Broker(
+      { host: "127.0.0.1", port: 4517, token: "secret", timeoutMs: 1000, maxCommandMs: 2000 },
+      { logger: noopLogger, transport }
+    );
+    await broker.start();
+    const h = () => {
+      if (!transport.handlers) {
+        throw new Error("no handlers");
+      }
+      return transport.handlers;
+    };
+    const exec = connectExecutor(h, { id: "e1" });
+    const agent = broker.createLocalAgent();
+    const open = agent.send("open", "g", {}, undefined, undefined, 999_999);
+    const cmd = lastCommand(exec.sent);
+    const expectation = expect(open).rejects.toThrow(/timed out after 2000ms/);
+    await vi.advanceTimersByTimeAsync(2001);
+    await expectation;
+    expect(hasCancel(exec.sent, cmd.id)).toBe(true);
+  });
+});
+
+/** Find the latest frame of a type in a sent buffer. */
+function lastOfType(sent, type) {
+  for (let i = sent.length - 1; i >= 0; i--) {
+    const f = decodeFrame(sent[i]);
+    if (f?.type === type) {
+      return f;
+    }
+  }
+  return null;
+}
+
+describe("Broker heartbeat & events", () => {
+  it("answers ping with pong for executors and agents", async () => {
+    const { h } = await setup();
+    const exec = connectExecutor(h, { id: "e1" });
+    h().onMessage(exec.conn, encodeFrame({ v: PROTOCOL_VERSION, type: "ping" }));
+    expect(lastOfType(exec.sent, "pong")).toBeTruthy();
+
+    const agent = connectAgent(h);
+    h().onMessage(agent.conn, encodeFrame({ v: PROTOCOL_VERSION, type: "ping" }));
+    expect(lastOfType(agent.sent, "pong")).toBeTruthy();
+  });
+
+  it("routes a group event to the owning agent", async () => {
+    const { broker, h } = await setup();
+    const exec = connectExecutor(h, { id: "e1" });
+    const agent = broker.createLocalAgent();
+    const open = agent.send("open", "g", {});
+    replyOk(h, exec, { url: "u" });
+    await open;
+    // A remote agent that does NOT own g should not receive g's events.
+    const other = connectAgent(h);
+    h().onMessage(
+      exec.conn,
+      encodeFrame({ v: PROTOCOL_VERSION, type: "event", name: "navigated", group: "g", data: {} })
+    );
+    expect(lastOfType(other.sent, "event")).toBeNull();
+  });
+
+  it("broadcasts a group-less event to all agents", async () => {
+    const { h } = await setup();
+    const exec = connectExecutor(h, { id: "e1" });
+    const agent = connectAgent(h);
+    h().onMessage(
+      exec.conn,
+      encodeFrame({ v: PROTOCOL_VERSION, type: "event", name: "tab_created", data: {} })
+    );
+    expect(lastOfType(agent.sent, "event")).toMatchObject({ name: "tab_created" });
+  });
+});
+
+describe("Broker executor selection", () => {
+  it("routes cookies (a global action) to the primary executor without a group", async () => {
+    const { broker, h } = await setup();
+    const exec = connectExecutor(h, { id: "e1" });
+    const agent = broker.createLocalAgent();
+    const p = agent.send("cookies", "", { op: "get" });
+    const cmd = replyOk(h, exec, { cookies: [] });
+    expect(cmd.action).toBe("cookies");
+    await expect(p).resolves.toEqual({ cookies: [] });
+  });
+
+  it("errors on an ambiguous target label", async () => {
+    const { broker, h } = await setup();
+    connectExecutor(h, { id: "e1", label: "dup" });
+    connectExecutor(h, { id: "e2", label: "dup" });
+    const agent = broker.createLocalAgent();
+    await expect(agent.send("open", "g", {}, undefined, "dup")).rejects.toThrow(/ambiguous/);
+  });
+
+  it("errors on an unknown target", async () => {
+    const { broker, h } = await setup();
+    connectExecutor(h, { id: "e1", label: "a" });
+    const agent = broker.createLocalAgent();
+    await expect(agent.send("open", "g", {}, undefined, "ghost")).rejects.toThrow(
+      /no connected browser/
+    );
+  });
+
+  it("replaces a prior connection when an executor reconnects with the same id", async () => {
+    const { broker, h } = await setup();
+    const first = connectExecutor(h, { id: "e1" });
+    const second = connectExecutor(h, { id: "e1" });
+    expect(broker.executorCount).toBe(1);
+    expect(first.isClosed()).toBe(true);
+    expect(second.isClosed()).toBe(false);
+  });
+});
+
+describe("Broker aggregate & shutdown", () => {
+  it("aggregates tabs across executors when no group is given", async () => {
+    const { broker, h } = await setup();
+    const exec = connectExecutor(h, { id: "e1" });
+    const agent = broker.createLocalAgent();
+    const p = agent.send("tabs", "", {});
+    // Reply to the aggregate probe (the most recent tabs command to the executor).
+    replyOk(h, exec, { groups: [{ name: "g1" }] });
+    const data = (await p) as { groups: Array<{ name: string; executor: string }> };
+    expect(data.groups).toEqual([{ name: "g1", executor: "e1" }]);
+  });
+
+  it("rejects all pending commands when the broker stops", async () => {
+    const { broker, h } = await setup();
+    connectExecutor(h, { id: "e1" });
+    const agent = broker.createLocalAgent();
+    const p = agent.send("open", "g", {});
+    broker.stop();
+    await expect(p).rejects.toThrow(/stopped/);
+  });
+});

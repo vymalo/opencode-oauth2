@@ -6,6 +6,12 @@ export default defineConfig({
     include: ["test/**/*.test.ts"],
     exclude: ["test/integration/**", "node_modules/**", "dist/**"],
     clearMocks: true,
-    restoreMocks: true
+    restoreMocks: true,
+    coverage: {
+      provider: "v8",
+      include: ["src/**"],
+      reporter: ["text-summary"],
+      thresholds: { statements: 70, branches: 68, functions: 60, lines: 70 }
+    }
   }
 });

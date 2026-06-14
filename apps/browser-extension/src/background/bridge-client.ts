@@ -30,6 +30,11 @@ export interface BridgeClientDeps {
   getConfig: () => Promise<BridgeClientConfig>;
   /** Execute one command and resolve with its result data. */
   onCommand: (frame: CommandFrame) => Promise<unknown>;
+  /**
+   * The broker abandoned an in-flight command (agent abort / timeout / agent
+   * gone) — tear down any UI/work for that command id. No result is sent.
+   */
+  onCancel?: (id: string) => void;
   /** Executor kind to publish in the status row, for the UI. */
   executorKind: () => ExecutorKind;
   /**
@@ -168,6 +173,9 @@ export class BridgeClient {
         return;
       case "release":
         await this.deps.onRelease?.();
+        return;
+      case "cancel":
+        this.deps.onCancel?.(frame.id);
         return;
       case "ping":
         ws.send(encodeFrame({ v: PROTOCOL_VERSION, type: "pong" }));

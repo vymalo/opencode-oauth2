@@ -45,7 +45,8 @@ export type BrowserAction =
   | "set_viewport"
   | "cookies"
   | "targets"
-  | "release";
+  | "release"
+  | "request_feedback";
 
 export const BROWSER_ACTIONS: readonly BrowserAction[] = [
   "open",
@@ -80,7 +81,8 @@ export const BROWSER_ACTIONS: readonly BrowserAction[] = [
   "set_viewport",
   "cookies",
   "targets",
-  "release"
+  "release",
+  "request_feedback"
 ] as const;
 
 /** A connection's role on the bridge. Absent → "extension" (back-compat). */
@@ -122,6 +124,8 @@ export interface CommandFrame {
   params: Record<string, unknown>;
   /** Broker-only executor selector; ignored by executors. */
   target?: string;
+  /** Broker-only per-command timeout (ms); ignored by executors. */
+  timeoutMs?: number;
 }
 
 /** Extension → server: response to a `command`. */
@@ -151,6 +155,16 @@ export interface ReleaseFrame {
   type: "release";
 }
 
+/**
+ * Server → extension: abandon the in-flight command with this `id` (tear down
+ * any UI/work; no `result` expected). Unknown/completed id ⇒ harmless no-op.
+ */
+export interface CancelFrame {
+  v: number;
+  type: "cancel";
+  id: string;
+}
+
 export interface PingFrame {
   v: number;
   type: "ping";
@@ -168,6 +182,7 @@ export type Frame =
   | ResultFrame
   | EventFrame
   | ReleaseFrame
+  | CancelFrame
   | PingFrame
   | PongFrame;
 
@@ -208,6 +223,8 @@ export function decodeFrame(raw: string): Frame | null {
       return typeof parsed.name === "string" ? (parsed as unknown as EventFrame) : null;
     case "release":
       return { v: PROTOCOL_VERSION, type: "release" };
+    case "cancel":
+      return typeof parsed.id === "string" ? (parsed as unknown as CancelFrame) : null;
     case "ping":
       return { v: PROTOCOL_VERSION, type: "ping" };
     case "pong":

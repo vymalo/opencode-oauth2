@@ -1,6 +1,8 @@
 import { recordAction, recordScreenshot } from "../shared/db";
 import type { CommandFrame } from "../shared/protocol";
 import type { Executor, Viewport } from "./executor";
+import { startFeedback } from "./feedback";
+import type { FeedbackMode, FeedbackRequest } from "./feedback-overlay";
 import type { GroupRegistry } from "./group-registry";
 import { runPageAction, type Target } from "./page-actions";
 
@@ -19,10 +21,33 @@ function target(params: Record<string, unknown>): Target {
  * (and screenshot) to IndexedDB for the dashboard — including failures.
  */
 export class CommandRouter {
+  /**
+   * Teardown callbacks for in-flight cancellable commands, keyed by command id.
+   * Long-running interactive commands (e.g. a feedback overlay) register here so
+   * a broker `cancel` can abort them; ordinary commands never register.
+   */
+  private readonly cancellers = new Map<string, () => void>();
+
   constructor(
     private readonly registry: GroupRegistry,
     private readonly executor: Executor
   ) {}
+
+  /** Register a teardown for a cancellable command; returns a disposer. */
+  registerCanceller(id: string, teardown: () => void): () => void {
+    this.cancellers.set(id, teardown);
+    return () => this.cancellers.delete(id);
+  }
+
+  /** Broker abandoned command `id` — run and drop its teardown if present. */
+  cancel(id: string): void {
+    const teardown = this.cancellers.get(id);
+    if (!teardown) {
+      return;
+    }
+    this.cancellers.delete(id);
+    teardown();
+  }
 
   async handle(frame: CommandFrame): Promise<unknown> {
     const start = Date.now();
@@ -48,6 +73,9 @@ export class CommandRouter {
         durationMs: Date.now() - start
       });
       throw err;
+    } finally {
+      // The command settled on its own; drop any teardown it registered.
+      this.cancellers.delete(frame.id);
     }
   }
 
@@ -290,6 +318,27 @@ export class CommandRouter {
       case "release": {
         await this.executor.releaseAll();
         return { data: { ok: true }, summary: "released control" };
+      }
+      case "request_feedback": {
+        const tabId = this.tab(group, params);
+        const req: FeedbackRequest = {
+          mode: (params.mode as FeedbackMode) ?? "confirm",
+          prompt: params.prompt as string | undefined,
+          options: Array.isArray(params.options) ? (params.options as string[]) : undefined,
+          timeoutMs: typeof params.timeoutMs === "number" ? params.timeoutMs : 120_000
+        };
+        const handle = startFeedback(tabId, frame.id, req);
+        // Register before awaiting so a broker `cancel` mid-wait can tear it down.
+        this.registerCanceller(frame.id, handle.cancel);
+        const result = await handle.result;
+        const summary = result.error
+          ? `feedback unavailable: ${result.error}`
+          : result.timedOut
+            ? "feedback timed out"
+            : result.responded
+              ? `feedback: ${result.annotations.map((a) => a.kind).join(",") || "none"}`
+              : "feedback dismissed";
+        return { data: result, summary };
       }
       default:
         throw new Error(`unknown action: ${action}`);
