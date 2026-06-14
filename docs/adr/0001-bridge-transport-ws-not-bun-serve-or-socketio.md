@@ -12,7 +12,7 @@ dials *out* to it (extensions can't host servers; a service worker can open an o
 socket). The bridge is an auto-elect **broker** — the first process to bind the port hosts;
 the rest join as guests; on a drop they re-elect — so multiple agents and multiple browsers
 can share one bridge. See [`browser.md`](../browser.md) and
-[`../plans/multi-client-routing.md`](../plans/multi-client-routing.md).
+[`../../plans/multi-client-routing.md`](../../plans/multi-client-routing.md).
 
 The bridge needs a server-side WebSocket implementation. The original build used
 **`Bun.serve`**, on the assumption (encoded in the original plan) that *"OpenCode runs on
