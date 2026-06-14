@@ -1,0 +1,28 @@
+# Architecture Decision Records
+
+Short, dated records of decisions that shaped this workspace and the reasoning behind
+them — so a future reader (or a future us) can see *why* a thing is the way it is without
+reverse-engineering it from the code or the git log.
+
+We only write an ADR when a decision is **load-bearing and non-obvious**: it closes off
+alternatives someone would reasonably reach for, or it encodes a constraint that isn't
+visible from the code alone. Routine choices don't need one.
+
+## Format
+
+Each record is `NNNN-kebab-title.md`, numbered in order, and follows a light
+[MADR](https://adr.github.io/madr/)-style shape:
+
+- **Status** — `Accepted` / `Superseded by ADR-NNNN` / `Deprecated`. Records are
+  append-only: we don't rewrite a decision, we supersede it with a new one and link both ways.
+- **Context** — the forces in play when the decision was made.
+- **Decision** — what we chose, stated plainly.
+- **Consequences** — what this buys us and what it costs us.
+- **Alternatives considered** — what we rejected and *why* (this is the part future-you
+  will actually come back for).
+
+## Index
+
+| ADR | Title | Status |
+| --- | --- | --- |
+| [0001](0001-bridge-transport-ws-not-bun-serve-or-socketio.md) | Browser-bridge transport: the `ws` package, not `Bun.serve` or socket.io | Accepted |

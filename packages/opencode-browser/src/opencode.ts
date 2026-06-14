@@ -43,9 +43,9 @@ type OpenCodeConfig = Parameters<NonNullable<Hooks["config"]>>[0];
 export interface BrowserPluginFactoryOptions {
   /** Inject a logger (defaults to the OpenCode-piped logger). */
   logger?: Logger;
-  /** Inject the server transport factory for host mode (defaults to Bun.serve). */
+  /** Inject the server transport factory for host mode (defaults to the Node `ws` server). */
   createServerTransport?: () => BridgeTransport;
-  /** Inject the agent-socket factory for guest mode (defaults to global WebSocket). */
+  /** Inject the agent-socket factory for guest mode (defaults to the Node `ws` client). */
   createAgentSocket?: AgentSocketFactory;
   /** Inject the screenshot disk-writer (tests). */
   saveScreenshot?: SaveScreenshot;

@@ -36,6 +36,7 @@ install; come here when you need depth on a specific topic.
 | --- | --- |
 | [security.md](security.md) | Consolidated security model across all plugins — token cache, the browser bridge, blast radius, reducing it |
 | [troubleshooting.md](troubleshooting.md) | Symptom-keyed fixes across every plugin |
+| [adr/](adr/) | Architecture Decision Records — load-bearing, non-obvious decisions and *why* (e.g. [why the browser bridge uses `ws`, not `Bun.serve` or socket.io](adr/0001-bridge-transport-ws-not-bun-serve-or-socketio.md)) |
 
 ## Repo-level
 
