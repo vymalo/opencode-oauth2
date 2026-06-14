@@ -11,7 +11,7 @@
  * background can cancel a request without a page-side message channel.
  */
 
-export type FeedbackMode = "confirm" | "choose" | "point";
+export type FeedbackMode = "confirm" | "choose" | "point" | "element" | "region" | "comment";
 
 export interface FeedbackRequest {
   mode: FeedbackMode;
@@ -25,7 +25,14 @@ export interface FeedbackRequest {
 export type FeedbackAnnotation =
   | { kind: "confirm"; value: boolean }
   | { kind: "choice"; value: string }
-  | { kind: "point"; x: number; y: number; ref?: string; selector?: string; text?: string };
+  | { kind: "point"; x: number; y: number; ref?: string; selector?: string; text?: string }
+  | { kind: "element"; ref?: string; selector?: string; text?: string }
+  | {
+      kind: "region";
+      rect: { x: number; y: number; width: number; height: number };
+      refs: string[];
+      text?: string;
+    };
 
 /** Message the injected overlay posts back to the background worker. */
 export interface FeedbackMessage {
@@ -153,8 +160,38 @@ function feedbackOverlay(id: string, mode: string, prompt: string, options: stri
     return b;
   };
 
-  if (mode === "point") {
-    // Transparent capture layer below the bar; click picks a page element.
+  // Resolve the nearest ancestor carrying a snapshot ref (so the agent can act).
+  const resolveRef = (el: HTMLElement | null): string | undefined => {
+    let node: HTMLElement | null = el;
+    while (node && !node.getAttribute("data-ocb-ref")) {
+      node = node.parentElement;
+    }
+    return node?.getAttribute("data-ocb-ref") ?? undefined;
+  };
+  // The page element under a point — overlay momentarily hidden so it doesn't win.
+  const elementUnder = (x: number, y: number): HTMLElement | null => {
+    root.style.display = "none";
+    const el = document.elementFromPoint(x, y) as HTMLElement | null;
+    root.style.display = "";
+    return el;
+  };
+  const describe = (el: HTMLElement | null, a: Record<string, unknown>): void => {
+    if (!el) {
+      return;
+    }
+    const ref = resolveRef(el);
+    if (ref) {
+      a.ref = ref;
+    }
+    a.selector = cssPath(el);
+    const label = (el.textContent || "").trim().slice(0, 80);
+    if (label) {
+      a.text = label;
+    }
+  };
+
+  const PAGE_MODES = ["point", "element", "region", "comment"];
+  if (PAGE_MODES.includes(mode)) {
     const capture = document.createElement("div");
     capture.style.cssText = [
       "position:absolute",
@@ -162,45 +199,86 @@ function feedbackOverlay(id: string, mode: string, prompt: string, options: stri
       "cursor:crosshair",
       "background:rgba(59,130,246,.06)"
     ].join(";");
-    const hint = document.createElement("div");
-    hint.style.cssText = [
-      "position:absolute",
-      "bottom:16px",
-      "left:50%",
-      "transform:translateX(-50%)",
-      "background:#0f172a",
-      "color:#f8fafc",
-      "padding:6px 12px",
-      "border-radius:9999px",
-      "font-size:12px"
-    ].join(";");
-    hint.textContent = "Click the element you mean — Esc to skip";
-    capture.appendChild(hint);
-    capture.addEventListener("click", (e: MouseEvent) => {
-      const x = e.clientX;
-      const y = e.clientY;
-      root.style.display = "none";
-      const el = document.elementFromPoint(x, y) as HTMLElement | null;
-      root.style.display = "";
-      const annotation: Record<string, unknown> = { kind: "point", x, y };
-      if (el) {
-        let node: HTMLElement | null = el;
-        while (node && !node.getAttribute("data-ocb-ref")) {
-          node = node.parentElement;
-        }
-        const ref = node?.getAttribute("data-ocb-ref") ?? undefined;
-        if (ref) {
-          annotation.ref = ref;
-        }
-        annotation.selector = cssPath(el);
-        const label = (el.textContent || "").trim().slice(0, 80);
-        if (label) {
-          annotation.text = label;
-        }
-      }
-      finish([annotation]);
-    });
     root.appendChild(capture);
+
+    if (mode === "element") {
+      capture.appendChild(hintBar("Hover and click the element — Esc to skip"));
+      const hl = marker("2px solid");
+      root.appendChild(hl);
+      capture.addEventListener("mousemove", (e: MouseEvent) => {
+        const el = elementUnder(e.clientX, e.clientY);
+        if (!el) {
+          hl.style.display = "none";
+          return;
+        }
+        place(hl, el.getBoundingClientRect());
+      });
+      capture.addEventListener("click", (e: MouseEvent) => {
+        const a: Record<string, unknown> = { kind: "element" };
+        describe(elementUnder(e.clientX, e.clientY), a);
+        finish([a]);
+      });
+    } else if (mode === "region") {
+      capture.appendChild(hintBar("Drag a box over the area — Esc to skip"));
+      const band = marker("2px dashed");
+      root.appendChild(band);
+      let sx = 0;
+      let sy = 0;
+      let dragging = false;
+      capture.addEventListener("mousedown", (e: MouseEvent) => {
+        dragging = true;
+        sx = e.clientX;
+        sy = e.clientY;
+        place(band, rectOf(sx, sy, sx, sy));
+      });
+      capture.addEventListener("mousemove", (e: MouseEvent) => {
+        if (dragging) {
+          place(band, rectOf(sx, sy, e.clientX, e.clientY));
+        }
+      });
+      capture.addEventListener("mouseup", (e: MouseEvent) => {
+        if (!dragging) {
+          return;
+        }
+        dragging = false;
+        const rect = rectOf(sx, sy, e.clientX, e.clientY);
+        if (rect.width < 4 || rect.height < 4) {
+          band.style.display = "none";
+          return;
+        }
+        const refs: string[] = [];
+        root.style.display = "none";
+        for (const node of Array.from(document.querySelectorAll("[data-ocb-ref]"))) {
+          if (intersects(rect, node.getBoundingClientRect())) {
+            const ref = node.getAttribute("data-ocb-ref");
+            if (ref) {
+              refs.push(ref);
+            }
+          }
+        }
+        root.style.display = "";
+        finish([{ kind: "region", rect, refs }]);
+      });
+    } else {
+      // point | comment — click a spot; comment then asks for a note.
+      capture.appendChild(
+        hintBar(
+          mode === "comment"
+            ? "Click a spot, then add a note — Esc to skip"
+            : "Click the element you mean — Esc to skip"
+        )
+      );
+      capture.addEventListener("click", (e: MouseEvent) => {
+        const a: Record<string, unknown> = { kind: "point", x: e.clientX, y: e.clientY };
+        describe(elementUnder(e.clientX, e.clientY), a);
+        if (mode === "comment") {
+          capture.remove();
+          promptComment(a);
+        } else {
+          finish([a]);
+        }
+      });
+    }
   } else {
     const panel = document.createElement("div");
     panel.style.cssText = [
@@ -276,5 +354,118 @@ function feedbackOverlay(id: string, mode: string, prompt: string, options: stri
       depth++;
     }
     return parts.join(" > ");
+  }
+
+  /** A floating instruction pill near the bottom of the capture layer. */
+  function hintBar(textStr: string): HTMLDivElement {
+    const hint = document.createElement("div");
+    hint.style.cssText = [
+      "position:absolute",
+      "bottom:16px",
+      "left:50%",
+      "transform:translateX(-50%)",
+      "background:#0f172a",
+      "color:#f8fafc",
+      "padding:6px 12px",
+      "border-radius:9999px",
+      "font-size:12px",
+      "pointer-events:none"
+    ].join(";");
+    hint.textContent = textStr;
+    return hint;
+  }
+
+  /** A non-interactive highlight/selection box overlaid on the page. */
+  function marker(border: string): HTMLDivElement {
+    const m = document.createElement("div");
+    m.style.cssText = [
+      "position:fixed",
+      "pointer-events:none",
+      `border:${border} ${ACCENT}`,
+      "background:rgba(59,130,246,.12)",
+      "z-index:2147483646",
+      "display:none"
+    ].join(";");
+    return m;
+  }
+
+  /** Position a marker over a viewport rectangle. */
+  function place(m: HTMLElement, r: { x: number; y: number; width: number; height: number }): void {
+    m.style.display = "block";
+    m.style.left = `${r.x}px`;
+    m.style.top = `${r.y}px`;
+    m.style.width = `${r.width}px`;
+    m.style.height = `${r.height}px`;
+  }
+
+  /** Normalize two corners into a positive-size rect. */
+  function rectOf(
+    ax: number,
+    ay: number,
+    bx: number,
+    by: number
+  ): { x: number; y: number; width: number; height: number } {
+    return {
+      x: Math.min(ax, bx),
+      y: Math.min(ay, by),
+      width: Math.abs(bx - ax),
+      height: Math.abs(by - ay)
+    };
+  }
+
+  function intersects(
+    a: { x: number; y: number; width: number; height: number },
+    b: DOMRect
+  ): boolean {
+    return !(b.right < a.x || b.left > a.x + a.width || b.bottom < a.y || b.top > a.y + a.height);
+  }
+
+  /** After a point click in `comment` mode, collect an optional free-text note. */
+  function promptComment(annotation: Record<string, unknown>): void {
+    const panel = document.createElement("div");
+    panel.style.cssText = [
+      "position:absolute",
+      "top:50%",
+      "left:50%",
+      "transform:translate(-50%,-50%)",
+      "min-width:300px",
+      "max-width:440px",
+      "background:#fff",
+      "border:1px solid #e2e8f0",
+      "border-radius:14px",
+      "box-shadow:0 12px 40px rgba(2,6,23,.28)",
+      "padding:18px"
+    ].join(";");
+    const label = document.createElement("div");
+    label.style.cssText = "font-size:13px;margin-bottom:8px";
+    label.textContent = "Add a note about what you pointed at:";
+    const ta = document.createElement("textarea");
+    ta.style.cssText = [
+      "width:100%",
+      "box-sizing:border-box",
+      "min-height:72px",
+      "padding:8px",
+      "border:1px solid #cbd5e1",
+      "border-radius:8px",
+      "font:inherit",
+      "font-size:13px",
+      "resize:vertical"
+    ].join(";");
+    const actions = document.createElement("div");
+    actions.style.cssText = "display:flex;gap:8px;justify-content:flex-end;margin-top:12px";
+    const skipBtn = btn("No note", false);
+    skipBtn.addEventListener("click", () => finish([annotation]));
+    const add = btn("Add", true);
+    add.addEventListener("click", () => {
+      const t = ta.value.trim();
+      if (t) {
+        annotation.text = t;
+      }
+      finish([annotation]);
+    });
+    actions.append(skipBtn, add);
+    panel.append(label, ta, actions);
+    root.appendChild(panel);
+    ta.focus();
   }
 }

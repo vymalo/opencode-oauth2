@@ -161,16 +161,30 @@ screenshot or snapshot isn't enough to know what the user means ("which of these
 
 - `confirm` — a yes/no bar; returns `{ kind: "confirm", value }`.
 - `choose` — buttons for each `options[]` entry; returns `{ kind: "choice", value }`.
-- `point` — the user clicks one spot; the reply resolves to the **element ref** under the click
-  (plus a CSS selector and pixel coords) so you can immediately `browser_click ref:…` it.
+- `point` — the user clicks one spot; resolves to the **element ref** under the click (plus a CSS
+  selector and pixel coords).
+- `element` — hover highlights the element under the cursor; a click picks it →
+  `{ kind: "element", ref, selector, text }`.
+- `region` — the user drags a box; returns `{ kind: "region", rect, refs }` where `refs` are the
+  snapshot refs of every element inside the box.
+- `comment` — click a spot, then type a free-text note; the point annotation carries `text`.
+
+point/element/region resolve to element **refs** so you can immediately `browser_click ref:…` or
+`browser_snapshot` them — refs, not pixels, are what the agent acts on.
 
 The overlay is clearly branded as opencode-browser (so a page can't spoof the prompt), dismissible
 (Esc / Skip), and raises the toolbar badge + focuses the tab to get the user's attention. On no
-response it returns `{ responded: false, timedOut: true }` so the agent can fall back rather than
-hang. The wait uses a long per-command timeout (default 120 s, max ~290 s, capped broker-side at
-10 min); if the agent's turn is aborted or times out, the broker sends a `cancel` frame that tears
-the overlay down — a blocking prompt never orphans state in the page. Meaningless in headless/CI
-routing (no human at the browser), where it simply times out.
+response it returns `{ responded: false, timedOut: true }`; on a page that blocks the overlay
+(restricted / CSP) it returns `{ responded: false, error }` — distinct from a timeout — so the
+agent falls back to a screenshot/snapshot instead of re-asking. The wait uses a long per-command
+timeout (default 120 s, max ~290 s, capped broker-side at 10 min); if the agent's turn is aborted
+or times out, the broker sends a `cancel` frame that tears the overlay down — a blocking prompt
+never orphans state in the page. Meaningless in headless/CI routing (no human at the browser),
+where it simply times out.
+
+> Not yet implemented: a marker-annotated **screenshot** return (deferred — the structured refs are
+> more actionable than pixels, and a single tool result can't carry both) and a **side-panel**
+> annotation fallback for overlay-blocked pages (today such pages return the `error` above).
 
 ### Scoping tools and token cost
 

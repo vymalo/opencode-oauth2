@@ -331,11 +331,13 @@ export class CommandRouter {
         // Register before awaiting so a broker `cancel` mid-wait can tear it down.
         this.registerCanceller(frame.id, handle.cancel);
         const result = await handle.result;
-        const summary = result.timedOut
-          ? "feedback timed out"
-          : result.responded
-            ? `feedback: ${result.annotations.map((a) => a.kind).join(",") || "none"}`
-            : "feedback dismissed";
+        const summary = result.error
+          ? `feedback unavailable: ${result.error}`
+          : result.timedOut
+            ? "feedback timed out"
+            : result.responded
+              ? `feedback: ${result.annotations.map((a) => a.kind).join(",") || "none"}`
+              : "feedback dismissed";
         return { data: result, summary };
       }
       default:

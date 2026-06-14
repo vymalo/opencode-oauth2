@@ -273,3 +273,55 @@ describe("browser_request_feedback (interactive group)", () => {
     expect(typeof res === "object" ? res.output : res).toMatch(/ref e42/);
   });
 });
+
+describe("browser_request_feedback rich modes (Phase 2)", () => {
+  const interactive = (result: unknown) =>
+    createBrowserTools({
+      send: fakeSend(result),
+      options: baseOptions({ groups: ["interactive"] }),
+      logger: noopLogger
+    });
+
+  it("summarizes an element selection by ref", async () => {
+    const tools = interactive({
+      responded: true,
+      annotations: [{ kind: "element", ref: "e9", selector: "#x", text: "Inbox" }]
+    });
+    const res = await tools.browser_request_feedback.execute(
+      { group: "g", mode: "element" },
+      ctx()
+    );
+    expect(typeof res === "object" ? res.output : res).toMatch(/selected ref e9/);
+  });
+
+  it("summarizes a region with covered refs", async () => {
+    const tools = interactive({
+      responded: true,
+      annotations: [
+        { kind: "region", rect: { x: 0, y: 0, width: 120, height: 60 }, refs: ["e1", "e2"] }
+      ]
+    });
+    const res = await tools.browser_request_feedback.execute({ group: "g", mode: "region" }, ctx());
+    expect(typeof res === "object" ? res.output : res).toMatch(/120×60 region covering e1, e2/);
+  });
+
+  it("includes a comment note in the summary", async () => {
+    const tools = interactive({
+      responded: true,
+      annotations: [{ kind: "point", x: 1, y: 2, ref: "e3", text: "this label is wrong" }]
+    });
+    const res = await tools.browser_request_feedback.execute(
+      { group: "g", mode: "comment" },
+      ctx()
+    );
+    expect(typeof res === "object" ? res.output : res).toMatch(/this label is wrong/);
+  });
+
+  it("surfaces an overlay error distinctly from a timeout", async () => {
+    const tools = interactive({ responded: false, error: "page blocked the overlay" });
+    const res = await tools.browser_request_feedback.execute({ group: "g", mode: "point" }, ctx());
+    const output = typeof res === "object" ? res.output : res;
+    expect(output).toMatch(/page blocked the overlay/);
+    expect(output).toMatch(/screenshot\/snapshot/);
+  });
+});

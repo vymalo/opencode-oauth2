@@ -1,6 +1,28 @@
 # UI feedback / human-in-the-loop (design)
 
-Status: **design / not yet implemented.** Greenfield follow-up to the browser plugin + MCP server.
+Status: **Phases 0–2 implemented** (PR #49). Greenfield follow-up to the browser plugin + MCP server.
+
+## What shipped vs. the original plan
+
+- **Phase 0** — `CancelFrame` + per-command timeout: shipped as designed. The per-command timeout
+  rides on `CommandFrame.timeoutMs` (broker-only, like `target`) so guest agents get it too; guest
+  local timer = `requested + grace` so the broker (which can cancel the executor) always fires first.
+- **Phase 1** — `interactive` group + `browser_request_feedback` (confirm/choose/point), port-free
+  in-page overlay (background owns the timeout; the page reports back via `chrome.runtime.sendMessage`
+  rather than the originally-sketched long-lived port — simpler and survives the same MV3 lifetime as
+  the bridge's heartbeat), ref resolution, badge + tab-focus attention signal: shipped.
+- **Phase 2** — element/region/comment modes: shipped. **Deferred, deliberately:**
+  - *Marker-annotated screenshot return* — `NeutralResult` carries text **or** json **or** image, not
+    a combination; the resolved element refs are more actionable to the agent than burned-in pixels,
+    so the json-with-refs result wins. Revisit only if a real need to return both appears (would mean
+    widening `NeutralResult` + both adapter renderers).
+  - *Side-panel-over-screenshot fallback* — a sizeable separate UI feature. Today an overlay-blocked
+    page (restricted / CSP) returns `{ responded: false, error }`, distinct from a timeout, so the
+    agent falls back to screenshot/snapshot reasoning. The side panel remains a future enhancement.
+
+---
+
+(Original design below.)
 Builds on the routing in [`multi-client-routing.md`](multi-client-routing.md) and the ws transport in
 [`docs/adr/0001-bridge-transport-ws-not-bun-serve-or-socketio.md`](../docs/adr/0001-bridge-transport-ws-not-bun-serve-or-socketio.md).
 

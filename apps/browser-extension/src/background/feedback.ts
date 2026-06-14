@@ -18,6 +18,8 @@ import {
 export interface FeedbackResult {
   responded: boolean;
   timedOut?: boolean;
+  /** The overlay couldn't be shown (restricted/CSP page) — distinct from timeout. */
+  error?: string;
   annotations: FeedbackAnnotation[];
 }
 
@@ -108,10 +110,12 @@ export function startFeedback(tabId: number, id: string, req: FeedbackRequest): 
   }
 
   void flagAttention(tabId);
-  // Injection failure (e.g. a restricted page) ends the request as "no response"
-  // rather than hanging until the timeout.
-  void showFeedbackOverlay(tabId, id, req).catch(() => {
-    finish({ responded: false, timedOut: true, annotations: [] });
+  // Injection failure (e.g. a restricted or CSP-locked page) ends the request
+  // immediately with a distinct error rather than hanging until the timeout, so
+  // the agent can fall back to a screenshot instead of silently re-asking.
+  void showFeedbackOverlay(tabId, id, req).catch((err: unknown) => {
+    const reason = err instanceof Error ? err.message : "the overlay could not be shown";
+    finish({ responded: false, error: reason, annotations: [] });
   });
 
   return {
