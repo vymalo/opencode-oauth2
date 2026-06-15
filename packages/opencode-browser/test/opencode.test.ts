@@ -9,7 +9,9 @@ import type { BridgeTransport, TransportHandlers } from "../src/transport.js";
 vi.mock("../src/token-file.js", () => ({
   resolveSharedToken: (_port: number, explicit: string | undefined, generate: () => string) =>
     explicit ? { token: explicit, source: "explicit" } : { token: generate(), source: "generated" },
-  writeBridgeFile: vi.fn()
+  writeBridgeFile: vi.fn(),
+  // No shared file yet, so the host writes + advertises its own token.
+  readBridgeFile: vi.fn(() => null)
 }));
 
 import { createBrowserPlugin } from "../src/opencode.js";

@@ -14,7 +14,7 @@ import {
   type LogLevel
 } from "./logging.js";
 import type { ToolGroup } from "./schema.js";
-import { resolveSharedToken, writeBridgeFile } from "./token-file.js";
+import { readBridgeFile, resolveSharedToken, writeBridgeFile } from "./token-file.js";
 import { createNodeAgentSocket, createNodeTransport } from "./node-transport.js";
 import { createBrowserTools, type SaveScreenshot } from "./tools.js";
 import type { BridgeTransport } from "./transport.js";
@@ -146,16 +146,26 @@ export function createBrowserPlugin(factoryOptions: BrowserPluginFactoryOptions 
       tokenProvided ? options.token : undefined,
       generateToken
     );
-    writeBridgeFile(options.port, token);
 
-    // Only the host advertises the token (guests reuse the same one from the
-    // shared file — reprinting it per session is just noise, and re-emits the
-    // secret). Fired via onHost so a host reached by failover re-election still
-    // advertises it, not only the initial host. The `paste_into_extension` field
-    // name dodges the logger's redaction filter so the value stays copyable.
+    // Persist + advertise the token, **host-only** (fired via onHost so a host
+    // reached by failover re-election does it too). Writing only on the host —
+    // not unconditionally at load like before — means a guest that resolved a
+    // fresh token on a transient read miss can never clobber the live host's
+    // token in the shared file. We also never overwrite a token the file already
+    // carries (another adapter, or a deliberate rotation, owns it) — so the file
+    // stays the single source of truth. The `paste_into_extension` field name
+    // dodges the logger's redaction filter so the value stays copyable.
     const advertiseToken = () => {
+      const shared = readBridgeFile()?.token;
+      if (!shared) {
+        writeBridgeFile(options.port, token);
+      }
       if (source !== "explicit") {
-        logger.info("browser_bridge_token", { paste_into_extension: token, source, mode: "host" });
+        logger.info("browser_bridge_token", {
+          paste_into_extension: shared ?? token,
+          source,
+          mode: "host"
+        });
       }
     };
 
@@ -168,7 +178,10 @@ export function createBrowserPlugin(factoryOptions: BrowserPluginFactoryOptions 
         executor: executorProvided ? options.executor : undefined,
         timeoutMs: options.timeoutMs,
         label: "opencode-plugin",
-        onHost: advertiseToken
+        onHost: advertiseToken,
+        // Lets a long-lived host pick up a rotated token from the shared file on
+        // a failed handshake, instead of rejecting forever until it's restarted.
+        reloadToken: () => readBridgeFile()?.token
       },
       {
         logger,
