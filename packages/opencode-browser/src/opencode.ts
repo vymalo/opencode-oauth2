@@ -151,18 +151,19 @@ export function createBrowserPlugin(factoryOptions: BrowserPluginFactoryOptions 
     // reached by failover re-election does it too). Writing only on the host —
     // not unconditionally at load like before — means a guest that resolved a
     // fresh token on a transient read miss can never clobber the live host's
-    // token in the shared file. We also never overwrite a token the file already
-    // carries (another adapter, or a deliberate rotation, owns it) — so the file
-    // stays the single source of truth. The `paste_into_extension` field name
-    // dodges the logger's redaction filter so the value stays copyable.
+    // token in the shared file. We write whenever the file doesn't already match
+    // OUR (port, token): that keeps a port change in sync and lets an explicit
+    // token overwrite a stale generated one — but a no-op when the file already
+    // agrees, so a concurrent host doesn't thrash it. The `paste_into_extension`
+    // field name dodges the logger's redaction filter so the value stays copyable.
     const advertiseToken = () => {
-      const shared = readBridgeFile()?.token;
-      if (!shared) {
+      const existing = readBridgeFile();
+      if (!existing || existing.port !== options.port || existing.token !== token) {
         writeBridgeFile(options.port, token);
       }
       if (source !== "explicit") {
         logger.info("browser_bridge_token", {
-          paste_into_extension: shared ?? token,
+          paste_into_extension: token,
           source,
           mode: "host"
         });
@@ -181,7 +182,9 @@ export function createBrowserPlugin(factoryOptions: BrowserPluginFactoryOptions 
         onHost: advertiseToken,
         // Lets a long-lived host pick up a rotated token from the shared file on
         // a failed handshake, instead of rejecting forever until it's restarted.
-        reloadToken: () => readBridgeFile()?.token
+        // Disabled for an EXPLICIT token: the operator pinned it, so the file
+        // must never override their configured secret.
+        reloadToken: source === "explicit" ? undefined : () => readBridgeFile()?.token
       },
       {
         logger,

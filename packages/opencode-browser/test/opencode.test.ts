@@ -1,5 +1,5 @@
 import type { PluginInput, PluginOptions } from "@opencode-ai/plugin";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentSocketFactory } from "../src/agent-client.js";
 import type { BridgeTransport, TransportHandlers } from "../src/transport.js";
@@ -15,6 +15,7 @@ vi.mock("../src/token-file.js", () => ({
 }));
 
 import { createBrowserPlugin } from "../src/opencode.js";
+import { readBridgeFile, writeBridgeFile } from "../src/token-file.js";
 
 /** A transport that "binds" instantly (no real socket) → host election wins. */
 class FakeTransport implements BridgeTransport {
@@ -80,6 +81,31 @@ describe("createBrowserPlugin", () => {
     const explicit = await load({ token: "my-secret" });
     const logged2 = explicit.client.log.mock.calls.map((c) => c[0]?.body?.message);
     expect(logged2).not.toContain("browser_bridge_token");
+  });
+
+  describe("host token persistence (bridge.json)", () => {
+    beforeEach(() => {
+      vi.mocked(writeBridgeFile).mockClear();
+      vi.mocked(readBridgeFile).mockReset().mockReturnValue(null);
+    });
+
+    it("rewrites bridge.json when the file points at a stale port (keeps discovery in sync)", async () => {
+      vi.mocked(readBridgeFile).mockReturnValueOnce({ port: 9999, token: "generated-token" });
+      await load(undefined); // default port 4517
+      expect(writeBridgeFile).toHaveBeenCalledWith(4517, "generated-token");
+    });
+
+    it("writes an explicit token over a stale file value (operator config wins)", async () => {
+      vi.mocked(readBridgeFile).mockReturnValueOnce({ port: 4517, token: "old-generated" });
+      await load({ token: "my-secret" });
+      expect(writeBridgeFile).toHaveBeenCalledWith(4517, "my-secret");
+    });
+
+    it("does not rewrite bridge.json when the file already matches our port and token", async () => {
+      vi.mocked(readBridgeFile).mockReturnValueOnce({ port: 4517, token: "generated-token" });
+      await load(undefined);
+      expect(writeBridgeFile).not.toHaveBeenCalled();
+    });
   });
 
   it("config hook resolves and accepts a log level", async () => {
