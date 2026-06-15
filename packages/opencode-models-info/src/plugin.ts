@@ -32,8 +32,13 @@ export interface EnrichDeps {
 export async function enrichConfig(input: EnrichConfigInput, deps: EnrichDeps): Promise<void> {
   const providers = input.provider;
   if (!providers) {
+    deps.logger.trace("models_info_enrich_no_providers", {});
     return;
   }
+
+  deps.logger.trace("models_info_enrich_start", {
+    providerCount: Object.keys(providers).length
+  });
 
   await Promise.allSettled(
     Object.entries(providers).map(([providerId, providerConfig]) =>
@@ -49,13 +54,24 @@ async function enrichProvider(
 ): Promise<void> {
   try {
     if (!providerConfig) {
+      deps.logger.trace("models_info_provider_no_config", { providerId });
       return;
     }
     const opts = parseMetaOptions(providerConfig.options);
+    deps.logger.trace("models_info_provider_meta_parsed", {
+      providerId,
+      hasModelsInfoUrl: Boolean(opts)
+    });
     if (!opts) {
       return;
     }
     const models = providerConfig.models;
+    const modelCount = models ? Object.keys(models).length : 0;
+    deps.logger.trace("models_info_provider_models_present", {
+      providerId,
+      hasModels: modelCount > 0,
+      modelCount
+    });
     if (!models || Object.keys(models).length === 0) {
       deps.logger.debug("models_info_provider_skipped_no_models", { providerId });
       return;
@@ -66,26 +82,61 @@ async function enrichProvider(
     // `modelsInfoHeaders` win on conflict. This is what makes the plugin
     // truly auth-agnostic — we never need to know how the token was acquired.
     const providerHeaders = asHeaderMap(providerConfig.options?.headers);
+    deps.logger.trace("models_info_provider_headers_resolved", {
+      providerId,
+      hasProviderHeaders: Boolean(providerHeaders),
+      hasMetaHeaders: Boolean(opts.modelsInfoHeaders)
+    });
     const record = await loadRecord(providerId, opts, providerHeaders, deps);
     if (!record) {
+      deps.logger.trace("models_info_no_record", { providerId });
       return;
     }
 
     const byId = new Map<string, OpenRouterModel>(record.models.map((m) => [m.id, m]));
     const overwrite = opts.modelsInfoOverwrite ? new Set(opts.modelsInfoOverwrite) : undefined;
+    deps.logger.trace("models_info_match_table_built", {
+      providerId,
+      sourceModels: record.models.length,
+      overwriteFields: overwrite ? [...overwrite] : []
+    });
 
     let enrichedCount = 0;
     for (const [modelId, modelConfig] of Object.entries(models)) {
       const declaredId = typeof modelConfig.id === "string" ? modelConfig.id : undefined;
+      const matchById = byId.has(modelId);
       const match = byId.get(modelId) ?? (declaredId ? byId.get(declaredId) : undefined);
       if (!match) {
+        deps.logger.trace("models_info_model_unmatched", { providerId, modelId, declaredId });
         continue;
       }
+      deps.logger.trace("models_info_model_matched", {
+        providerId,
+        modelId,
+        matchedBy: matchById ? "id" : "declaredId"
+      });
       const derived = mapOpenRouterEntry(match, overwrite);
+      const derivedFields = Object.keys(derived);
+      const appliedFields = derivedFields.filter(
+        (f) => modelConfig[f] === undefined || overwrite?.has(f)
+      );
+      const skippedFields = derivedFields.filter((f) => !appliedFields.includes(f));
+      deps.logger.trace("models_info_model_merge", {
+        providerId,
+        modelId,
+        derivedFields,
+        appliedFields,
+        skippedFields
+      });
       mergeIntoModel(modelConfig, derived, overwrite);
       enrichedCount += 1;
     }
 
+    deps.logger.trace("models_info_provider_done", {
+      providerId,
+      enrichedCount,
+      totalModels: Object.keys(models).length
+    });
     deps.logger.debug("models_info_enriched", {
       providerId,
       enrichedCount,
@@ -112,8 +163,14 @@ async function loadRecord(
   // provider's rotating auth header) — so switching tenants busts the cache,
   // but an OAuth2 token rotation does not thrash it. See cacheKey() docstring.
   const key = cacheKey(providerId, opts.modelsInfoUrl, opts.modelsInfoHeaders);
+  deps.logger.trace("models_info_cache_key_computed", { providerId, key });
   const now = deps.now ? deps.now() : Date.now();
   const cached = await deps.cache.get(key);
+  deps.logger.trace("models_info_cache_lookup", {
+    providerId,
+    found: Boolean(cached),
+    expired: cached ? isExpired(cached, now) : undefined
+  });
 
   if (cached && !isExpired(cached, now)) {
     deps.logger.debug("models_info_cache_hit", {
@@ -125,12 +182,23 @@ async function loadRecord(
   }
 
   const headers = buildFetchHeaders(opts, providerHeaders);
+  deps.logger.trace("models_info_fetch_start", {
+    providerId,
+    url: opts.modelsInfoUrl,
+    hasHeaders: Boolean(headers),
+    hasConditional: Boolean(cached?.etag)
+  });
   const result = await fetchOpenRouterModels({
     url: opts.modelsInfoUrl,
     headers,
     timeoutMs: opts.modelsInfoTimeoutMs,
     etag: cached?.etag,
     fetchImpl: deps.fetchImpl
+  });
+  deps.logger.trace("models_info_fetch_result", {
+    providerId,
+    status: result.status,
+    count: result.models?.length
   });
 
   if (result.status === "ok" && result.models) {

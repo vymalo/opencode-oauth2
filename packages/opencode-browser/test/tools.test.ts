@@ -10,7 +10,7 @@ import { createBrowserTools, type SendFn } from "../src/tools.js";
 import type { ResolvedBrowserOptions } from "../src/types.js";
 
 const z = tool.schema;
-const noopLogger: Logger = { debug() {}, info() {}, warn() {}, error() {} };
+const noopLogger: Logger = { trace() {}, debug() {}, info() {}, warn() {}, error() {} };
 
 function baseOptions(overrides: Partial<ResolvedBrowserOptions> = {}): ResolvedBrowserOptions {
   return {

@@ -3,6 +3,7 @@ import { constants as fsConstants } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 
+import type { Logger } from "./logging.js";
 import type { CachedServerState } from "./types.js";
 
 function resolveDefaultCacheRoot(): string {
@@ -49,7 +50,10 @@ function hasValidTokenShape(token: unknown): boolean {
 }
 
 export class FileCacheStore {
-  constructor(private readonly baseDir: string) {}
+  constructor(
+    private readonly baseDir: string,
+    private readonly logger?: Logger
+  ) {}
 
   async ensureReady(): Promise<void> {
     await mkdir(this.baseDir, { recursive: true, mode: 0o700 });
@@ -71,9 +75,15 @@ export class FileCacheStore {
       }
 
       if (parsed.token && !hasValidTokenShape(parsed.token)) {
+        this.logger?.trace("oauth2_cache_token_dropped_invalid_shape", { serverId });
         parsed.token = undefined;
       }
 
+      this.logger?.trace("oauth2_cache_file_read", {
+        serverId,
+        modelCount: Array.isArray(parsed.models) ? parsed.models.length : 0,
+        hasToken: Boolean(parsed.token)
+      });
       return parsed;
     } catch (error) {
       if (
@@ -82,6 +92,7 @@ export class FileCacheStore {
         "code" in error &&
         (error as { code: string }).code === "ENOENT"
       ) {
+        this.logger?.trace("oauth2_cache_file_missing", { serverId });
         return undefined;
       }
       throw error;
@@ -102,6 +113,11 @@ export class FileCacheStore {
     });
 
     await rename(tempPath, filePath);
+    this.logger?.trace("oauth2_cache_file_written", {
+      serverId: state.serverId,
+      modelCount: Array.isArray(state.models) ? state.models.length : 0,
+      hasToken: Boolean(state.token)
+    });
 
     try {
       await chmod(filePath, 0o600);

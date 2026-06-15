@@ -3,6 +3,7 @@ import type { Logger } from "../src/logging.js";
 
 export function createSilentLogger(): Logger {
   return {
+    trace() {},
     debug() {},
     info() {},
     warn() {},

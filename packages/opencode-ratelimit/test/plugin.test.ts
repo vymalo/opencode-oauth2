@@ -15,6 +15,7 @@ const NOW = 1_700_000_000_000;
 
 function silentLogger(): Logger {
   return {
+    trace: vi.fn(),
     debug: vi.fn(),
     info: vi.fn(),
     warn: vi.fn(),

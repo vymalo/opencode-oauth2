@@ -95,6 +95,7 @@ export class AgentClient implements AgentEndpoint {
           }
           if (frame.type === "ready") {
             this.ready = true;
+            this.deps.logger.trace("browser_guest_ready", { label: this.opts.label });
             for (const w of this.readyWaiters.splice(0)) {
               w();
             }
@@ -162,6 +163,7 @@ export class AgentClient implements AgentEndpoint {
       // Forward the override so the host broker applies (and clamps) it.
       timeoutMs
     };
+    this.deps.logger.trace("browser_guest_command_send", { id, action, group, target });
     // Backstop only — let the broker's deadline fire first (it can cancel the
     // executor); fall back to the global timeout when no override is given.
     const requested = timeoutMs !== undefined ? timeoutMs : this.opts.timeoutMs;
@@ -230,6 +232,7 @@ export class AgentClient implements AgentEndpoint {
     if (!p) {
       return;
     }
+    this.deps.logger.trace("browser_guest_result_received", { id: frame.id, ok: frame.ok });
     this.clearPending(frame.id);
     if (frame.ok) {
       p.resolve(frame.data);

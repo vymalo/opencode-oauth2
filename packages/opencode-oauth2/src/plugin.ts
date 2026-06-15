@@ -46,7 +46,8 @@ export class OAuth2ModelSyncPlugin {
     this.config = validateConfig(this.configInput);
     this.logger = options.logger ?? createJsonConsoleLogger(this.config.logLevel);
     this.cacheStore = new FileCacheStore(
-      options.cacheDir ?? resolveCacheDir(this.config.cacheNamespace)
+      options.cacheDir ?? resolveCacheDir(this.config.cacheNamespace),
+      this.logger
     );
   }
 
@@ -59,6 +60,12 @@ export class OAuth2ModelSyncPlugin {
 
     for (const server of this.config.servers) {
       const cached = await this.cacheStore.loadServerState(server.id);
+      this.logger.trace("oauth2_cache_load", {
+        serverId: server.id,
+        hit: Boolean(cached),
+        cachedModelCount: cached?.models.length ?? 0,
+        hasCachedToken: Boolean(cached?.token)
+      });
       const initialState: CachedServerState = cached ?? {
         serverId: server.id,
         updatedAt: Date.now(),
@@ -92,6 +99,12 @@ export class OAuth2ModelSyncPlugin {
     const interactiveWarmup =
       options.interactive ?? Boolean(process.stdin?.isTTY && process.stdout?.isTTY);
 
+    this.logger.trace("oauth2_start", {
+      serverCount: this.config.servers.length,
+      warmup,
+      interactiveWarmup
+    });
+
     for (const server of this.config.servers) {
       if (warmup) {
         try {
@@ -104,6 +117,10 @@ export class OAuth2ModelSyncPlugin {
         }
       }
 
+      this.logger.trace("oauth2_scheduler_registered", {
+        serverId: server.id,
+        intervalMinutes: server.syncIntervalMinutes
+      });
       const handle = startScheduler({
         intervalMs: Math.round(server.syncIntervalMinutes * 60_000),
         logger: this.logger,
@@ -161,17 +178,39 @@ export class OAuth2ModelSyncPlugin {
     const previousState = runtime.state;
 
     try {
+      this.logger.trace("oauth2_sync_ensure_token", {
+        serverId,
+        hadCachedToken: Boolean(previousState.token),
+        hadRefreshToken: Boolean(previousState.token?.refreshToken),
+        interactive: options.interactive !== false
+      });
       const token = await oauth.ensureToken(previousState.token, {
         interactive: options.interactive
+      });
+      this.logger.trace("oauth2_model_discovery_fetch_start", {
+        serverId,
+        baseURL: server.baseURL,
+        tokenChanged: token.accessToken !== previousState.token?.accessToken
       });
       const rawModels = await fetchModels(server.baseURL, token, {
         fetchImpl: this.options.fetchImpl,
         timeoutMs: this.config.httpTimeoutMs,
         logger: this.logger
       });
+      this.logger.trace("oauth2_model_discovery_fetch_finished", {
+        serverId,
+        rawModelCount: rawModels.length
+      });
 
       const normalizedModels = normalizeModelList(rawModels, server.nameOverrides);
       const diff = diffModels(previousState.models, normalizedModels);
+      this.logger.trace("oauth2_model_discovery_normalized", {
+        serverId,
+        modelCount: normalizedModels.length,
+        added: diff.added.length,
+        removed: diff.removed.length,
+        renamed: diff.renamed.length
+      });
 
       const nextState: CachedServerState = {
         ...previousState,
@@ -240,10 +279,24 @@ export class OAuth2ModelSyncPlugin {
     // returned as-is, a stale-but-refreshable one is refreshed, and anything
     // that would need a browser / device-code prompt throws instead of
     // blocking. The per-chat path leaves it unset so a real login can proceed.
+    this.logger.trace("oauth2_ensure_access_token_start", {
+      serverId,
+      hadCachedToken: Boolean(runtime.state.token),
+      hadRefreshToken: Boolean(runtime.state.token?.refreshToken),
+      interactive: options.interactive !== false
+    });
     const token = await oauth.ensureToken(runtime.state.token, {
       interactive: options.interactive
     });
     if (token.accessToken !== runtime.state.token?.accessToken) {
+      this.logger.trace("oauth2_ensure_access_token_refreshed", {
+        serverId,
+        present: Boolean(token.accessToken),
+        expiresInSeconds:
+          typeof token.expiresAt === "number"
+            ? Math.max(0, Math.round((token.expiresAt - Date.now()) / 1000))
+            : undefined
+      });
       const nextState: CachedServerState = {
         ...runtime.state,
         updatedAt: Date.now(),
@@ -251,6 +304,11 @@ export class OAuth2ModelSyncPlugin {
       };
       await this.cacheStore.saveServerState(nextState);
       runtime.state = nextState;
+    } else {
+      this.logger.trace("oauth2_ensure_access_token_reused_cached", {
+        serverId,
+        present: Boolean(token.accessToken)
+      });
     }
 
     return token;

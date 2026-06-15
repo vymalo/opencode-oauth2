@@ -1,4 +1,4 @@
-export type LogLevel = "debug" | "info" | "warn" | "error";
+export type LogLevel = "trace" | "debug" | "info" | "warn" | "error";
 
 /** How rate-limit state is partitioned. */
 export type RateLimitScope = "provider" | "model";

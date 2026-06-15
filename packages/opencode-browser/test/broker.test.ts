@@ -11,7 +11,7 @@ import {
 } from "../src/protocol.js";
 import type { BridgeTransport, ClientConnection, TransportHandlers } from "../src/transport.js";
 
-const noopLogger: Logger = { debug() {}, info() {}, warn() {}, error() {} };
+const noopLogger: Logger = { trace() {}, debug() {}, info() {}, warn() {}, error() {} };
 
 class FakeTransport implements BridgeTransport {
   handlers: TransportHandlers | null = null;
