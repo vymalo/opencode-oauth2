@@ -89,12 +89,14 @@ export async function createEndpoint(opts: EndpointOptions, deps: EndpointDeps):
       return;
     }
     mode = "electing";
+    deps.logger.trace("browser_election_start", { host: opts.host, port: opts.port });
 
     // 1) Try to host (win the bind). Everything is inside the try so a transport
     // that throws at construction (or a Broker that fails to start) degrades to
     // guest instead of crashing the plugin load.
     let candidate: Broker | null = null;
     try {
+      deps.logger.trace("browser_bind_attempt", { host: opts.host, port: opts.port });
       const transport = deps.createServerTransport();
       candidate = new Broker(
         {
@@ -111,6 +113,7 @@ export async function createEndpoint(opts: EndpointOptions, deps: EndpointDeps):
       broker = candidate;
       current = candidate.createLocalAgent();
       mode = "host";
+      deps.logger.trace("browser_bind_won", { host: opts.host, port: opts.port });
       deps.logger.info("browser_endpoint_mode", { mode: "host" });
       // Isolate the side-effect callback: a throw here must NOT reach the outer
       // catch, which would stop the freshly-started broker and degrade to guest.
@@ -128,6 +131,7 @@ export async function createEndpoint(opts: EndpointOptions, deps: EndpointDeps):
       } catch {
         /* never bound */
       }
+      deps.logger.trace("browser_bind_lost", { addrInUse: isAddrInUse(err) });
       if (!isAddrInUse(err)) {
         deps.logger.warn("browser_endpoint_bind_error", {
           message: err instanceof Error ? err.message : String(err)
@@ -136,6 +140,7 @@ export async function createEndpoint(opts: EndpointOptions, deps: EndpointDeps):
     }
 
     // 2) Someone else hosts — join as a guest.
+    deps.logger.trace("browser_guest_connect_attempt", { url });
     const client = new AgentClient(
       { url, token: opts.token, label: opts.label, timeoutMs: opts.timeoutMs },
       {

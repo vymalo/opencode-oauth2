@@ -3,6 +3,7 @@ import type { LogLevel } from "./types.js";
 export type { LogLevel } from "./types.js";
 
 export const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
+  trace: 5,
   debug: 10,
   info: 20,
   warn: 30,
@@ -16,6 +17,7 @@ export interface LogFields {
 }
 
 export interface Logger {
+  trace(event: string, fields?: LogFields): void;
   debug(event: string, fields?: LogFields): void;
   info(event: string, fields?: LogFields): void;
   warn(event: string, fields?: LogFields): void;
@@ -63,6 +65,7 @@ export function createJsonConsoleLogger(minLevel: LogLevel = DEFAULT_LOG_LEVEL):
   };
 
   return {
+    trace: (event, fields) => write("trace", event, fields),
     debug: (event, fields) => write("debug", event, fields),
     info: (event, fields) => write("info", event, fields),
     warn: (event, fields) => write("warn", event, fields),
@@ -76,7 +79,9 @@ export function fromOpenCodeLogLevel(value: unknown): LogLevel | undefined {
   }
   switch (value.toUpperCase()) {
     case "DEBUG":
-      return "debug";
+      // Host DEBUG unlocks our most-verbose internal tier (trace) — the browser
+      // bridge is the package users debug most, so DEBUG opts into full tracing.
+      return "trace";
     case "INFO":
       return "info";
     case "WARN":

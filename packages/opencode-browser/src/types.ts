@@ -1,6 +1,6 @@
 import type { ToolGroup } from "./schema.js";
 
-export type LogLevel = "debug" | "info" | "warn" | "error";
+export type LogLevel = "trace" | "debug" | "info" | "warn" | "error";
 
 export type { ToolGroup } from "./schema.js";
 

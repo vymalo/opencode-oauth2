@@ -22,7 +22,13 @@ function stderrLogger(): Logger {
     (event: string, fields?: Record<string, unknown>): void => {
       process.stderr.write(`[${level}] ${event}${fields ? ` ${JSON.stringify(fields)}` : ""}\n`);
     };
-  return { debug: () => {}, info: write("info"), warn: write("warn"), error: write("error") };
+  return {
+    trace: () => {},
+    debug: () => {},
+    info: write("info"),
+    warn: write("warn"),
+    error: write("error")
+  };
 }
 
 function resolveGroups(raw: string | undefined): ToolGroup[] {

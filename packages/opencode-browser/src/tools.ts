@@ -172,7 +172,14 @@ export function createBrowserTools(deps: ToolDeps): Record<string, ToolDefinitio
         const group = typeof args.group === "string" ? args.group : "";
         const target = typeof args.target === "string" ? args.target : undefined;
         const params = spec.params ? spec.params(args) : args;
+        deps.logger.trace("browser_tool_invoked", {
+          tool: spec.name,
+          action: spec.action,
+          group,
+          target
+        });
         const data = await deps.send(spec.action, group, params, ctx.abort, target, spec.timeoutMs);
+        deps.logger.trace("browser_tool_completed", { tool: spec.name, group });
         const result: NeutralResult = spec.result
           ? spec.result(data, args)
           : { kind: "text", text: `${spec.name} ok` };

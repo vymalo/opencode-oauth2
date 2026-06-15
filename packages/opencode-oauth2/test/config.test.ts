@@ -462,11 +462,28 @@ describe("validateConfig", () => {
     expect(result.logLevel).toBe("debug");
   });
 
+  it("accepts the most-verbose 'trace' logLevel", () => {
+    const result = validateConfig({
+      logLevel: "trace",
+      servers: [
+        {
+          id: "server-1",
+          issuer: "https://auth.example.com",
+          baseURL: "https://api.example.com/v1",
+          clientId: "client-id",
+          scopes: ["openid"]
+        }
+      ]
+    });
+
+    expect(result.logLevel).toBe("trace");
+  });
+
   it("rejects an unknown logLevel value", () => {
     expect(() =>
       validateConfig({
         // biome-ignore lint/suspicious/noExplicitAny: testing invalid input
-        logLevel: "trace" as any,
+        logLevel: "verbose" as any,
         servers: [
           {
             id: "server-1",

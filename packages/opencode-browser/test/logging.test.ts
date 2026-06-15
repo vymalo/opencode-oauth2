@@ -14,11 +14,23 @@ describe("createJsonConsoleLogger", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const logger = createJsonConsoleLogger("warn");
+    logger.trace("t");
     logger.debug("d");
     logger.info("i");
     logger.warn("w");
     expect(log).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("emits trace at the trace level but suppresses it at debug", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    createJsonConsoleLogger("trace").trace("seen", { n: 1 });
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(lastJson(log as never)).toMatchObject({ level: "trace", event: "seen", n: 1 });
+
+    log.mockClear();
+    createJsonConsoleLogger("debug").trace("hidden");
+    expect(log).not.toHaveBeenCalled();
   });
 
   it("routes error and warn to their console channels", () => {
@@ -61,13 +73,16 @@ describe("createJsonConsoleLogger", () => {
 
 describe("fromOpenCodeLogLevel", () => {
   it("maps known levels case-insensitively", () => {
-    expect(fromOpenCodeLogLevel("DEBUG")).toBe("debug");
+    // Host DEBUG unlocks our most-verbose internal tier (trace).
+    expect(fromOpenCodeLogLevel("DEBUG")).toBe("trace");
     expect(fromOpenCodeLogLevel("info")).toBe("info");
     expect(fromOpenCodeLogLevel("Warn")).toBe("warn");
     expect(fromOpenCodeLogLevel("ERROR")).toBe("error");
   });
 
   it("returns undefined for unknown or non-string values", () => {
+    // "trace" is an internal tier only — it's not a host log level, so the host
+    // string "trace" does not map (DEBUG is the host level that unlocks trace).
     expect(fromOpenCodeLogLevel("trace")).toBeUndefined();
     expect(fromOpenCodeLogLevel(42)).toBeUndefined();
     expect(fromOpenCodeLogLevel(undefined)).toBeUndefined();

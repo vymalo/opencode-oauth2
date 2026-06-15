@@ -14,6 +14,9 @@ type Entry = { level: string; event: string; fields?: Record<string, unknown> };
 
 function recordingLogger(entries: Entry[]): Logger {
   return {
+    trace(event, fields) {
+      entries.push({ level: "trace", event, fields });
+    },
     debug(event, fields) {
       entries.push({ level: "debug", event, fields });
     },
