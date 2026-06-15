@@ -12,6 +12,12 @@ import type { ExecutorKind, ExecutorMode } from "../shared/types";
 
 const INITIAL_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 30_000;
+// Retry interval after a handshake *rejection* (bad token). Much slower than the
+// network-drop backoff so a doomed/stale token doesn't flood the bridge ~1/s —
+// but NOT dormant: we keep retrying at this cadence so the link self-heals the
+// moment a good host comes back (e.g. the operator restarts the process that
+// owns the bridge port, or fixes a rotated token) without a manual reconnect.
+const REJECTED_RETRY_MS = 60_000;
 const HEARTBEAT_MS = 25_000;
 
 export interface BridgeClientConfig {
@@ -69,11 +75,22 @@ export class BridgeClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private stopped = true;
+  /**
+   * Set when the broker rejects our handshake (bad token). We don't go dormant —
+   * the rejection is often the *host's* fault (a stale/rotated token, or an old
+   * host still squatting the port), fixed host-side without touching the
+   * extension. So we keep retrying, just slowly (`REJECTED_RETRY_MS`), and the
+   * link self-heals when a good host returns. Cleared on a successful `ready`
+   * (and on a fresh `connect()`/`reconnect()`), which restores fast backoff.
+   */
+  private handshakeRejected = false;
 
   constructor(private readonly deps: BridgeClientDeps) {}
 
   async connect(): Promise<void> {
     this.stopped = false;
+    this.handshakeRejected = false;
+    this.backoff = INITIAL_BACKOFF_MS;
     this.clearReconnect();
     await this.openSocket();
   }
@@ -157,6 +174,7 @@ export class BridgeClient {
     switch (frame.type) {
       case "ready":
         this.backoff = INITIAL_BACKOFF_MS;
+        this.handshakeRejected = false;
         this.startHeartbeat();
         if (frame.executor && this.deps.onServerPreference) {
           await this.deps.onServerPreference(frame.executor as ExecutorMode);
@@ -171,6 +189,22 @@ export class BridgeClient {
       case "command":
         await this.runCommand(ws, frame);
         return;
+      case "rejected": {
+        // The broker refused our handshake. Don't hammer — but don't go dormant
+        // either: the cause is often host-side (a stale/rotated token, or an old
+        // host still holding the port), fixed without touching us. `onClose`
+        // (which follows immediately) sees `handshakeRejected` and schedules a
+        // slow retry, so we self-heal when a good host returns. The message is
+        // neutral — re-pasting may not be the fix.
+        this.handshakeRejected = true;
+        this.stopHeartbeat();
+        const hint =
+          frame.reason === "bad_token"
+            ? "bridge rejected the token — it may be stale/rotated, or another host is running. Re-paste the current token, or restart the host that owns the bridge port."
+            : `bridge rejected the connection (${frame.reason})`;
+        await setStatus({ state: "error", lastError: hint, connectedAt: undefined });
+        return;
+      }
       case "release":
         await this.deps.onRelease?.();
         return;
@@ -206,9 +240,16 @@ export class BridgeClient {
     if (this.stopped) {
       return;
     }
-    // Server went away — release control (detach the debugger) while we're
-    // disconnected; a later command re-attaches if it comes back.
+    // Release control either way (detach the debugger) while disconnected.
     void this.deps.onDisconnected?.();
+    if (this.handshakeRejected) {
+      // Handshake was rejected — keep the actionable error status visible and
+      // retry slowly (scheduleReconnect honors REJECTED_RETRY_MS) so we recover
+      // automatically when a good host returns, without flooding meanwhile.
+      this.scheduleReconnect();
+      return;
+    }
+    // Server went away — a later command re-attaches if it comes back.
     void setStatus({ state: "connecting", connectedAt: undefined });
     this.scheduleReconnect();
   }
@@ -222,6 +263,12 @@ export class BridgeClient {
 
   private scheduleReconnect(): void {
     this.clearReconnect();
+    if (this.handshakeRejected) {
+      // Rejected token: fixed slow cadence (no exponential ramp), so we neither
+      // flood nor give up. `ready` clears the flag and restores fast backoff.
+      this.reconnectTimer = setTimeout(() => void this.openSocket(), REJECTED_RETRY_MS);
+      return;
+    }
     const delay = this.backoff;
     this.backoff = Math.min(this.backoff * 2, MAX_BACKOFF_MS);
     this.reconnectTimer = setTimeout(() => void this.openSocket(), delay);

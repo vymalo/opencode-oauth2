@@ -116,6 +116,54 @@ describe("Broker handshake", () => {
     expect(exec.isClosed()).toBe(true);
   });
 
+  it("sends a `rejected` frame before closing a bad-token handshake", async () => {
+    const { h } = await setup();
+    const exec = connectExecutor(h, { token: "wrong" });
+    // The dialer needs to see WHY, before the socket drops, to stop retrying.
+    expect(decodeFrame(exec.sent[0])).toMatchObject({ type: "rejected", reason: "bad_token" });
+    expect(exec.isClosed()).toBe(true);
+  });
+
+  it("logs non-secret token fingerprints (expected vs got) on rejection", async () => {
+    const transport = new FakeTransport();
+    const logger: Logger = {
+      trace: vi.fn(),
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn()
+    };
+    const broker = new Broker(
+      { host: "127.0.0.1", port: 4517, token: "secret", timeoutMs: 1000 },
+      { logger, transport }
+    );
+    await broker.start();
+    const handlers = transport.handlers;
+    if (!handlers) {
+      throw new Error("transport did not register handlers");
+    }
+    connectExecutor(() => handlers, { token: "wrong", id: "e1" });
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      "browser_handshake_rejected",
+      expect.objectContaining({
+        reason: "bad_token",
+        role: "extension",
+        expected: expect.stringMatching(/^len6\./), // fingerprint of "secret"
+        got: expect.stringMatching(/^len5\./) // fingerprint of "wrong"
+      })
+    );
+    // The fingerprints must differ (that's the whole diagnostic value) and never
+    // contain the raw tokens.
+    const call = (logger.warn as ReturnType<typeof vi.fn>).mock.calls[0][1] as {
+      expected: string;
+      got: string;
+    };
+    expect(call.expected).not.toBe(call.got);
+    expect(`${call.expected}${call.got}`).not.toContain("secret");
+    expect(`${call.expected}${call.got}`).not.toContain("wrong");
+  });
+
   it("accepts an agent", async () => {
     const { h } = await setup();
     const agent = connectAgent(h);
