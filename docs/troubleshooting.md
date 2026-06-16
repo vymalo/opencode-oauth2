@@ -301,6 +301,21 @@ kubectl logs deploy/opencode-bot --tail=200 \
 
 If `oauth_jwt_bearer_started` count grows steadily but `oauth_jwt_bearer_success` plateaus, you have a failing re-auth.
 
+## `sync_failed … ENOENT … rename '<serverId>.json.tmp' -> '<serverId>.json'`
+
+**What's happening.** Several OpenCode instances started at nearly the same moment and all ran the oauth2 model sync for the same provider. The desktop app triggers this whenever it restores more than one project window at launch — each window is its own OpenCode process, and they all write the same cache file.
+
+The model-sync cache writes atomically: write a temp file, then `rename` it onto the real path. Before this fix every writer used the **same** temp name (`<serverId>.json.tmp`), so two concurrent processes raced — process A's `rename` consumed the temp file process B had just written, and B's `rename` then failed with `ENOENT` on a temp file that no longer existed.
+
+**Impact.** Cosmetic-but-noisy: the *other* instance's atomic write still lands, so the cache file is never corrupt — but the losing instance logs `ERROR sync_failed` and falls back to its in-memory/stale model list for that boot instead of the fresh sync.
+
+**Look for.**
+
+- An `ERROR sync_failed` whose `error` is an `ENOENT` on a `*.json.tmp -> *.json` rename.
+- Multiple `creating instance` / `ratelimit_plugin_initialized` lines clustered within the same second just before it (the tell-tale parallel boot).
+
+**Fix.** Upgrade to a build that includes the per-writer temp-name fix (temp files are now suffixed with `pid` + a uuid and unlinked on failure, so concurrent writers can't collide). No config change needed. If you're pinned to an older version and can't upgrade, launching projects one at a time avoids the race.
+
 ## Provenance badge missing on npm
 
 **What's happening.** The published package on npmjs.com is missing the "Built and signed on GitHub Actions" badge. Either the publish workflow didn't request OIDC, or npm rejected the provenance attestation.

@@ -1,5 +1,6 @@
-import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 
@@ -101,23 +102,35 @@ export class FileCacheStore {
 
   async saveServerState(state: CachedServerState): Promise<void> {
     const filePath = statePath(this.baseDir, state.serverId);
-    const tempPath = `${filePath}.tmp`;
+    // Unique per-write temp name. A shared `${filePath}.tmp` collides when
+    // several opencode instances boot at once (the desktop app restores every
+    // project window in parallel) and all sync the same provider: one process'
+    // rename consumes the temp file the other is about to rename, surfacing as
+    // `sync_failed … ENOENT … rename '<serverId>.json.tmp' -> '<serverId>.json'`.
+    // pid + uuid makes each writer's temp file private; rename stays atomic so
+    // last-writer-wins on the final path. See docs/troubleshooting.md.
+    const tempPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
 
     await mkdir(dirname(filePath), { recursive: true, mode: 0o700 });
 
     const serialized = JSON.stringify(state, null, 2);
-    await writeFile(tempPath, serialized, {
-      encoding: "utf8",
-      mode: 0o600,
-      flag: fsConstants.O_CREAT | fsConstants.O_TRUNC | fsConstants.O_WRONLY
-    });
-
-    await rename(tempPath, filePath);
-    this.logger?.trace("oauth2_cache_file_written", {
-      serverId: state.serverId,
-      modelCount: Array.isArray(state.models) ? state.models.length : 0,
-      hasToken: Boolean(state.token)
-    });
+    try {
+      await writeFile(tempPath, serialized, {
+        encoding: "utf8",
+        mode: 0o600,
+        flag: fsConstants.O_CREAT | fsConstants.O_TRUNC | fsConstants.O_WRONLY
+      });
+      await rename(tempPath, filePath);
+      this.logger?.trace("oauth2_cache_file_written", {
+        serverId: state.serverId,
+        modelCount: Array.isArray(state.models) ? state.models.length : 0,
+        hasToken: Boolean(state.token)
+      });
+    } catch (error) {
+      // Best-effort cleanup so a failed write never strands an orphan temp file.
+      await unlink(tempPath).catch(() => {});
+      throw error;
+    }
 
     try {
       await chmod(filePath, 0o600);
