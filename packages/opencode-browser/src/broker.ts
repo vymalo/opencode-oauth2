@@ -62,6 +62,14 @@ export interface BrokerOptions {
 export interface BrokerDeps {
   logger: Logger;
   transport: BridgeTransport;
+  /**
+   * Optional: re-read the shared bridge token from its source of truth (the
+   * per-user `bridge.json`). Called on a bad-token handshake so a long-lived
+   * host — which resolved its token once at boot and otherwise never re-reads —
+   * can pick up a rotated token without a restart. Returns the current token, or
+   * `undefined` if unavailable. Host-only; guests/tests can omit it.
+   */
+  reloadToken?: () => string | undefined;
 }
 
 interface ExecutorInfo {
@@ -202,21 +210,32 @@ export class Broker {
       browser: frame.browser
     });
     if (frame.token !== this.opts.token) {
-      // Fingerprints (never the raw tokens) make the mismatch diagnosable from
-      // the log alone — compare `expected` vs `got` to confirm it's a stale
-      // executor token, then re-paste. role/client say which peer it was.
-      this.deps.logger.warn("browser_handshake_rejected", {
-        reason: "bad_token",
-        role: frame.role ?? "extension",
-        client: frame.client,
-        expected: tokenFingerprint(this.opts.token),
-        got: tokenFingerprint(frame.token)
+      // The shared token may have rotated under this long-lived host (it resolved
+      // its token once at boot and otherwise never re-reads bridge.json). Re-read
+      // it; if the file now carries a different value, adopt it — so a rotation
+      // reaches a running host without a restart — then re-check the handshake.
+      this.adoptRotatedToken();
+      if (frame.token !== this.opts.token) {
+        // Fingerprints (never the raw tokens) make the mismatch diagnosable from
+        // the log alone — `expected` vs `got` of the same length but different
+        // value means a rotated/stale token, not a paste typo. role/client say
+        // which peer it was.
+        this.deps.logger.warn("browser_handshake_rejected", {
+          reason: "bad_token",
+          role: frame.role ?? "extension",
+          client: frame.client,
+          expected: tokenFingerprint(this.opts.token),
+          got: tokenFingerprint(frame.token)
+        });
+        // Tell the dialer *why* before dropping it, so it can show an actionable
+        // error and stop hammering instead of retrying a token that can't work.
+        this.safeSend(conn, rejectedFrame("bad_token"));
+        conn.close();
+        return;
+      }
+      this.deps.logger.info("browser_bridge_token_reloaded", {
+        fingerprint: tokenFingerprint(this.opts.token)
       });
-      // Tell the dialer *why* before dropping it, so it can show an actionable
-      // error and stop hammering instead of retrying a token that can't work.
-      this.safeSend(conn, rejectedFrame("bad_token"));
-      conn.close();
-      return;
     }
     if (role === "agent") {
       const id = `agent:${++this.agentSeq}`;
@@ -270,6 +289,20 @@ export class Broker {
     // Rebuild group ownership from the executor's existing tabs (recovers after a
     // broker re-election; groups come back orphaned and are adopted on first use).
     void this.rebuildFromExecutor(info);
+  }
+
+  /**
+   * Re-read the shared token (via the injected `reloadToken`) and adopt it if the
+   * source of truth now holds a different, non-empty value. Lets a rotation in
+   * `bridge.json` reach this running host. No-op without a `reloadToken` dep, or
+   * when the file is unchanged/unavailable — so a genuinely wrong token still
+   * gets rejected. Reads only on a mismatch, so it's not on the hot path.
+   */
+  private adoptRotatedToken(): void {
+    const latest = this.deps.reloadToken?.();
+    if (latest && latest.length > 0 && latest !== this.opts.token) {
+      this.opts.token = latest;
+    }
   }
 
   private async rebuildFromExecutor(executor: ExecutorInfo): Promise<void> {

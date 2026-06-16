@@ -25,6 +25,12 @@ export interface EndpointOptions {
    * than only once at startup.
    */
   onHost?: () => void;
+  /**
+   * Re-read the shared bridge token (host mode). The broker calls this on a
+   * failed handshake so a rotated token in `bridge.json` reaches a long-lived
+   * host without a restart — see `BrokerDeps.reloadToken`.
+   */
+  reloadToken?: () => string | undefined;
 }
 
 export interface EndpointDeps {
@@ -107,7 +113,7 @@ export async function createEndpoint(opts: EndpointOptions, deps: EndpointDeps):
           timeoutMs: opts.timeoutMs,
           maxCommandMs: opts.maxCommandMs
         },
-        { logger: deps.logger, transport }
+        { logger: deps.logger, transport, reloadToken: opts.reloadToken }
       );
       await candidate.start();
       broker = candidate;
