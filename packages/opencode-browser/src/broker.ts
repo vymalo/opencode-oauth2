@@ -10,7 +10,9 @@ import {
   type Frame,
   nextId,
   PROTOCOL_VERSION,
-  resultFrame
+  rejectedFrame,
+  resultFrame,
+  tokenFingerprint
 } from "./protocol.js";
 import type { BridgeTransport, ClientConnection } from "./transport.js";
 
@@ -200,7 +202,19 @@ export class Broker {
       browser: frame.browser
     });
     if (frame.token !== this.opts.token) {
-      this.deps.logger.warn("browser_handshake_rejected", { reason: "bad_token" });
+      // Fingerprints (never the raw tokens) make the mismatch diagnosable from
+      // the log alone — compare `expected` vs `got` to confirm it's a stale
+      // executor token, then re-paste. role/client say which peer it was.
+      this.deps.logger.warn("browser_handshake_rejected", {
+        reason: "bad_token",
+        role: frame.role ?? "extension",
+        client: frame.client,
+        expected: tokenFingerprint(this.opts.token),
+        got: tokenFingerprint(frame.token)
+      });
+      // Tell the dialer *why* before dropping it, so it can show an actionable
+      // error and stop hammering instead of retrying a token that can't work.
+      this.safeSend(conn, rejectedFrame("bad_token"));
       conn.close();
       return;
     }

@@ -10,8 +10,10 @@ import {
   helloFrame,
   nextId,
   PROTOCOL_VERSION,
+  rejectedFrame,
   type ResultFrame,
-  resultFrame
+  resultFrame,
+  tokenFingerprint
 } from "../src/protocol.js";
 
 describe("protocol encode/decode", () => {
@@ -148,5 +150,38 @@ describe("frame builders", () => {
     });
     expect(decodeFrame(JSON.stringify({ v: 1, type: "event" }))).toBeNull();
     expect(decodeFrame(JSON.stringify({ v: 1, type: "result", id: "x" }))).toBeNull();
+  });
+
+  it("builds and round-trips a rejected frame, dropping one with no reason", () => {
+    expect(rejectedFrame("bad_token")).toEqual({
+      v: PROTOCOL_VERSION,
+      type: "rejected",
+      reason: "bad_token"
+    });
+    expect(decodeFrame(encodeFrame(rejectedFrame("bad_token")))).toEqual({
+      v: PROTOCOL_VERSION,
+      type: "rejected",
+      reason: "bad_token"
+    });
+    expect(decodeFrame(JSON.stringify({ v: 1, type: "rejected" }))).toBeNull();
+  });
+});
+
+describe("tokenFingerprint", () => {
+  it("is stable, distinguishes different tokens, and never leaks the token", () => {
+    expect(tokenFingerprint("secret")).toBe(tokenFingerprint("secret"));
+    expect(tokenFingerprint("secret")).not.toBe(tokenFingerprint("Secret"));
+    const fp = tokenFingerprint("super-secret-value");
+    expect(fp).not.toContain("super-secret-value");
+    expect(fp).toMatch(/^len18\./);
+  });
+
+  it("flags an empty token distinctly", () => {
+    expect(tokenFingerprint("")).toBe("empty");
+  });
+
+  it("never throws on a non-string token (forged/malformed frame)", () => {
+    expect(tokenFingerprint(undefined as unknown as string)).toBe("invalid");
+    expect(tokenFingerprint(42 as unknown as string)).toBe("invalid");
   });
 });

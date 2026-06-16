@@ -165,6 +165,18 @@ export interface CancelFrame {
   id: string;
 }
 
+/**
+ * Server → client: the handshake was refused; the socket is about to close.
+ * Lets the dialer tell a *rejection* (bad token) from a plain network drop and
+ * surface an actionable error instead of retrying forever. `reason` is a stable
+ * machine code (e.g. `"bad_token"`).
+ */
+export interface RejectedFrame {
+  v: number;
+  type: "rejected";
+  reason: string;
+}
+
 export interface PingFrame {
   v: number;
   type: "ping";
@@ -183,6 +195,7 @@ export type Frame =
   | EventFrame
   | ReleaseFrame
   | CancelFrame
+  | RejectedFrame
   | PingFrame
   | PongFrame;
 
@@ -225,6 +238,8 @@ export function decodeFrame(raw: string): Frame | null {
       return { v: PROTOCOL_VERSION, type: "release" };
     case "cancel":
       return typeof parsed.id === "string" ? (parsed as unknown as CancelFrame) : null;
+    case "rejected":
+      return typeof parsed.reason === "string" ? (parsed as unknown as RejectedFrame) : null;
     case "ping":
       return { v: PROTOCOL_VERSION, type: "ping" };
     case "pong":
@@ -255,4 +270,28 @@ export function eventFrame(
   data?: Record<string, unknown>
 ): EventFrame {
   return { v: PROTOCOL_VERSION, type: "event", name, group, data };
+}
+
+export function rejectedFrame(reason: string): RejectedFrame {
+  return { v: PROTOCOL_VERSION, type: "rejected", reason };
+}
+
+/**
+ * Short, **non-secret** fingerprint of a bridge token, safe to log. Reveals only
+ * length + a base36 digest, so the executor and broker can log matching
+ * fingerprints and a human can eyeball whether the tokens agree. Mirror of the
+ * plugin's `tokenFingerprint`.
+ */
+export function tokenFingerprint(token: string): string {
+  // Defensive: never throw on a non-string slipping through (mirror of the
+  // plugin guard) — a crash in the connection path is worse than a vague label.
+  if (typeof token !== "string") {
+    return "invalid";
+  }
+  let hash = 5381;
+  for (let i = 0; i < token.length; i++) {
+    hash = (hash * 33) ^ token.charCodeAt(i);
+  }
+  const digest = (hash >>> 0).toString(36);
+  return token.length === 0 ? "empty" : `len${token.length}.${digest}`;
 }
