@@ -37,4 +37,14 @@ describe("cacheDir per platform", () => {
     expect(cacheDir()).toContain("opencode-code-index");
     expect(cacheDir()).toContain("/win/local");
   });
+
+  it("ignores a relative/empty env base and falls back to home (no CWD-relative path)", () => {
+    state.platform = "linux";
+    process.env.XDG_CACHE_HOME = "relative/dir"; // not absolute -> ignored
+    expect(cacheDir()).toContain("/home/u/.cache/opencode-code-index");
+
+    state.platform = "win32";
+    process.env.LOCALAPPDATA = ""; // empty -> ignored (the `??`-can't-catch-"" bug)
+    expect(cacheDir()).toContain("/home/u/AppData/Local/opencode-code-index");
+  });
 });

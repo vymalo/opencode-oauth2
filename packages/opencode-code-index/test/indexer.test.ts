@@ -56,6 +56,26 @@ describe("indexRepo", () => {
     expect(await store.blastRadius("auth", "feature")).toEqual(["handler", "login"]);
   });
 
+  it("logs (does not crash on) a fallback write failure after a read error", async () => {
+    const errors: string[] = [];
+    const repo = new GitRepo(fakeRunner({ branch: "main", tree: { "bad.ts": "x" }, blobs: {} }));
+    // A store whose writes always fail — the read fails first, then the empty
+    // fallback insert fails too; both are logged and indexing continues.
+    const failStore = {
+      hasBlob: async () => false,
+      insertBlob: async () => {
+        throw new Error("disk full");
+      },
+      replaceManifest: async () => {}
+    } as unknown as CodeIndexStore;
+    const result = await indexRepo(repo, failStore, {
+      extensions: EXTS,
+      logger: { debug() {}, info() {}, warn() {}, error: (e) => errors.push(e) }
+    });
+    expect(errors).toContain("code_index_fallback_write_failed");
+    expect(result.files).toBe(1);
+  });
+
   it("records a blob with no symbols when extraction throws", async () => {
     store = await CodeIndexStore.open(":memory:");
     const warns: string[] = [];

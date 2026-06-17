@@ -1,10 +1,10 @@
 import { mkdir } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { tool, type ToolContext, type ToolDefinition } from "@opencode-ai/plugin";
 
 import { defaultDbPath } from "./config.js";
 import { GitRepo, makeGitRunner } from "./git.js";
-import { indexRepo } from "./indexer.js";
+import { indexRepo, type IndexResult } from "./indexer.js";
 import type { Logger } from "./logging.js";
 import { CodeIndexStore } from "./store.js";
 import type { ResolvedCodeIndexOptions, SymbolHit } from "./types.js";
@@ -29,6 +29,8 @@ interface WorktreeContext {
   dbPath: string;
   /** Branches already indexed (or confirmed indexed) in this process. */
   ensured: Set<string>;
+  /** In-flight indexing promise per branch, so concurrent tool calls share one run. */
+  indexing: Map<string, Promise<IndexResult>>;
 }
 
 const NOT_A_REPO = "code-index: not inside a git work tree — nothing to index.";
@@ -57,12 +59,17 @@ export function createCodeIndexTools(deps: ToolDeps): Record<string, ToolDefinit
       throw new Error(NOT_A_REPO);
     }
     const repoId = await repo.repoId();
-    const dbPath = deps.options.dbPath ?? defaultDbPath(repoId);
+    let dbPath = deps.options.dbPath ?? defaultDbPath(repoId);
     if (dbPath !== ":memory:") {
+      // A relative override resolves against the worktree, not the process CWD
+      // (which is undefined for a plugin and varies per session).
+      if (!isAbsolute(dbPath)) {
+        dbPath = resolve(worktree, dbPath);
+      }
       await mkdir(dirname(dbPath), { recursive: true });
     }
     const store = await openStore(dbPath);
-    return { repo, store, dbPath, ensured: new Set() };
+    return { repo, store, dbPath, ensured: new Set(), indexing: new Map() };
   }
 
   function context(worktree: string): Promise<WorktreeContext> {
@@ -76,18 +83,33 @@ export function createCodeIndexTools(deps: ToolDeps): Record<string, ToolDefinit
     return pending;
   }
 
+  /**
+   * Run `indexRepo` for a branch, de-duplicating concurrent calls. OpenCode runs
+   * tools in parallel, so two calls landing in the same window must share one run
+   * (else duplicate INSERTs / lock contention). The promise is cleared on
+   * completion, so a *later* call always triggers a fresh (incremental) run.
+   */
+  function startIndex(ctx: WorktreeContext, branch: string): Promise<IndexResult> {
+    let pending = ctx.indexing.get(branch);
+    if (!pending) {
+      pending = indexRepo(ctx.repo, ctx.store, {
+        extensions: deps.options.extensions,
+        logger: deps.logger
+      }).finally(() => ctx.indexing.delete(branch));
+      ctx.indexing.set(branch, pending);
+    }
+    return pending;
+  }
+
   /** Ensure the current branch is indexed once per process; returns the branch. */
-  async function ensureIndexed(ctx: WorktreeContext, force = false): Promise<string> {
+  async function ensureIndexed(ctx: WorktreeContext): Promise<string> {
     const branch = await ctx.repo.currentBranch();
-    if (!force && ctx.ensured.has(branch)) {
+    if (ctx.ensured.has(branch)) {
       return branch;
     }
     const status = await ctx.store.status(branch);
-    if (force || status.files === 0) {
-      await indexRepo(ctx.repo, ctx.store, {
-        extensions: deps.options.extensions,
-        logger: deps.logger
-      });
+    if (status.files === 0) {
+      await startIndex(ctx, branch);
     }
     ctx.ensured.add(branch);
     return branch;
@@ -179,10 +201,7 @@ export function createCodeIndexTools(deps: ToolDeps): Record<string, ToolDefinit
       async execute(_args: Record<string, unknown>, toolCtx: ToolContext) {
         const ctx = await context(toolCtx.worktree);
         const branch = await ctx.repo.currentBranch();
-        const result = await indexRepo(ctx.repo, ctx.store, {
-          extensions: deps.options.extensions,
-          logger: deps.logger
-        });
+        const result = await startIndex(ctx, branch);
         ctx.ensured.add(branch);
         return `Indexed branch \`${result.branch}\`: ${result.indexedBlobs} new blob(s), ${result.skippedBlobs} reused, ${result.files} file(s).`;
       }

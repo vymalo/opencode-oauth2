@@ -4,7 +4,7 @@ import { extractFromSource } from "./extract.js";
 import type { GitRepo } from "./git.js";
 import type { Logger } from "./logging.js";
 import type { CodeIndexStore } from "./store.js";
-import type { ManifestEntry } from "./types.js";
+import type { Extraction, ManifestEntry } from "./types.js";
 
 export interface IndexOptions {
   extensions: string[];
@@ -57,20 +57,34 @@ export async function indexRepo(
     }
 
     const lang = extOf(entry.path);
+
+    // Read + parse in their own try: a failure here is a per-file problem (binary,
+    // unreadable blob, parser crash) — record an empty blob so we don't retry it.
+    let extraction: Extraction;
     try {
       const source = await repo.readBlob(entry.blobSha);
-      const extraction = extractFromSource(source, lang);
-      await store.insertBlob(entry.blobSha, lang, extraction);
-      indexed++;
+      extraction = extractFromSource(source, lang);
     } catch (err) {
-      // Record the blob with no symbols so we don't retry a file we can't parse.
-      await store.insertBlob(entry.blobSha, lang, { defs: [], refs: [] });
       options.logger?.warn("code_index_blob_failed", {
         path: entry.path,
         blob: entry.blobSha,
         error: err instanceof Error ? err.message : String(err)
       });
+      try {
+        await store.insertBlob(entry.blobSha, lang, { defs: [], refs: [] });
+      } catch (dbErr) {
+        options.logger?.error("code_index_fallback_write_failed", {
+          blob: entry.blobSha,
+          error: dbErr instanceof Error ? dbErr.message : String(dbErr)
+        });
+      }
+      continue;
     }
+
+    // The real write is outside the read/parse catch: a DB failure here is fatal
+    // (not a parse problem) and must propagate rather than be masked or retried.
+    await store.insertBlob(entry.blobSha, lang, extraction);
+    indexed++;
   }
 
   await store.replaceManifest(branch, root, indexable);

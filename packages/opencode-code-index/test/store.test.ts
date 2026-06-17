@@ -85,6 +85,20 @@ describe("symbol", () => {
   });
 });
 
+describe("transactional writes", () => {
+  it("rolls back a failed insertBlob and stays consistent", async () => {
+    await store.insertBlob("dupblob", "ts", { defs: [def("only")], refs: [] });
+    // Re-inserting the same blob sha violates the PK -> the transaction rolls back.
+    await expect(
+      store.insertBlob("dupblob", "ts", { defs: [def("ghost")], refs: [] })
+    ).rejects.toThrow();
+    await store.replaceManifest("b", ".", [{ path: "x.ts", blobSha: "dupblob" }]);
+    // The first blob's symbol survives; the rolled-back insert left nothing behind.
+    expect((await store.symbol("only", "b")).map((h) => h.name)).toEqual(["only"]);
+    expect(await store.symbol("ghost", "b")).toEqual([]);
+  });
+});
+
 describe("status", () => {
   it("reports branch files plus the shared pool totals", async () => {
     const s = await store.status("main");

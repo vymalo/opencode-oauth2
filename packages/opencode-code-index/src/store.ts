@@ -87,45 +87,62 @@ export class CodeIndexStore {
     return reader.getRowObjects() as Record<string, unknown>[];
   }
 
+  /** Run `fn` inside a transaction so a mid-write failure leaves no partial rows. */
+  private async transaction<T>(fn: () => Promise<T>): Promise<T> {
+    await this.conn.run("BEGIN TRANSACTION");
+    try {
+      const result = await fn();
+      await this.conn.run("COMMIT");
+      return result;
+    } catch (err) {
+      await this.conn.run("ROLLBACK");
+      throw err;
+    }
+  }
+
   async hasBlob(blobSha: string): Promise<boolean> {
     const r = await this.rows("SELECT 1 FROM blob WHERE blob_sha = ? LIMIT 1", [blobSha]);
     return r.length > 0;
   }
 
-  /** Insert a parsed blob (blob row + its symbols + its edges) in one shot. */
+  /** Insert a parsed blob (blob row + its symbols + its edges) atomically. */
   async insertBlob(blobSha: string, lang: string, extraction: Extraction): Promise<void> {
-    await this.conn.run("INSERT INTO blob VALUES (?, ?)", [blobSha, lang]);
-    for (const d of extraction.defs) {
-      await this.conn.run("INSERT INTO symbol VALUES (?, ?, ?, ?)", [
-        blobSha,
-        d.name,
-        d.kind,
-        d.line
-      ]);
-    }
-    for (const e of extraction.refs) {
-      await this.conn.run("INSERT INTO ref VALUES (?, ?, ?, ?, ?, ?)", [
-        blobSha,
-        e.caller,
-        e.dstName,
-        e.kind,
-        e.line,
-        e.confidence
-      ]);
-    }
+    await this.transaction(async () => {
+      await this.conn.run("INSERT INTO blob VALUES (?, ?)", [blobSha, lang]);
+      for (const d of extraction.defs) {
+        await this.conn.run("INSERT INTO symbol VALUES (?, ?, ?, ?)", [
+          blobSha,
+          d.name,
+          d.kind,
+          d.line
+        ]);
+      }
+      for (const e of extraction.refs) {
+        await this.conn.run("INSERT INTO ref VALUES (?, ?, ?, ?, ?, ?)", [
+          blobSha,
+          e.caller,
+          e.dstName,
+          e.kind,
+          e.line,
+          e.confidence
+        ]);
+      }
+    });
   }
 
-  /** Replace a branch/root's manifest with `entries` (delete-then-insert). */
+  /** Replace a branch/root's manifest with `entries` (delete-then-insert, atomic). */
   async replaceManifest(branch: string, root: string, entries: ManifestEntry[]): Promise<void> {
-    await this.conn.run("DELETE FROM manifest WHERE branch = ? AND root = ?", [branch, root]);
-    for (const e of entries) {
-      await this.conn.run("INSERT INTO manifest VALUES (?, ?, ?, ?)", [
-        branch,
-        root,
-        e.path,
-        e.blobSha
-      ]);
-    }
+    await this.transaction(async () => {
+      await this.conn.run("DELETE FROM manifest WHERE branch = ? AND root = ?", [branch, root]);
+      for (const e of entries) {
+        await this.conn.run("INSERT INTO manifest VALUES (?, ?, ?, ?)", [
+          branch,
+          root,
+          e.path,
+          e.blobSha
+        ]);
+      }
+    });
   }
 
   /** Definitions of `name` present on `branch`. */

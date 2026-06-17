@@ -1,10 +1,19 @@
 import { homedir, platform } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 
 import { SUPPORTED_EXTENSIONS } from "./extract.js";
 import type { CodeIndexPluginOptions, ResolvedCodeIndexOptions } from "./types.js";
 
 const NAMESPACE = "opencode-code-index";
+
+/**
+ * An env-provided base dir is only honored if it is an **absolute** path. An
+ * empty or relative value (`??` doesn't catch `""`) would otherwise resolve the
+ * cache under the process CWD — so fall back to the home-relative default.
+ */
+function envBase(value: string | undefined, fallback: string): string {
+  return value && isAbsolute(value) ? value : fallback;
+}
 
 /** Per-OS cache directory, mirroring the suite's cache-layout convention. */
 export function cacheDir(): string {
@@ -13,9 +22,9 @@ export function cacheDir(): string {
     case "darwin":
       return join(home, "Library", "Caches", NAMESPACE);
     case "win32":
-      return join(process.env.LOCALAPPDATA ?? join(home, "AppData", "Local"), NAMESPACE);
+      return join(envBase(process.env.LOCALAPPDATA, join(home, "AppData", "Local")), NAMESPACE);
     default:
-      return join(process.env.XDG_CACHE_HOME ?? join(home, ".cache"), NAMESPACE);
+      return join(envBase(process.env.XDG_CACHE_HOME, join(home, ".cache")), NAMESPACE);
   }
 }
 

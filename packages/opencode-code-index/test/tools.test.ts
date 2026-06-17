@@ -1,8 +1,11 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ToolDefinition } from "@opencode-ai/plugin";
 
 import { resolveOptions } from "../src/config.js";
-import { GitRepo } from "../src/git.js";
+import { GitRepo, type GitRunner } from "../src/git.js";
 import { CodeIndexStore } from "../src/store.js";
 import { createCodeIndexTools, type ToolDeps } from "../src/tools.js";
 import { chainState, type FakeGitState, fakeRunner } from "./fake-git.js";
@@ -18,8 +21,12 @@ function buildTools(state: FakeGitState) {
   });
 }
 
-function run(tool: ToolDefinition, args: Record<string, unknown>): Promise<string> {
-  const ctx = { worktree: "/repo", abort: new AbortController().signal };
+function run(
+  tool: ToolDefinition,
+  args: Record<string, unknown>,
+  worktree = "/repo"
+): Promise<string> {
+  const ctx = { worktree, abort: new AbortController().signal };
   return (tool as unknown as { execute: (a: unknown, c: unknown) => Promise<string> }).execute(
     args,
     ctx
@@ -89,5 +96,47 @@ describe("code-index tools", () => {
   it("reports a friendly error outside a git work tree", async () => {
     const tools = buildTools({ branch: "main", tree: {}, blobs: {}, isRepo: false });
     await expect(run(tools.code_symbol, { name: "util" })).rejects.toThrow(/work tree/);
+  });
+
+  it("de-duplicates concurrent first-touch indexing (one run for parallel calls)", async () => {
+    let lsTreeCalls = 0;
+    const counting: GitRunner = async (args) => {
+      if (args[0] === "ls-tree") lsTreeCalls++;
+      return fakeRunner(chainState("main"))(args);
+    };
+    const tools = createCodeIndexTools({
+      options: resolveOptions({ dbPath: ":memory:" }),
+      logger: noopLogger,
+      openStore: () => CodeIndexStore.open(":memory:"),
+      makeRepo: () => new GitRepo(counting)
+    });
+    // Parallel tool calls on a fresh branch must share a single indexRepo run.
+    const [a, b] = await Promise.all([
+      run(tools.code_symbol, { name: "util" }),
+      run(tools.code_callers, { name: "util" })
+    ]);
+    expect(a).toContain("util");
+    expect(b).toContain("auth");
+    expect(lsTreeCalls).toBe(1);
+  });
+
+  it("resolves a relative dbPath against the worktree, not the CWD", async () => {
+    const worktree = await mkdtemp(join(tmpdir(), "code-index-rel-"));
+    let captured = "";
+    const tools = createCodeIndexTools({
+      options: resolveOptions({ dbPath: "sub/index.duckdb" }),
+      logger: noopLogger,
+      openStore: (path) => {
+        captured = path;
+        return CodeIndexStore.open(":memory:");
+      },
+      makeRepo: () => new GitRepo(fakeRunner(chainState("main")))
+    });
+    try {
+      await run(tools.code_symbol, { name: "util" }, worktree);
+      expect(captured).toBe(resolve(worktree, "sub/index.duckdb"));
+    } finally {
+      await rm(worktree, { recursive: true, force: true });
+    }
   });
 });
