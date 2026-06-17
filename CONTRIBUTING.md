@@ -3,6 +3,24 @@
 Thanks for helping out! This is a [pnpm](https://pnpm.io) workspace of OpenCode plugins (the
 `@vymalo` scope) plus a companion browser extension. This guide gets you from clone to PR.
 
+## AI Governance
+
+This repository follows the [ADORSYS-GIS AI Governance](https://adorsys-gis.github.io/ai-governance/)
+discipline: **AI may accelerate the work, but humans own intent, verification, and consequences.**
+AI output is not truth — review AI-generated code as untrusted, and never submit work you cannot explain.
+
+- **Open issues** with the structured forms — [Epic](.github/ISSUE_TEMPLATE/epic.yml),
+  [User Story](.github/ISSUE_TEMPLATE/user-story.yml), or
+  [Development Ticket](.github/ISSUE_TEMPLATE/dev-ticket.yml). Blank issues are disabled on purpose.
+- **Open pull requests** with the [pull request template](.github/PULL_REQUEST_TEMPLATE.md) and fill in
+  every section — including the **AI Usage Declaration**, a **source-of-truth** link, and **verification
+  evidence**. The advisory [`governance.yml`](.github/workflows/governance.yml) check flags a PR body
+  missing any of the three (pinned to an immutable governance release SHA).
+- **AI code review is advisory, never a merge gate.** Only deterministic checks (governance, lint,
+  tests) may block. Treat every AI-review finding as a *claim* to verify against the cited lines, not a
+  verdict. See the [AI Working Agreement](https://adorsys-gis.github.io/ai-governance/12-ai-working-agreement)
+  and the [Doctrine](https://adorsys-gis.github.io/ai-governance/13-doctrine).
+
 ## Prerequisites
 
 - **Node ≥ 22** (runtime packages set this in `engines`).
@@ -88,6 +106,8 @@ Two entry points per published package: `"."` → `dist/index.js` (kept intentio
 - Conventional-commit style subjects (`feat(browser): …`, `fix(oauth2): …`, `docs: …`).
 - Keep one concern per PR; open an issue first for substantial changes so we can align on scope.
 - Make sure the pre-push gate is green and docs are updated alongside behavior changes.
+- Use the [pull request template](.github/PULL_REQUEST_TEMPLATE.md) and complete the **AI Usage
+  Declaration**, source-of-truth link, and verification evidence (see [AI Governance](#ai-governance)).
 
 ## Releasing (maintainers)
 
