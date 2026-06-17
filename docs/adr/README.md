@@ -26,3 +26,6 @@ Each record is `NNNN-kebab-title.md`, numbered in order, and follows a light
 | ADR | Title | Status |
 | --- | --- | --- |
 | [0001](0001-bridge-transport-ws-not-bun-serve-or-socketio.md) | Browser-bridge transport: the `ws` package, not `Bun.serve` or socket.io | Accepted |
+| [0002](0002-code-index-embedded-duckdb-not-graph-db-server.md) | Code index store: embedded DuckDB, not a graph-DB server | Accepted (experimental) |
+| [0003](0003-code-index-content-addressed-blob-per-branch-manifest.md) | Code index: content-addressed by git blob, scoped per branch | Accepted (experimental) |
+| [0004](0004-code-index-tree-sitter-sound-but-partial-resolution.md) | Code index call graph: tree-sitter only, "sound but partial" | Accepted (experimental) |

@@ -57,6 +57,9 @@ flowchart LR
 > [!TIP]
 > Every plugin here works with **any** auth scheme — static API key, OAuth2, or none — *except* oauth2 itself, which is the one doing the authenticating. Enable only what you need.
 
+> [!NOTE]
+> The workspace also carries an **experimental, private** plugin — `@vymalo/opencode-code-index` (DuckDB + tree-sitter code indexing: `code_symbol`, `code_callers`, `code_blast_radius`, …). It is **not published**, not part of the five-plugin suite above, and may be removed. See [`docs/code-index.md`](docs/code-index.md).
+
 ## Quickstart
 
 Add the plugins you want to your OpenCode config and declare a provider. The smallest possible setup — an OAuth2-protected provider that discovers its own models:
