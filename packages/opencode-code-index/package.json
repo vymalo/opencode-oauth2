@@ -45,6 +45,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "demo": "node demo/demo.mjs",
     "lint": "biome lint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",

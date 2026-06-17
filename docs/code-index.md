@@ -35,6 +35,43 @@ Those are the differentiated value; the rest of the tools round out navigation.
 The first `code_*` call on a branch **indexes it lazily**; subsequent calls reuse the
 store. Use `index_refresh` after edits to pick up changes.
 
+## Try it
+
+[`demo/demo.mjs`](../packages/opencode-code-index/demo/demo.mjs) drives the real tools
+against **this repo** (throwaway DuckDB in the temp dir, no cache pollution):
+
+```sh
+pnpm --filter @vymalo/opencode-code-index build   # emit dist/
+pnpm --filter @vymalo/opencode-code-index demo
+```
+
+Sample output (run on this branch — 178 files → 726 symbols, 4 608 edges):
+
+```text
+▶ index_status({})
+Code index for branch `…` (db: /…/code-index-demo.duckdb):
+  files:   178
+  blobs:   172 (total pool across branches)
+  symbols: 726
+  edges:   4608
+
+▶ code_symbol({"name":"CodeIndexStore"})
+Definition(s) of `CodeIndexStore`:
+  packages/opencode-code-index/src/store.ts:56  CodeIndexStore (class)
+
+▶ code_callees({"name":"indexRepo"})
+Callees of `indexRepo` (2):
+  packages/opencode-code-index/src/extract.ts:40  extractFromSource (function)
+  packages/opencode-code-index/src/indexer.ts:23  extOf (function)
+
+▶ code_blast_radius({"name":"extractFromSource"})
+Blast radius of `extractFromSource` (3):
+  ensureIndexed, execute, indexRepo
+```
+
+`code_blast_radius` walks the graph: `indexRepo` calls `extractFromSource`, and both
+`ensureIndexed` and a tool `execute` reach `indexRepo` — exactly the transitive set.
+
 ## How indexing works (the load-bearing model)
 
 The index is **content-addressed by git blob** and **scoped per branch**:
