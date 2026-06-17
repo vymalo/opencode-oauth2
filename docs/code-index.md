@@ -66,21 +66,23 @@ method-dispatch edges may be missing, so `code_callers` / `code_blast_radius` ca
 
 ## Configuration
 
-Enable it like any OpenCode plugin and (optionally) pass options:
+Enable it like any OpenCode plugin. Options are passed via the `[specifier, options]`
+**tuple form** of the `plugin` array (OpenCode has no separate `pluginConfig` key):
 
 ```jsonc
 {
-  "plugin": ["@vymalo/opencode-code-index"],
-  "pluginConfig": {
-    "@vymalo/opencode-code-index": {
+  "plugin": [
+    ["@vymalo/opencode-code-index", {
       "enabled": true,
       "extensions": ["ts", "tsx", "js", "jsx", "mjs", "cjs"],
       "dbPath": null,        // default: <cache>/<repoId>.duckdb
       "autoIndex": false
-    }
-  }
+    }]
+  ]
 }
 ```
+
+With no options, the bare string form works too: `"plugin": ["@vymalo/opencode-code-index"]`.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
