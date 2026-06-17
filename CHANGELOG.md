@@ -4,9 +4,9 @@ All notable changes to the **OpenCode Toolbelt** — the `@vymalo/*` plugin suit
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-All eight workspace packages move on **one version line** and are released together, so a single entry covers the whole suite. Each line is tagged with the package it touches (`oauth2`, `models-info`, `ratelimit`, `browser`, `browser-mcp`, `browser-extension`). PR references link to the change.
+All nine workspace packages move on **one version line** and are released together, so a single entry covers the whole suite. Each line is tagged with the package it touches (`oauth2`, `models-info`, `ratelimit`, `browser`, `browser-mcp`, `browser-extension`, `code-index`). PR references link to the change.
 
-## [Unreleased]
+## [0.8.1] — 2026-06-17
 
 ### Added
 
