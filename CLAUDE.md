@@ -161,3 +161,21 @@ Every release is recorded in [`CHANGELOG.md`](CHANGELOG.md) — [Keep a Changelo
 - [`plans/ui-feedback.md`](plans/ui-feedback.md) — design (draft) for human-in-the-loop browser feedback: a `browser_request_feedback` tool that paints an annotation overlay and blocks on the user; needs a `CancelFrame` + per-command timeout first.
 - [`docs/`](docs/) — the architecture doc is canonical for hook behavior. Also: [`well-known.md`](docs/well-known.md) (`.well-known/opencode` distribution), [`models-info.md`](docs/models-info.md) (enrichment composition + caching), [`ratelimit.md`](docs/ratelimit.md) (rate-limit policy/tiers), [`browser.md`](docs/browser.md) (browser-automation dual plugin — topology, wire protocol, tool reference, executors, security), [`troubleshooting.md`](docs/troubleshooting.md) (symptom-keyed fixes), plus GitHub Actions / Kubernetes cookbooks and local-dev setup.
 - [`docs/adr/`](docs/adr/) — Architecture Decision Records: load-bearing, non-obvious decisions and *why* (e.g. [ADR-0001](docs/adr/0001-bridge-transport-ws-not-bun-serve-or-socketio.md) — the browser bridge uses `ws`, not `Bun.serve` or socket.io). Add one when a choice closes off alternatives someone would reasonably reach for.
+
+<!-- ai-governance:stanza -->
+<!-- BEGIN: AI Governance stanza (managed by ADORSYS-GIS/ai-governance) -->
+## AI Governance
+
+AI may accelerate the work, but humans own intent, verification, and consequences.
+AI output is not truth: review AI-generated code as untrusted, and never submit work you cannot explain.
+
+When opening issues or pull requests in this repo:
+
+- Use the provided **issue forms** (Epic, User Story, Dev Ticket) and the **pull request template** — do not open blank issues/PRs.
+- Fill in the **AI Usage Declaration** honestly (what AI was used for, what you verified).
+- Include a **source-of-truth link** (a URL or `#123` reference). No source of truth means the work is not ready.
+- Provide **verification evidence** (commands, logs, links, or checked verification boxes). No evidence means it is not done.
+
+Source of truth and full doctrine: https://adorsys-gis.github.io/ai-governance/
+This stanza is intentionally thin — read the site; do not duplicate the doctrine here.
+<!-- END: AI Governance stanza -->
