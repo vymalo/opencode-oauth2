@@ -43,11 +43,15 @@ function createOpenCodeLogger(client: PluginInput["client"], getMinLevel: () => 
     if (consoleAll || level === "warn" || level === "error") {
       fallback[level](event, fields);
     }
+    // OpenCode's log API has no `trace` tier — fold it into the host's most
+    // verbose level (`debug`) for the wire payload; our own `getMinLevel()`
+    // gate above is what actually unlocks trace events.
+    const hostLevel = level === "trace" ? "debug" : level;
     void client.app
       .log({
         body: {
           service: PLUGIN_SERVICE_NAME,
-          level,
+          level: hostLevel,
           message: event,
           extra: fields
         }
@@ -58,6 +62,7 @@ function createOpenCodeLogger(client: PluginInput["client"], getMinLevel: () => 
   };
 
   return {
+    trace: (event, fields) => write("trace", event, fields),
     debug: (event, fields) => write("debug", event, fields),
     info: (event, fields) => write("info", event, fields),
     warn: (event, fields) => write("warn", event, fields),

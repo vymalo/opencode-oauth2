@@ -64,6 +64,9 @@ export type RateStateStore = Map<string, ProviderRateState>;
  */
 export function installRateLimiter(input: InstallConfigInput, deps: RateLimitDeps): void {
   const providers = input.provider;
+  deps.logger.trace("ratelimit_install_start", {
+    providerCount: providers ? Object.keys(providers).length : 0
+  });
   if (!providers) {
     deps.logger.info("ratelimit_plugin_initialized", { providerCount: 0 });
     return;
@@ -74,17 +77,31 @@ export function installRateLimiter(input: InstallConfigInput, deps: RateLimitDep
     if (!providerConfig) {
       continue;
     }
+    deps.logger.trace("ratelimit_provider_optin_check", {
+      providerId,
+      hasOptions: Boolean(providerConfig.options)
+    });
     const opts = parseRateLimitOptions(providerConfig.options);
     if (!opts) {
       deps.logger.debug("ratelimit_provider_skipped", { providerId, reason: "not_opted_in" });
       continue;
     }
+    deps.logger.trace("ratelimit_provider_optin_resolved", {
+      providerId,
+      scope: opts.scope,
+      headerPrefix: opts.headerPrefix,
+      tiers: opts.tiers.length
+    });
 
     const options = (providerConfig.options ??= {});
     // Compose with any fetch a prior plugin already installed (capture it now,
     // not at call time, so we delegate to the original — not to ourselves).
     const delegate =
       typeof options.fetch === "function" ? (options.fetch as typeof fetch) : undefined;
+    deps.logger.trace("ratelimit_fetch_wrapped", {
+      providerId,
+      composedWithExistingFetch: Boolean(delegate)
+    });
     const store: RateStateStore = new Map();
     options.fetch = makeRateLimitFetch(providerId, opts, store, deps, delegate);
     enabledCount += 1;
@@ -132,16 +149,36 @@ export function makeRateLimitFetch(
     // Honor an abort signal whether it rides on `init` or on a `Request` input.
     const signal = init?.signal ?? (isRequest(input) ? input.signal : undefined) ?? undefined;
     const model = opts.scope === "model" ? await modelFromRequest(input, init) : undefined;
+    if (opts.scope === "model") {
+      logger.trace("ratelimit_model_resolved", { providerId, model, matched: model !== undefined });
+    }
     const key = model ? `${providerId}\u0000${model}` : providerId;
     let state = store.get(key);
+    const bucketExisted = state !== undefined;
     if (!state) {
       state = createProviderState();
       store.set(key, state);
     }
+    logger.trace("ratelimit_fetch_invoked", {
+      providerId,
+      scope: opts.scope,
+      model,
+      bucketKey: key,
+      bucketExisted,
+      cooldownUntilMs: state.cooldownUntilMs
+    });
 
     // 2. Pre-request gate — wait out a cooldown a previous "wait" tier armed.
     if (state.cooldownUntilMs > now()) {
       const waitMs = clampWait(state.cooldownUntilMs - now(), state.cooldownMaxWaitMs);
+      logger.trace("ratelimit_cooldown_gate_armed", {
+        providerId,
+        model,
+        cooldownUntilMs: state.cooldownUntilMs,
+        remainingMs: state.cooldownUntilMs - now(),
+        clampedWaitMs: waitMs,
+        maxWaitMs: state.cooldownMaxWaitMs
+      });
       if (waitMs > 0) {
         logger.info("ratelimit_throttle_wait", { providerId, model, waitMs });
         await waitGate(
@@ -165,8 +202,19 @@ export function makeRateLimitFetch(
       // wait-tier retry doesn't fail with "body already used". (The original is
       // never sent directly, so each clone has an unconsumed body.)
       const attemptInput = isRequest(input) ? input.clone() : input;
+      logger.trace("ratelimit_underlying_fetch", { providerId, model, attempt });
       const response = await underlying(attemptInput, init);
       const snapshot = readSnapshot(response, opts, now(), logger, providerId);
+      logger.trace("ratelimit_snapshot_parsed", {
+        providerId,
+        model,
+        status: response.status,
+        limit: snapshot.limit,
+        remaining: snapshot.remaining,
+        resetSeconds: snapshot.resetSeconds,
+        resetAtMs: snapshot.resetAtMs,
+        retryAfterMs: snapshot.retryAfterMs
+      });
       logger.debug("ratelimit_quota", {
         providerId,
         model,
@@ -184,26 +232,64 @@ export function makeRateLimitFetch(
           snapshot.remaining <= 0 &&
           snapshot.resetAtMs !== undefined
         ) {
-          const tier = selectTier(opts.tiers, effectiveResetSeconds(snapshot));
+          const resetForTier = effectiveResetSeconds(snapshot);
+          const tier = selectTier(opts.tiers, resetForTier);
+          logger.trace("ratelimit_exhausted_tier_selected", {
+            providerId,
+            model,
+            resetSeconds: resetForTier,
+            maxResetSeconds: tier.maxResetSeconds,
+            action: tier.action,
+            maxWaitMs: tier.maxWaitMs,
+            maxRetries: tier.maxRetries
+          });
           if (tier.action === "wait") {
             state.cooldownUntilMs = snapshot.resetAtMs;
             state.cooldownMaxWaitMs = tier.maxWaitMs;
+            logger.trace("ratelimit_cooldown_set", {
+              providerId,
+              model,
+              cooldownUntilMs: state.cooldownUntilMs,
+              maxWaitMs: tier.maxWaitMs,
+              source: "exhausted"
+            });
           } else {
             // Error tier → don't arm, and drop any stale cooldown a prior
             // "wait" window left so the next request hits a real 429 at once.
             state.cooldownUntilMs = 0;
             state.cooldownMaxWaitMs = 0;
+            logger.trace("ratelimit_cooldown_cleared", {
+              providerId,
+              model,
+              source: "exhausted_error_tier"
+            });
           }
         }
         return response;
       }
 
-      const tier = selectTier(opts.tiers, effectiveResetSeconds(snapshot));
+      const resetForTier = effectiveResetSeconds(snapshot);
+      const tier = selectTier(opts.tiers, resetForTier);
+      logger.trace("ratelimit_429_tier_selected", {
+        providerId,
+        model,
+        attempt,
+        resetSeconds: resetForTier,
+        maxResetSeconds: tier.maxResetSeconds,
+        action: tier.action,
+        maxWaitMs: tier.maxWaitMs,
+        maxRetries: tier.maxRetries
+      });
       if (tier.action === "error") {
         // Drop any cooldown a prior "wait" tier armed, so the fail-fast is
         // actually fast — later requests must not sleep a stale window first.
         state.cooldownUntilMs = 0;
         state.cooldownMaxWaitMs = 0;
+        logger.trace("ratelimit_cooldown_cleared", {
+          providerId,
+          model,
+          source: "429_error_tier"
+        });
         logger.warn("ratelimit_failfast", {
           providerId,
           model,
@@ -213,13 +299,35 @@ export function makeRateLimitFetch(
       }
 
       if (attempt >= tier.maxRetries) {
+        logger.trace("ratelimit_retries_exhausted", {
+          providerId,
+          model,
+          attempt,
+          maxRetries: tier.maxRetries
+        });
         logger.error("ratelimit_giveup", { providerId, model, attempts: attempt });
         return response;
       }
 
-      const waitMs = clampWait(computeBackoff(snapshot, now()), tier.maxWaitMs);
+      const backoffMs = computeBackoff(snapshot, now());
+      const waitMs = clampWait(backoffMs, tier.maxWaitMs);
+      logger.trace("ratelimit_429_backoff_computed", {
+        providerId,
+        model,
+        attempt: attempt + 1,
+        rawBackoffMs: backoffMs,
+        clampedWaitMs: waitMs,
+        maxWaitMs: tier.maxWaitMs
+      });
       state.cooldownUntilMs = now() + waitMs;
       state.cooldownMaxWaitMs = tier.maxWaitMs;
+      logger.trace("ratelimit_cooldown_set", {
+        providerId,
+        model,
+        cooldownUntilMs: state.cooldownUntilMs,
+        maxWaitMs: tier.maxWaitMs,
+        source: "429_backoff"
+      });
       logger.warn("ratelimit_429_backoff", {
         providerId,
         model,
@@ -365,12 +473,27 @@ async function waitGate(
   phase: "pre_request" | "backoff"
 ): Promise<void> {
   const deadlineMs = maxWaitMs > 0 ? now() + maxWaitMs : Number.POSITIVE_INFINITY;
+  logger.trace("ratelimit_wait_start", {
+    providerId,
+    model,
+    phase,
+    cooldownUntilMs: state.cooldownUntilMs,
+    maxWaitMs
+  });
   for (;;) {
     const target = Math.min(state.cooldownUntilMs, deadlineMs);
     const remainingMs = target - now();
     if (remainingMs <= 0) {
+      logger.trace("ratelimit_wait_end", { providerId, model, phase });
       return;
     }
+    logger.trace("ratelimit_wait_tick", {
+      providerId,
+      model,
+      phase,
+      remainingMs,
+      sharedTimer: state.cooldownPromise !== undefined
+    });
 
     // Reuse the shared timer only if it won't make us wait longer than we need.
     let pending = state.cooldownPromise;

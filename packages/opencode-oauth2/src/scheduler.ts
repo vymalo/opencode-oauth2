@@ -32,6 +32,11 @@ export function startScheduler(options: SchedulerOptions): SchedulerHandle {
       return;
     }
 
+    options.logger.trace("oauth2_scheduler_tick", {
+      taskName: options.taskName,
+      failures
+    });
+
     try {
       await options.run();
       failures = 0;

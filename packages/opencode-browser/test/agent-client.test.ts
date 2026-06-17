@@ -16,7 +16,7 @@ import {
   resultFrame
 } from "../src/protocol.js";
 
-const noopLogger: Logger = { debug() {}, info() {}, warn() {}, error() {} };
+const noopLogger: Logger = { trace() {}, debug() {}, info() {}, warn() {}, error() {} };
 
 function fakeSocket() {
   const sent: string[] = [];

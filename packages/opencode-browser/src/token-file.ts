@@ -1,4 +1,5 @@
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { chmodSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 
@@ -63,7 +64,24 @@ export function writeBridgeFile(port: number, token: string): void {
   try {
     const file = bridgeFilePath();
     mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
-    writeFileSync(file, JSON.stringify({ port, token }), { mode: 0o600 });
+    // Atomic write: a per-writer temp file then `rename` onto the real path. A
+    // plain `writeFileSync` is briefly truncated mid-write, and a concurrent
+    // reader that catches that empty/torn window falls through to GENERATE a
+    // fresh token (resolveSharedToken) and overwrite the shared one — the root
+    // of host/extension token divergence when many instances boot at once. The
+    // pid+uuid suffix keeps concurrent writers from colliding on the temp path.
+    const tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+      writeFileSync(tmp, JSON.stringify({ port, token }), { mode: 0o600 });
+      renameSync(tmp, file);
+    } catch (err) {
+      try {
+        unlinkSync(tmp);
+      } catch {
+        /* nothing to clean up */
+      }
+      throw err;
+    }
     chmodSync(file, 0o600);
   } catch {
     /* best-effort */

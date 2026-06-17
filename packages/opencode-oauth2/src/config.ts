@@ -97,7 +97,8 @@ export interface OAuth2ModelSyncConfigInput {
   tokenExpirySkewMs?: number;
   /**
    * Minimum log level the plugin emits. Lower-priority records are dropped.
-   * One of `"debug" | "info" | "warn" | "error"`. Defaults to `"info"`.
+   * One of `"trace" | "debug" | "info" | "warn" | "error"`. Defaults to
+   * `"info"`. `"trace"` is the most-verbose tier (host `--log-level DEBUG`).
    */
   logLevel?: LogLevel;
 }
@@ -163,12 +164,18 @@ function validateLogLevel(value: unknown, path: string): LogLevel {
     return DEFAULT_LOG_LEVEL;
   }
 
-  if (value === "debug" || value === "info" || value === "warn" || value === "error") {
+  if (
+    value === "trace" ||
+    value === "debug" ||
+    value === "info" ||
+    value === "warn" ||
+    value === "error"
+  ) {
     return value;
   }
 
   throw new Error(
-    `${path} must be one of "debug" | "info" | "warn" | "error" (received ${JSON.stringify(value)})`
+    `${path} must be one of "trace" | "debug" | "info" | "warn" | "error" (received ${JSON.stringify(value)})`
   );
 }
 

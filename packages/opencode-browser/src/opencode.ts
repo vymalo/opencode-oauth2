@@ -14,7 +14,7 @@ import {
   type LogLevel
 } from "./logging.js";
 import type { ToolGroup } from "./schema.js";
-import { resolveSharedToken, writeBridgeFile } from "./token-file.js";
+import { readBridgeFile, resolveSharedToken, writeBridgeFile } from "./token-file.js";
 import { createNodeAgentSocket, createNodeTransport } from "./node-transport.js";
 import { createBrowserTools, type SaveScreenshot } from "./tools.js";
 import type { BridgeTransport } from "./transport.js";
@@ -74,14 +74,20 @@ function createOpenCodeLogger(client: PluginInput["client"], getMinLevel: () => 
     if (consoleAll || level === "warn" || level === "error") {
       fallback[level](event, fields);
     }
+    // OpenCode's host log API has no `trace` tier — fold it into `debug` for the
+    // host call (our own level filter above already gates trace by DEBUG).
+    const hostLevel = level === "trace" ? "debug" : level;
     void client.app
-      .log({ body: { service: PLUGIN_SERVICE_NAME, level, message: event, extra: fields } })
+      .log({
+        body: { service: PLUGIN_SERVICE_NAME, level: hostLevel, message: event, extra: fields }
+      })
       .catch(() => {
         /* best-effort */
       });
   };
 
   return {
+    trace: (event, fields) => write("trace", event, fields),
     debug: (event, fields) => write("debug", event, fields),
     info: (event, fields) => write("info", event, fields),
     warn: (event, fields) => write("warn", event, fields),
@@ -140,16 +146,27 @@ export function createBrowserPlugin(factoryOptions: BrowserPluginFactoryOptions 
       tokenProvided ? options.token : undefined,
       generateToken
     );
-    writeBridgeFile(options.port, token);
 
-    // Only the host advertises the token (guests reuse the same one from the
-    // shared file — reprinting it per session is just noise, and re-emits the
-    // secret). Fired via onHost so a host reached by failover re-election still
-    // advertises it, not only the initial host. The `paste_into_extension` field
-    // name dodges the logger's redaction filter so the value stays copyable.
+    // Persist + advertise the token, **host-only** (fired via onHost so a host
+    // reached by failover re-election does it too). Writing only on the host —
+    // not unconditionally at load like before — means a guest that resolved a
+    // fresh token on a transient read miss can never clobber the live host's
+    // token in the shared file. We write whenever the file doesn't already match
+    // OUR (port, token): that keeps a port change in sync and lets an explicit
+    // token overwrite a stale generated one — but a no-op when the file already
+    // agrees, so a concurrent host doesn't thrash it. The `paste_into_extension`
+    // field name dodges the logger's redaction filter so the value stays copyable.
     const advertiseToken = () => {
+      const existing = readBridgeFile();
+      if (!existing || existing.port !== options.port || existing.token !== token) {
+        writeBridgeFile(options.port, token);
+      }
       if (source !== "explicit") {
-        logger.info("browser_bridge_token", { paste_into_extension: token, source, mode: "host" });
+        logger.info("browser_bridge_token", {
+          paste_into_extension: token,
+          source,
+          mode: "host"
+        });
       }
     };
 
@@ -162,7 +179,12 @@ export function createBrowserPlugin(factoryOptions: BrowserPluginFactoryOptions 
         executor: executorProvided ? options.executor : undefined,
         timeoutMs: options.timeoutMs,
         label: "opencode-plugin",
-        onHost: advertiseToken
+        onHost: advertiseToken,
+        // Lets a long-lived host pick up a rotated token from the shared file on
+        // a failed handshake, instead of rejecting forever until it's restarted.
+        // Disabled for an EXPLICIT token: the operator pinned it, so the file
+        // must never override their configured secret.
+        reloadToken: source === "explicit" ? undefined : () => readBridgeFile()?.token
       },
       {
         logger,

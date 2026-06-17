@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -98,9 +98,18 @@ export class FileCacheStore implements CacheStore {
     this.memory.set(key, record);
     await this.ensureReady();
     const target = this.filePath(key);
-    const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
-    await writeFile(tmp, JSON.stringify(record), { mode: 0o600 });
-    await rename(tmp, target);
+    // Unique per-write temp name (pid + uuid) so concurrent opencode instances
+    // — or two enrich passes in one process racing the same key — never collide
+    // on the temp file and trip an ENOENT on rename. See opencode-oauth2's
+    // saveServerState for the full rationale.
+    const tmp = `${target}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(tmp, JSON.stringify(record), { mode: 0o600 });
+      await rename(tmp, target);
+    } catch (error) {
+      await unlink(tmp).catch(() => {});
+      throw error;
+    }
   }
 }
 

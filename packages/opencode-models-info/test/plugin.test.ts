@@ -7,6 +7,7 @@ import type { CachedModelsRecord, OpenRouterModel } from "../src/types.js";
 
 function silentLogger(): Logger {
   return {
+    trace: vi.fn(),
     debug: vi.fn(),
     info: vi.fn(),
     warn: vi.fn(),

@@ -5,7 +5,7 @@ import { createEndpoint } from "../src/endpoint.js";
 import type { Logger } from "../src/logging.js";
 import type { BridgeTransport, TransportHandlers } from "../src/transport.js";
 
-const noopLogger: Logger = { debug() {}, info() {}, warn() {}, error() {} };
+const noopLogger: Logger = { trace() {}, debug() {}, info() {}, warn() {}, error() {} };
 
 class OkTransport implements BridgeTransport {
   listen(_opts: { host: string; port: number }, _handlers: TransportHandlers): Promise<void> {

@@ -42,11 +42,15 @@ function createOpenCodeLogger(client: PluginInput["client"], getMinLevel: () => 
     if (consoleAll || level === "warn" || level === "error") {
       fallback[level](event, fields);
     }
+    // The host's log API has no `trace` level — fold it onto `debug` so the most
+    // verbose tier still reaches the structured stream (it's already gated above
+    // by `getMinLevel`, which DEBUG maps to `trace`).
+    const hostLevel = level === "trace" ? "debug" : level;
     void client.app
       .log({
         body: {
           service: PLUGIN_SERVICE_NAME,
-          level,
+          level: hostLevel,
           message: event,
           extra: fields
         }
@@ -57,6 +61,7 @@ function createOpenCodeLogger(client: PluginInput["client"], getMinLevel: () => 
   };
 
   return {
+    trace: (event, fields) => write("trace", event, fields),
     debug: (event, fields) => write("debug", event, fields),
     info: (event, fields) => write("info", event, fields),
     warn: (event, fields) => write("warn", event, fields),

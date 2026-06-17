@@ -324,6 +324,9 @@ describe("acquireTokenViaDeviceCode", () => {
     type Entry = { level: string; event: string; fields?: Record<string, unknown> };
     const entries: Entry[] = [];
     const recordingLogger = {
+      trace(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "trace", event, fields });
+      },
       debug(event: string, fields?: Record<string, unknown>) {
         entries.push({ level: "debug", event, fields });
       },
@@ -461,6 +464,9 @@ describe("acquireTokenViaDeviceCode", () => {
     type Entry = { level: string; event: string; fields?: Record<string, unknown> };
     const entries: Entry[] = [];
     const logger = {
+      trace(event: string, fields?: Record<string, unknown>) {
+        entries.push({ level: "trace", event, fields });
+      },
       debug(event: string, fields?: Record<string, unknown>) {
         entries.push({ level: "debug", event, fields });
       },

@@ -721,21 +721,24 @@ describe("OpenCode plugin hooks", () => {
 });
 
 describe("fromOpenCodeLogLevel", () => {
-  it("maps OpenCode's uppercase log levels to internal lowercase levels", () => {
-    expect(fromOpenCodeLogLevel("DEBUG")).toBe("debug");
+  it("maps OpenCode's uppercase log levels to internal levels (DEBUG unlocks trace)", () => {
+    // Host DEBUG is intentionally mapped to the most-verbose `trace` tier so
+    // `--log-level DEBUG` surfaces the oauth2_* trace events.
+    expect(fromOpenCodeLogLevel("DEBUG")).toBe("trace");
     expect(fromOpenCodeLogLevel("INFO")).toBe("info");
     expect(fromOpenCodeLogLevel("WARN")).toBe("warn");
     expect(fromOpenCodeLogLevel("ERROR")).toBe("error");
   });
 
   it("tolerates mixed-case input from non-canonical hosts", () => {
-    expect(fromOpenCodeLogLevel("debug")).toBe("debug");
+    expect(fromOpenCodeLogLevel("debug")).toBe("trace");
     expect(fromOpenCodeLogLevel("Info")).toBe("info");
   });
 
   it("returns undefined for missing or unrecognized values so the caller can apply a default", () => {
     expect(fromOpenCodeLogLevel(undefined)).toBeUndefined();
     expect(fromOpenCodeLogLevel(null)).toBeUndefined();
+    // There is no host "TRACE" level; an unknown string still falls through.
     expect(fromOpenCodeLogLevel("trace")).toBeUndefined();
     expect(fromOpenCodeLogLevel(42)).toBeUndefined();
   });

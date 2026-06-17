@@ -202,6 +202,19 @@ export interface CancelFrame {
   id: string;
 }
 
+/**
+ * Server → client: the handshake was refused; the socket is about to close.
+ * Sent just before `conn.close()` so the dialer can tell a *rejection* (bad
+ * token, wrong protocol) apart from a plain network drop — and surface an
+ * actionable error ("re-paste the token") instead of retrying forever. `reason`
+ * is a stable machine code (e.g. `"bad_token"`), not a human sentence.
+ */
+export interface RejectedFrame {
+  v: number;
+  type: "rejected";
+  reason: string;
+}
+
 export interface PingFrame {
   v: number;
   type: "ping";
@@ -220,6 +233,7 @@ export type Frame =
   | EventFrame
   | ReleaseFrame
   | CancelFrame
+  | RejectedFrame
   | PingFrame
   | PongFrame;
 
@@ -270,6 +284,8 @@ export function decodeFrame(raw: string): Frame | null {
       return { v: PROTOCOL_VERSION, type: "release" };
     case "cancel":
       return typeof parsed.id === "string" ? (parsed as unknown as CancelFrame) : null;
+    case "rejected":
+      return typeof parsed.reason === "string" ? (parsed as unknown as RejectedFrame) : null;
     case "ping":
       return { v: PROTOCOL_VERSION, type: "ping" };
     case "pong":
@@ -304,6 +320,33 @@ export function resultFrame(id: string, data: unknown): ResultFrame {
 
 export function errorFrame(id: string, message: string, code?: string): ResultFrame {
   return { v: PROTOCOL_VERSION, type: "result", id, ok: false, error: { message, code } };
+}
+
+export function rejectedFrame(reason: string): RejectedFrame {
+  return { v: PROTOCOL_VERSION, type: "rejected", reason };
+}
+
+/**
+ * A short, **non-secret** fingerprint of a bridge token, safe to log. It never
+ * reveals the token: just its length plus a base36 digest, so two sides can log
+ * `tokenFingerprint(...)` and a human can see at a glance whether the executor's
+ * token matches the broker's — the whole point when debugging `bad_token`.
+ */
+export function tokenFingerprint(token: string): string {
+  // Defensive: this is logged from a connection handler, so never throw on a
+  // non-string slipping through (a malformed/forged frame) — a crash there is
+  // worse than a vague fingerprint.
+  if (typeof token !== "string") {
+    return "invalid";
+  }
+  // djb2 — tiny, dependency-free, stable. Collisions are irrelevant: this is a
+  // visual match aid, not a security primitive.
+  let hash = 5381;
+  for (let i = 0; i < token.length; i++) {
+    hash = (hash * 33) ^ token.charCodeAt(i);
+  }
+  const digest = (hash >>> 0).toString(36);
+  return token.length === 0 ? "empty" : `len${token.length}.${digest}`;
 }
 
 export function cancelFrame(id: string): CancelFrame {

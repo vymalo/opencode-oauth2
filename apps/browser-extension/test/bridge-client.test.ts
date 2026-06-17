@@ -168,6 +168,103 @@ describe("BridgeClient frame routing", () => {
   });
 });
 
+describe("BridgeClient handshake rejection", () => {
+  it("on a bad-token rejection shows a neutral error and retries slowly (no flood)", async () => {
+    vi.useFakeTimers();
+    try {
+      const { ws } = await connected();
+      const firstWs = ws;
+      ws.emit(
+        "message",
+        encodeFrame({ v: PROTOCOL_VERSION, type: "rejected", reason: "bad_token" })
+      );
+      await Promise.resolve();
+      expect(setStatus).toHaveBeenCalledWith(
+        expect.objectContaining({
+          state: "error",
+          lastError: expect.stringContaining("restart the host")
+        })
+      );
+      // After the close, it must NOT hammer: well before the slow retry window
+      // (which would be the every-second flood under the old backoff), no new
+      // socket is opened.
+      ws.emit("close");
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(FakeWS.last).toBe(firstWs); // still no flood
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("auto-recovers: keeps retrying on the slow cadence until a good host returns", async () => {
+    vi.useFakeTimers();
+    try {
+      const { ws } = await connected();
+      const firstWs = ws;
+      ws.emit(
+        "message",
+        encodeFrame({ v: PROTOCOL_VERSION, type: "rejected", reason: "bad_token" })
+      );
+      ws.emit("close");
+      // At the slow-retry interval it dials again on its own — no manual
+      // reconnect needed. This is the auto-heal after e.g. restarting the host.
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(FakeWS.last).not.toBe(firstWs); // a fresh socket was opened
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a successful ready after a rejection restores fast backoff", async () => {
+    vi.useFakeTimers();
+    try {
+      const { ws } = await connected();
+      ws.emit(
+        "message",
+        encodeFrame({ v: PROTOCOL_VERSION, type: "rejected", reason: "bad_token" })
+      );
+      ws.emit("close");
+      await vi.advanceTimersByTimeAsync(60_000); // slow retry dials a new socket
+      const retryWs = FakeWS.last as FakeWS;
+      retryWs.emit("open");
+      retryWs.emit(
+        "message",
+        encodeFrame({
+          v: PROTOCOL_VERSION,
+          type: "ready",
+          server: "opencode-browser",
+          protocol: PROTOCOL_VERSION
+        })
+      );
+      await Promise.resolve();
+      expect(setStatus).toHaveBeenCalledWith(expect.objectContaining({ state: "connected" }));
+      // A subsequent drop now uses fast backoff (1s), not the slow reject cadence.
+      retryWs.emit("close");
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(FakeWS.last).not.toBe(retryWs);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a manual reconnect() (re-paste / save) dials again immediately", async () => {
+    vi.useFakeTimers();
+    try {
+      const { client, ws } = await connected();
+      ws.emit(
+        "message",
+        encodeFrame({ v: PROTOCOL_VERSION, type: "rejected", reason: "bad_token" })
+      );
+      ws.emit("close");
+      const before = FakeWS.last;
+      await client.reconnect(); // the dashboard "save token" path — no 60s wait
+      expect(FakeWS.last).not.toBe(before); // a new socket was created at once
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("BridgeClient disconnect", () => {
   it("closes the socket and reports disconnected", async () => {
     const onDisconnected = vi.fn();

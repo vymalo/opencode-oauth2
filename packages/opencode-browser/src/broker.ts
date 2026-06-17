@@ -10,7 +10,9 @@ import {
   type Frame,
   nextId,
   PROTOCOL_VERSION,
-  resultFrame
+  rejectedFrame,
+  resultFrame,
+  tokenFingerprint
 } from "./protocol.js";
 import type { BridgeTransport, ClientConnection } from "./transport.js";
 
@@ -60,6 +62,14 @@ export interface BrokerOptions {
 export interface BrokerDeps {
   logger: Logger;
   transport: BridgeTransport;
+  /**
+   * Optional: re-read the shared bridge token from its source of truth (the
+   * per-user `bridge.json`). Called on a bad-token handshake so a long-lived
+   * host — which resolved its token once at boot and otherwise never re-reads —
+   * can pick up a rotated token without a restart. Returns the current token, or
+   * `undefined` if unavailable. Host-only; guests/tests can omit it.
+   */
+  reloadToken?: () => string | undefined;
 }
 
 interface ExecutorInfo {
@@ -192,15 +202,45 @@ export class Broker {
   }
 
   private handleHello(conn: ClientConnection, frame: Frame & { type: "hello" }): void {
-    if (frame.token !== this.opts.token) {
-      this.deps.logger.warn("browser_handshake_rejected", { reason: "bad_token" });
-      conn.close();
-      return;
-    }
     const role = frame.role ?? "extension";
+    this.deps.logger.trace("browser_handshake_hello", {
+      role,
+      client: frame.client,
+      label: frame.label,
+      browser: frame.browser
+    });
+    if (frame.token !== this.opts.token) {
+      // The shared token may have rotated under this long-lived host (it resolved
+      // its token once at boot and otherwise never re-reads bridge.json). Re-read
+      // it; if the file now carries a different value, adopt it — so a rotation
+      // reaches a running host without a restart — then re-check the handshake.
+      this.adoptRotatedToken();
+      if (frame.token !== this.opts.token) {
+        // Fingerprints (never the raw tokens) make the mismatch diagnosable from
+        // the log alone — `expected` vs `got` of the same length but different
+        // value means a rotated/stale token, not a paste typo. role/client say
+        // which peer it was.
+        this.deps.logger.warn("browser_handshake_rejected", {
+          reason: "bad_token",
+          role: frame.role ?? "extension",
+          client: frame.client,
+          expected: tokenFingerprint(this.opts.token),
+          got: tokenFingerprint(frame.token)
+        });
+        // Tell the dialer *why* before dropping it, so it can show an actionable
+        // error and stop hammering instead of retrying a token that can't work.
+        this.safeSend(conn, rejectedFrame("bad_token"));
+        conn.close();
+        return;
+      }
+      this.deps.logger.info("browser_bridge_token_reloaded", {
+        fingerprint: tokenFingerprint(this.opts.token)
+      });
+    }
     if (role === "agent") {
       const id = `agent:${++this.agentSeq}`;
       this.agents.set(conn, { conn, id });
+      this.deps.logger.trace("browser_agent_accepted", { id, client: frame.client });
       this.deps.logger.info("browser_agent_connected", { id, client: frame.client });
       this.safeSend(conn, {
         v: PROTOCOL_VERSION,
@@ -216,6 +256,7 @@ export class Broker {
     // Replace any stale connection carrying the same id (extension reconnect).
     const prior = this.executorById.get(id);
     if (prior && prior.conn !== conn) {
+      this.deps.logger.trace("browser_executor_replace_stale", { id });
       this.executors.delete(prior.conn);
       prior.conn.close();
     }
@@ -229,6 +270,7 @@ export class Broker {
     this.executorById.set(id, info);
     if (!this.primaryExecutorId || !this.executorById.has(this.primaryExecutorId)) {
       this.primaryExecutorId = id;
+      this.deps.logger.trace("browser_primary_executor_set", { id });
     }
     this.deps.logger.info("browser_executor_connected", {
       id,
@@ -249,6 +291,20 @@ export class Broker {
     void this.rebuildFromExecutor(info);
   }
 
+  /**
+   * Re-read the shared token (via the injected `reloadToken`) and adopt it if the
+   * source of truth now holds a different, non-empty value. Lets a rotation in
+   * `bridge.json` reach this running host. No-op without a `reloadToken` dep, or
+   * when the file is unchanged/unavailable — so a genuinely wrong token still
+   * gets rejected. Reads only on a mismatch, so it's not on the hot path.
+   */
+  private adoptRotatedToken(): void {
+    const latest = this.deps.reloadToken?.();
+    if (latest && latest.length > 0 && latest !== this.opts.token) {
+      this.opts.token = latest;
+    }
+  }
+
   private async rebuildFromExecutor(executor: ExecutorInfo): Promise<void> {
     try {
       const data = (await this.sendToExecutor(executor, "broker", {
@@ -259,6 +315,10 @@ export class Broker {
       for (const g of data.groups ?? []) {
         if (g.name && !this.groupOwner.has(g.name)) {
           this.groupOwner.set(g.name, { executorId: executor.id, agentId: null });
+          this.deps.logger.trace("browser_group_orphan_rebuilt", {
+            group: g.name,
+            executorId: executor.id
+          });
         }
       }
     } catch {
@@ -275,6 +335,10 @@ export class Broker {
         this.executorById.delete(executor.id);
         for (const [group, owner] of this.groupOwner) {
           if (owner.executorId === executor.id) {
+            this.deps.logger.trace("browser_group_dropped_executor_gone", {
+              group,
+              executorId: executor.id
+            });
             this.groupOwner.delete(group);
           }
         }
@@ -349,7 +413,15 @@ export class Broker {
     const owner = this.groupOwner.get(cmd.group);
     if (owner) {
       if (owner.agentId && owner.agentId !== agentId) {
+        this.deps.logger.trace("browser_group_denied", {
+          group: cmd.group,
+          agentId,
+          ownerAgentId: owner.agentId
+        });
         throw new BrokerError(`group "${cmd.group}" is owned by another client`, "group_owned");
+      }
+      if (owner.agentId === null) {
+        this.deps.logger.trace("browser_group_adopted", { group: cmd.group, agentId });
       }
       owner.agentId = agentId; // claim (incl. adopting an orphan)
       const exec = this.executorById.get(owner.executorId);
@@ -369,6 +441,11 @@ export class Broker {
     }
     const exec = this.pickExecutor(cmd.target);
     this.groupOwner.set(cmd.group, { executorId: exec.id, agentId });
+    this.deps.logger.trace("browser_group_assigned", {
+      group: cmd.group,
+      agentId,
+      executorId: exec.id
+    });
     return exec;
   }
 
@@ -442,20 +519,28 @@ export class Broker {
       params: cmd.params
     };
     const timeoutMs = this.timeoutFor(cmd.timeoutMs);
+    this.deps.logger.trace("browser_command_dispatched", {
+      id: reqId,
+      action: cmd.action,
+      group: cmd.group,
+      executorId: executor.id,
+      agentId,
+      timeoutMs
+    });
     return new Promise<unknown>((resolve, reject) => {
       const timer =
         timeoutMs > 0
-          ? setTimeout(
-              () =>
-                this.abandon(
-                  reqId,
-                  new BrokerError(
-                    `command '${cmd.action}' timed out after ${timeoutMs}ms`,
-                    "timeout"
-                  )
-                ),
-              timeoutMs
-            )
+          ? setTimeout(() => {
+              this.deps.logger.trace("browser_command_timeout_fired", {
+                id: reqId,
+                action: cmd.action,
+                timeoutMs
+              });
+              this.abandon(
+                reqId,
+                new BrokerError(`command '${cmd.action}' timed out after ${timeoutMs}ms`, "timeout")
+              );
+            }, timeoutMs)
           : null;
       let detachAbort: (() => void) | null = null;
       if (signal) {
@@ -488,8 +573,15 @@ export class Broker {
   private handleResult(frame: Frame & { type: "result" }): void {
     const p = this.pending.get(frame.id);
     if (!p) {
+      this.deps.logger.trace("browser_result_unmatched", { id: frame.id });
       return;
     }
+    this.deps.logger.trace("browser_command_result_correlated", {
+      id: frame.id,
+      ok: frame.ok,
+      executorId: p.executorId,
+      agentId: p.agentId
+    });
     this.clearPending(frame.id);
     if (frame.ok) {
       p.resolve(frame.data);
@@ -503,6 +595,13 @@ export class Broker {
     conn: ClientConnection,
     frame: CommandFrame
   ): Promise<void> {
+    this.deps.logger.trace("browser_agent_command_received", {
+      agentId: agent.id,
+      id: frame.id,
+      action: frame.action,
+      group: frame.group,
+      target: frame.target
+    });
     try {
       const data = await this.route(agent.id, {
         action: frame.action,
@@ -511,10 +610,21 @@ export class Broker {
         target: frame.target,
         timeoutMs: frame.timeoutMs
       });
+      this.deps.logger.trace("browser_agent_command_result", {
+        agentId: agent.id,
+        id: frame.id,
+        ok: true
+      });
       this.safeSend(conn, resultFrame(frame.id, data));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const code = err instanceof BrokerError ? err.code : undefined;
+      this.deps.logger.trace("browser_agent_command_result", {
+        agentId: agent.id,
+        id: frame.id,
+        ok: false,
+        code
+      });
       this.safeSend(conn, errorFrame(frame.id, message, code));
     }
   }
@@ -522,6 +632,11 @@ export class Broker {
   private routeEvent(frame: EventFrame): void {
     // Forward to the owning agent if known, else broadcast to all remote agents.
     const owner = frame.group ? this.groupOwner.get(frame.group) : undefined;
+    this.deps.logger.trace("browser_event_routed", {
+      name: frame.name,
+      group: frame.group,
+      ownerAgentId: owner?.agentId ?? null
+    });
     for (const agent of this.agents.values()) {
       if (!owner || owner.agentId === null || owner.agentId === agent.id) {
         this.safeSend(agent.conn, frame);
@@ -565,10 +680,11 @@ export class Broker {
 
   private releaseForAgent(agentId: string): void {
     const execIds = new Set<string>();
-    for (const owner of this.groupOwner.values()) {
+    for (const [group, owner] of this.groupOwner) {
       if (owner.agentId === agentId) {
         execIds.add(owner.executorId);
         owner.agentId = null;
+        this.deps.logger.trace("browser_group_orphaned", { group, agentId });
       }
     }
     // Only release the executors this agent actually owned. An agent that holds
@@ -624,6 +740,12 @@ export class Broker {
       return;
     }
     const exec = this.executorById.get(p.executorId);
+    this.deps.logger.trace("browser_command_abandoned", {
+      id: reqId,
+      executorId: p.executorId,
+      cancelSent: Boolean(exec),
+      reason: err.message
+    });
     if (exec) {
       this.safeSend(exec.conn, cancelFrame(reqId));
     }

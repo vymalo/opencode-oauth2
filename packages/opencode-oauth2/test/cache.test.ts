@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -51,6 +51,34 @@ describe("FileCacheStore", () => {
     const loaded = await store.loadServerState("example-ai");
     expect(loaded?.token?.accessToken).toBe("access-token");
     expect(loaded?.token?.refreshToken).toBeUndefined();
+  });
+
+  it("survives many concurrent saves of the same server (no temp-file race)", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "opencode-cache-concurrent-"));
+    const store = new FileCacheStore(baseDir);
+    await store.ensureReady();
+
+    // Mirrors the desktop app restoring several project windows at once: many
+    // writers racing the same `<serverId>.json`. A shared `.tmp` name made one
+    // writer's rename ENOENT-fail on the temp file another had already consumed.
+    const saves = Array.from({ length: 25 }, (_, i) =>
+      store.saveServerState({
+        serverId: "example-ai",
+        updatedAt: Date.now(),
+        rawModels: [{ id: `glm-${i}` }],
+        models: [{ id: `glm-${i}`, displayName: `GLM ${i}` }],
+        token: { accessToken: `token-${i}`, tokenType: "Bearer" }
+      })
+    );
+
+    await expect(Promise.all(saves)).resolves.toBeDefined();
+
+    // The final file is intact (last writer wins) and no orphan temp files leak.
+    const loaded = await store.loadServerState("example-ai");
+    expect(loaded?.token?.accessToken).toMatch(/^token-\d+$/);
+
+    const leftovers = (await readdir(baseDir)).filter((name) => name.includes(".tmp"));
+    expect(leftovers).toEqual([]);
   });
 
   it("drops cached tokens with malformed required fields", async () => {

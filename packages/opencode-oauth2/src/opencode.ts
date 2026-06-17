@@ -24,6 +24,11 @@ import type { TokenSet } from "./types.js";
  * values fall through to `undefined` so the caller can apply its own default —
  * we never throw on the OpenCode-supplied value because the host owns
  * validation of its own field.
+ *
+ * Note: host `DEBUG` unlocks this plugin's most-verbose `"trace"` tier (there
+ * is no separate host `TRACE` level), so running OpenCode with
+ * `--log-level DEBUG` surfaces the `oauth2_*` trace events emitted across the
+ * runtime hot paths.
  */
 export function fromOpenCodeLogLevel(value: unknown): LogLevel | undefined {
   if (typeof value !== "string") {
@@ -31,7 +36,7 @@ export function fromOpenCodeLogLevel(value: unknown): LogLevel | undefined {
   }
   switch (value.toUpperCase()) {
     case "DEBUG":
-      return "debug";
+      return "trace";
     case "INFO":
       return "info";
     case "WARN":
@@ -499,6 +504,7 @@ async function propagateCachedBearer(
   // is exactly the case that left `@vymalo/opencode-models-info` fetching an
   // OAuth2-protected `meta.modelsInfoUrl` without a bearer (HTTP 401). A stale
   // value here is still harmless: `chat.headers` overwrites per request.
+  logger.trace("oauth2_bearer_propagation_start", { providerId });
   let token: TokenSet;
   try {
     token = await runtime.ensureAccessToken(providerId, { interactive: false });
@@ -532,7 +538,11 @@ function createOpenCodeLogger(client: PluginInput["client"], getMinLevel: () => 
   // default; set VYMALO_PLUGIN_CONSOLE_LOG=1 to restore full console output.
   const consoleAll = /^(1|true|yes|on)$/i.test(process.env.VYMALO_PLUGIN_CONSOLE_LOG ?? "");
 
-  const write = (level: "debug" | "info" | "warn" | "error", event: string, fields?: LogFields) => {
+  const write = (
+    level: "trace" | "debug" | "info" | "warn" | "error",
+    event: string,
+    fields?: LogFields
+  ) => {
     if (LOG_LEVEL_PRIORITY[level] < LOG_LEVEL_PRIORITY[getMinLevel()]) {
       return;
     }
@@ -541,11 +551,18 @@ function createOpenCodeLogger(client: PluginInput["client"], getMinLevel: () => 
       fallback[level](event, fields);
     }
 
+    // OpenCode's host log API has no dedicated `trace` level, so forward our
+    // most-verbose tier as host `debug` (the trace gate above already ran, so
+    // host-side filtering only sees records we intended to surface). The
+    // original event name still carries the `oauth2_*` prefix, so the record
+    // remains identifiable in the host log stream.
+    const hostLevel = level === "trace" ? "debug" : level;
+
     void client.app
       .log({
         body: {
           service: PLUGIN_SERVICE_NAME,
-          level,
+          level: hostLevel,
           message: event,
           extra: fields
         }
@@ -556,6 +573,9 @@ function createOpenCodeLogger(client: PluginInput["client"], getMinLevel: () => 
   };
 
   return {
+    trace(event, fields) {
+      write("trace", event, fields);
+    },
     debug(event, fields) {
       write("debug", event, fields);
     },
@@ -595,9 +615,18 @@ export function createOpencodeOauth2Plugin(
         // warnings via `logger`, and those need to be filtered against the
         // user's chosen threshold — not the bootstrap default.
         currentLogLevel = fromOpenCodeLogLevel(config.logLevel) ?? DEFAULT_LOG_LEVEL;
+        logger.trace("oauth2_config_hook_start", {
+          logLevel: currentLogLevel,
+          hostLogLevel: typeof config.logLevel === "string" ? config.logLevel : undefined
+        });
         const managed = collectManagedProviders(config, logger);
+        logger.trace("oauth2_config_hook_collected_providers", {
+          managedCount: managed.servers.length,
+          providerIds: managed.servers.map((server) => server.id)
+        });
 
         if (managed.servers.length === 0) {
+          logger.trace("oauth2_config_hook_no_managed_providers", {});
           state.runtime?.stop();
           state.runtime = undefined;
           state.signature = undefined;
@@ -613,6 +642,10 @@ export function createOpencodeOauth2Plugin(
 
         const signature = runtimeSignature(pluginConfig);
         if (!state.runtime || state.signature !== signature) {
+          logger.trace("oauth2_runtime_rebuild", {
+            reason: state.runtime ? "signature_changed" : "first_build",
+            serverCount: pluginConfig.servers.length
+          });
           state.runtime?.stop();
 
           state.runtime = new OAuth2ModelSyncPlugin(pluginConfig, {
@@ -625,6 +658,8 @@ export function createOpencodeOauth2Plugin(
           await state.runtime.initialize();
           await state.runtime.start({ warmup: true });
           state.signature = signature;
+        } else {
+          logger.trace("oauth2_runtime_reused", { serverCount: pluginConfig.servers.length });
         }
 
         state.managedProviderIds = new Set<string>(managed.servers.map((server) => server.id));
@@ -644,6 +679,10 @@ export function createOpencodeOauth2Plugin(
             }
 
             const models = runtime.getServerModels(providerId);
+            logger.trace("oauth2_config_hook_provider_models", {
+              providerId,
+              modelCount: models.length
+            });
             if (models.length > 0) {
               mergeDiscoveredModels(providerConfig, models);
             }
@@ -658,17 +697,31 @@ export function createOpencodeOauth2Plugin(
             return propagateCachedBearer(providerConfig, providerId, runtime, logger);
           })
         );
+        logger.trace("oauth2_config_hook_finished", {
+          managedCount: state.managedProviderIds.size
+        });
       },
       "chat.headers": async (input, output) => {
         const providerId = input.model?.providerID ?? input.provider?.info?.id;
         if (!providerId || !state.runtime || !state.managedProviderIds.has(providerId)) {
+          logger.trace("oauth2_chat_headers_skipped", {
+            providerId,
+            managed: providerId ? state.managedProviderIds.has(providerId) : false
+          });
           return;
         }
 
+        logger.trace("oauth2_chat_headers_ensure_token", { providerId });
         const token = await state.runtime.ensureAccessToken(providerId);
         output.headers.Authorization = `${token.tokenType || "Bearer"} ${token.accessToken}`;
+        logger.trace("oauth2_chat_headers_bearer_injected", {
+          providerId,
+          present: Boolean(token.accessToken),
+          tokenType: token.tokenType || "Bearer"
+        });
 
         if (state.runtime.getServerModels(providerId).length === 0) {
+          logger.trace("oauth2_chat_headers_lazy_sync", { providerId });
           void state.runtime.syncServer(providerId);
         }
       }

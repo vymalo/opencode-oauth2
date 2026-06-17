@@ -41,6 +41,23 @@ describe("FileCacheStore", () => {
     expect(fromMem).toEqual(record);
   });
 
+  it("survives many concurrent puts of the same key (no temp-file race)", async () => {
+    const store = new FileCacheStore(dir);
+    const key = cacheKey("p", "https://example.test/models");
+
+    const puts = Array.from({ length: 25 }, (_, i) =>
+      store.put(key, { fetchedAt: 1000 + i, ttlSeconds: 60, models: [{ id: `m-${i}` }] })
+    );
+    await expect(Promise.all(puts)).resolves.toBeDefined();
+
+    const onDisk = JSON.parse(await readFile(join(dir, `${key}.json`), "utf8"));
+    expect(Array.isArray(onDisk.models)).toBe(true);
+
+    const { readdir } = await import("node:fs/promises");
+    const leftovers = (await readdir(dir)).filter((name) => name.includes(".tmp"));
+    expect(leftovers).toEqual([]);
+  });
+
   it("returns undefined on cache miss", async () => {
     const store = new FileCacheStore(dir);
     expect(await store.get("missing")).toBeUndefined();

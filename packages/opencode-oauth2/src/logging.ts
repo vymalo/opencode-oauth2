@@ -1,6 +1,7 @@
-export type LogLevel = "debug" | "info" | "warn" | "error";
+export type LogLevel = "trace" | "debug" | "info" | "warn" | "error";
 
 export const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
+  trace: 5,
   debug: 10,
   info: 20,
   warn: 30,
@@ -12,6 +13,7 @@ export interface LogFields {
 }
 
 export interface Logger {
+  trace(event: string, fields?: LogFields): void;
   debug(event: string, fields?: LogFields): void;
   info(event: string, fields?: LogFields): void;
   warn(event: string, fields?: LogFields): void;
@@ -65,6 +67,9 @@ export function createJsonConsoleLogger(minLevel: LogLevel = "info"): Logger {
   };
 
   return {
+    trace(event, fields) {
+      log("trace", event, fields);
+    },
     debug(event, fields) {
       log("debug", event, fields);
     },

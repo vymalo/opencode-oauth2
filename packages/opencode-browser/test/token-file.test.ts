@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -59,6 +59,19 @@ describe("bridge state file location", () => {
 
     expect(existsSync(join(home, ".local", "state", "opencode-browser", "bridge.json"))).toBe(true);
     expect(readBridgeFile()?.token).toBe("tok-empty");
+  });
+
+  it("writes atomically — concurrent writers never strand a torn temp file", () => {
+    process.env.XDG_STATE_HOME = xdg;
+    const dir = join(xdg, "opencode-browser");
+    // Many instances writing at once (the desktop app restoring windows): the
+    // last write wins and no `.tmp` scratch file is left behind for a reader to
+    // catch mid-write (which would make resolveSharedToken regenerate).
+    for (let i = 0; i < 25; i++) {
+      writeBridgeFile(4517, `tok-${i}`);
+    }
+    expect(readBridgeFile()?.token).toMatch(/^tok-\d+$/);
+    expect(readdirSync(dir).filter((n) => n.includes(".tmp"))).toEqual([]);
   });
 });
 
