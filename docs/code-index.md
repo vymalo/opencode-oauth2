@@ -139,3 +139,13 @@ With no options, the bare string form works too: `"plugin": ["@vymalo/opencode-c
   ([`plans/code-index.md`](../plans/code-index.md) §10) but not yet implemented.
 - **Indexes committed HEAD**, not the dirty working tree — `index_refresh` after
   commits to refresh.
+
+## Design decisions (ADRs)
+
+The load-bearing, alternative-closing choices are recorded as ADRs:
+
+- [ADR-0002](adr/0002-code-index-embedded-duckdb-not-graph-db-server.md) — embedded DuckDB, not a graph-DB server (Neo4j/Qdrant/Cozo).
+- [ADR-0003](adr/0003-code-index-content-addressed-blob-per-branch-manifest.md) — content-addressed by git blob, scoped per branch.
+- [ADR-0004](adr/0004-code-index-tree-sitter-sound-but-partial-resolution.md) — tree-sitter only, "sound but partial" call-graph resolution.
+
+Full design narrative: [`plans/code-index.md`](../plans/code-index.md).
