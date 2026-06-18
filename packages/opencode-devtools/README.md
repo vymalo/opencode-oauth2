@@ -1,0 +1,58 @@
+# @vymalo/opencode-devtools
+
+> A belt of everyday, **deterministic, local** developer utilities for the model — maths, encoding,
+> crypto, date/time, structured-data conversion, and an opt-in HTTP client.
+
+[![npm](https://img.shields.io/npm/v/@vymalo/opencode-devtools)](https://www.npmjs.com/package/@vymalo/opencode-devtools)
+![node: >=22](https://img.shields.io/badge/node-%3E%3D22-339933)
+![license: MIT](https://img.shields.io/badge/license-MIT-blue)
+
+An OpenCode plugin that registers a set of pure, in-process tools the model can call — no bridge, no
+server, no auth. Tools are organised into **groups** (gated by the `groups` option, like the browser
+plugin): `math`, `codec`, `crypto`, `datetime`, `convert` (on by default) and an opt-in, SSRF-guarded
+`http` group. The same tool surface ships as an MCP server: [`@vymalo/opencode-devtools-mcp`](../opencode-devtools-mcp).
+
+## Install
+
+```jsonc
+// opencode.json
+{
+  "plugin": ["@vymalo/opencode-devtools"]
+}
+```
+
+Enable the `http` group (off by default — it performs network egress):
+
+```jsonc
+{
+  "plugin": [
+    ["@vymalo/opencode-devtools", {
+      "groups": ["math", "codec", "crypto", "datetime", "convert", "http"],
+      "http": { "allowPrivateNetwork": false }
+    }]
+  ]
+}
+```
+
+## Tools at a glance
+
+| Group | Tools |
+| --- | --- |
+| `math` | `math_eval` (64-digit), `math_convert_unit`, `math_stats`, `math_base` |
+| `codec` | `codec_base64`, `codec_hex`, `codec_url`, `codec_jwt_decode`, `codec_gzip` |
+| `crypto` | `crypto_hash`, `crypto_hmac`, `crypto_uuid` (v4/v7), `crypto_ulid`, `crypto_random`, `crypto_keypair` |
+| `datetime` | `datetime_now`, `datetime_parse`, `datetime_format`, `datetime_diff`, `datetime_convert_tz`, `datetime_cron` |
+| `convert` | `convert_data` (JSON/YAML/TOML/CSV), `convert_query` (JSONPath) |
+| `http` *(opt-in)* | `http_request`, `http_graphql` |
+
+Full reference, config, and the security model: [`docs/devtools.md`](../../docs/devtools.md).
+
+## Why not memory / adb / database too?
+
+Those already have mature MCP servers, so we **adopt** them rather than rebuild — see
+[`docs/recommended-mcps.md`](../../docs/recommended-mcps.md). devtools fills only the gaps: the small
+deterministic utilities nobody else maintains well.
+
+## License
+
+MIT

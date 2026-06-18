@@ -17,6 +17,8 @@
   <a href="https://www.npmjs.com/package/@vymalo/opencode-ratelimit"><img alt="@vymalo/opencode-ratelimit" src="https://img.shields.io/npm/v/@vymalo/opencode-ratelimit?label=ratelimit&color=CB3837&logo=npm"></a>
   <a href="https://www.npmjs.com/package/@vymalo/opencode-browser"><img alt="@vymalo/opencode-browser" src="https://img.shields.io/npm/v/@vymalo/opencode-browser?label=browser&color=CB3837&logo=npm"></a>
   <a href="https://www.npmjs.com/package/@vymalo/opencode-browser-mcp"><img alt="@vymalo/opencode-browser-mcp" src="https://img.shields.io/npm/v/@vymalo/opencode-browser-mcp?label=browser-mcp&color=CB3837&logo=npm"></a>
+  <a href="https://www.npmjs.com/package/@vymalo/opencode-devtools"><img alt="@vymalo/opencode-devtools" src="https://img.shields.io/npm/v/@vymalo/opencode-devtools?label=devtools&color=CB3837&logo=npm"></a>
+  <a href="https://www.npmjs.com/package/@vymalo/opencode-devtools-mcp"><img alt="@vymalo/opencode-devtools-mcp" src="https://img.shields.io/npm/v/@vymalo/opencode-devtools-mcp?label=devtools-mcp&color=CB3837&logo=npm"></a>
 </p>
 
 ---
@@ -34,6 +36,8 @@ The **OpenCode Toolbelt** is the set of `@vymalo/*` plugins that fill those gaps
 | **ratelimit** | [`@vymalo/opencode-ratelimit`](packages/opencode-ratelimit) | Teach a provider to **respect the rate-limit headers** your gateway already sends. Reads Envoy / IETF draft-03 `x-ratelimit-*`, throttles before you hit the wall, and backs off + retries on `429`. |
 | **browser** | [`@vymalo/opencode-browser`](packages/opencode-browser) | Give the model **hands in a real browser**: 34 `browser_*` tools (open, click, type, scroll, screenshot, snapshot, human-in-the-loop feedback…) over a localhost bridge that a companion extension drives. |
 | **browser-mcp** | [`@vymalo/opencode-browser-mcp`](packages/opencode-browser-mcp) | The same browser tools, exposed as an **MCP stdio server** — so Claude Code, Cursor, Cline, and any other MCP client can drive the extension too. |
+| **devtools** | [`@vymalo/opencode-devtools`](packages/opencode-devtools) | A belt of everyday **local utilities** the model can call — `math` (precise eval, units, stats), `codec` (base64/hex/url, JWT decode, gzip), `crypto` (hash/hmac, uuid/ulid, keypairs), `datetime` (parse/format/diff, timezones, cron), `convert` (JSON/YAML/TOML/CSV + JSONPath), and an opt-in, SSRF-guarded `http` client. Deterministic, zero-auth, no server. |
+| **devtools-mcp** | [`@vymalo/opencode-devtools-mcp`](packages/opencode-devtools-mcp) | The same utilities, exposed as an **MCP stdio server** for any MCP client. |
 | 🧩 **extension** | [`apps/browser-extension`](apps/browser-extension) | The companion Chromium + Firefox extension that the browser plugin / MCP server talk to. Private — ships as a Release asset and on the Chrome Web Store / Firefox AMO. |
 
 ```mermaid
@@ -178,6 +182,28 @@ Targeting is via stable `browser_snapshot` refs or CSS selectors / coordinates. 
 
 ---
 
+## 🧰 Devtools — local utilities
+
+`@vymalo/opencode-devtools` gives the model a belt of everyday, **deterministic** tools that run in-process — no bridge, no auth, no network (except the opt-in `http` group). They're organized into **groups** (like the browser plugin), with the five offline groups on by default:
+
+```jsonc
+{
+  "plugin": [
+    "@vymalo/opencode-devtools",
+    // or enable the http group (network egress, off by default):
+    ["@vymalo/opencode-devtools", { "groups": ["math", "codec", "crypto", "datetime", "convert", "http"] }]
+  ]
+}
+```
+
+`math` (precise eval, unit & base conversion, stats) · `codec` (base64/hex/url, JWT decode, gzip) · `crypto` (hash/hmac, uuid v4/v7, ulid, random, keypairs) · `datetime` (parse/format/diff, timezones, cron explain + next-runs) · `convert` (JSON/YAML/TOML/CSV + JSONPath) · `http` (request + GraphQL, SSRF-guarded, opt-in).
+
+**Beyond OpenCode** — [`@vymalo/opencode-devtools-mcp`](packages/opencode-devtools-mcp) exposes the same catalog over MCP for any client. Full reference: [`docs/devtools.md`](docs/devtools.md).
+
+> **Adopt, don't rebuild.** We deliberately did **not** build plugins for memory, Android/iOS, or databases — mature MCP servers already cover those. See [`docs/recommended-mcps.md`](docs/recommended-mcps.md) for the ones we recommend wiring in instead.
+
+---
+
 ## 🧱 Stacking the belt
 
 The plugins are decoupled at the import level but meet at the shared config object, so you can snap several onto one provider. Order matters for the `config` hooks — list them **oauth2 → models-info → ratelimit** so the bearer is in place before models-info fetches metadata with it:
@@ -222,6 +248,8 @@ Full index: [`docs/README.md`](docs/README.md). The highlights:
 | [`docs/models-info.md`](docs/models-info.md) | Metadata enrichment — composition with any auth scheme, caching, failure modes |
 | [`docs/ratelimit.md`](docs/ratelimit.md) | Reading `x-ratelimit-*`, the throttle/backoff state machine, tiers, the timeout caveat |
 | [`docs/browser.md`](docs/browser.md) | Browser automation — topology, wire protocol, full tool reference, executors, multi-client routing, store publishing |
+| [`docs/devtools.md`](docs/devtools.md) | Devtools utilities — tool groups, full reference, the `math`/`http` security model, plugin + MCP config |
+| [`docs/recommended-mcps.md`](docs/recommended-mcps.md) | Mature third-party MCP servers to **adopt** (memory, android/iOS, database) instead of rebuilding |
 | [`docs/security.md`](docs/security.md) | Consolidated security model across all plugins — token cache, the browser bridge, blast radius |
 | [`docs/github-actions.md`](docs/github-actions.md) | CI without stored secrets — Keycloak/Auth0/Okta setup, reusable workflow, matrix, fork-PR limits |
 | [`docs/kubernetes.md`](docs/kubernetes.md) | `CronJob` / `Job` / `Deployment` with projected SA tokens, multi-provider pods, RBAC |
