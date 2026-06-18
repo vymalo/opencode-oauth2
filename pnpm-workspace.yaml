@@ -24,3 +24,6 @@ allowBuilds:
   # spawn-sync (a transitive WXT/web-ext dep) ships a native build step we do
   # not need — the prebuilt JS works fine. Deny it.
   spawn-sync: false
+
+minimumReleaseAgeExclude:
+  - cronstrue@3.20.0

@@ -1,26 +1,27 @@
 {
-  "name": "@vymalo/opencode-oauth2",
+  "name": "@vymalo/opencode-devtools-mcp",
   "version": "0.9.0",
-  "description": "OpenCode plugin for OAuth2/OIDC-secured, OpenAI-compatible model providers with periodic model sync.",
+  "description": "MCP server for @vymalo/opencode-devtools — exposes the same local developer utilities (math, codec, crypto, datetime, convert, http) over the Model Context Protocol so any MCP client (Claude Code, Cursor, Cline, …) can call them. No bridge, no auth — pure deterministic compute.",
   "license": "MIT",
   "author": "vymalo contributors",
   "homepage": "https://github.com/vymalo/opencode-oauth2#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/vymalo/opencode-oauth2.git",
-    "directory": "packages/opencode-oauth2"
+    "directory": "packages/opencode-devtools-mcp"
   },
   "bugs": {
     "url": "https://github.com/vymalo/opencode-oauth2/issues"
   },
   "keywords": [
-    "opencode",
-    "opencode-plugin",
-    "oauth2",
-    "oidc",
-    "openai-compatible",
-    "ai-sdk",
-    "model-sync"
+    "mcp",
+    "model-context-protocol",
+    "utilities",
+    "math",
+    "crypto",
+    "jwt",
+    "datetime",
+    "cron"
   ],
   "type": "module",
   "main": "dist/index.js",
@@ -29,12 +30,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    },
-    "./lib": {
-      "types": "./dist/lib.d.ts",
-      "import": "./dist/lib.js"
-    },
-    "./package.json": "./package.json"
+    }
+  },
+  "bin": {
+    "opencode-devtools-mcp": "dist/mcp.js"
   },
   "sideEffects": false,
   "files": [
@@ -52,16 +51,14 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "coverage": "vitest run --coverage",
-    "test:integration": "vitest run --config vitest.integration.config.ts",
     "format": "biome format --write .",
     "format:check": "biome format ."
   },
   "dependencies": {
-    "@opencode-ai/plugin": "1.15.10"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@vymalo/opencode-devtools": "workspace:*"
   },
   "devDependencies": {
-    "@ai-sdk/openai": "^2.0.106",
-    "ai": "^5.0.199",
     "vite": "^8.0.14",
     "vitest": "^4.1.7"
   }
