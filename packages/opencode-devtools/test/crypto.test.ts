@@ -97,4 +97,13 @@ describe("crypto group", () => {
     const rsa = await run("crypto_keypair", { type: "rsa", modulusLength: 1024 });
     expect((rsa as { data: { privateKey: string } }).data.privateKey).toContain("PRIVATE KEY");
   });
+
+  it("rejects out-of-range RSA modulus (DoS guard)", async () => {
+    await expect(run("crypto_keypair", { type: "rsa", modulusLength: 512 })).rejects.toThrow(
+      /1024 and 4096/
+    );
+    await expect(run("crypto_keypair", { type: "rsa", modulusLength: 16384 })).rejects.toThrow(
+      /1024 and 4096/
+    );
+  });
 });

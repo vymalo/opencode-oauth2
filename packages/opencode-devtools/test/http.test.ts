@@ -23,7 +23,10 @@ describe("http group — SSRF guard", () => {
       "169.254.169.254",
       "::1",
       "fc00::1",
-      "fe80::1"
+      "fe80::1",
+      "fe81::1", // fe80::/10 spans fe80–febf, not just fe80
+      "febf::1",
+      "ff02::1" // multicast
     ]) {
       expect(isBlockedHost(h)).toBe(true);
     }

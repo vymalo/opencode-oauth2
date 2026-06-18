@@ -200,6 +200,10 @@ export const CRYPTO_TOOLS: readonly ToolSpec[] = [
       if (type === "rsa") {
         const modulusLength =
           typeof args.modulusLength === "number" ? Math.floor(args.modulusLength) : 2048;
+        // generateKeyPairSync blocks the event loop; a huge modulus is a DoS.
+        if (modulusLength < 1024 || modulusLength > 4096) {
+          throw new Error('"modulusLength" must be between 1024 and 4096');
+        }
         pair = generateKeyPairSync("rsa", { modulusLength, ...enc });
       } else if (type === "ec") {
         pair = generateKeyPairSync("ec", { namedCurve: "P-256", ...enc });

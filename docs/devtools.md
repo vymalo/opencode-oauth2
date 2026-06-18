@@ -131,6 +131,8 @@ Per-agent control is also available via OpenCode's tool allow/deny on the indivi
    not resolve DNS, so a public name that resolves to a private IP (DNS rebinding) is not caught.
    Keep the group disabled on untrusted input unless you also control egress at the network layer.
 3. **`codec_jwt_decode` does not verify signatures** — the result is explicitly `verified: false`.
+4. **`convert_query` runs with `eval: false`.** JSONPath script/filter expressions (`[?(…)]`) execute JavaScript via the engine; since `path` is model-supplied, they're disabled — a filter expression returns a clear error rather than evaluating. Standard path queries are unaffected.
+5. **`crypto_keypair` RSA modulus is clamped to 1024–4096 bits** — `generateKeyPairSync` is synchronous, so an arbitrarily large modulus would block the event loop (DoS).
 
 ## Not in v1 (deferred)
 

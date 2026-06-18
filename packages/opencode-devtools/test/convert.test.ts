@@ -60,6 +60,15 @@ describe("convert group", () => {
     expect(data.count).toBe(2);
   });
 
+  it("refuses script/filter expressions (no eval — sandbox)", async () => {
+    await expect(
+      run("convert_query", {
+        input: '{"items":[{"name":"a","admin":true}]}',
+        path: "$.items[?(@.admin)].name"
+      })
+    ).rejects.toThrow(/Eval|prevented/i);
+  });
+
   it("runs a JSONPath query over YAML with no matches", async () => {
     const r = await run("convert_query", {
       input: "items:\n  - name: a\n",

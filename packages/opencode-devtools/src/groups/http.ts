@@ -40,8 +40,8 @@ export function isBlockedHost(hostname: string): boolean {
   if (h === "::1" || h === "::" || h === "0.0.0.0") {
     return true;
   }
-  if (h.startsWith("fc") || h.startsWith("fd") || h.startsWith("fe80")) {
-    return true; // unique-local + link-local IPv6
+  if (h.startsWith("fc") || h.startsWith("fd") || /^fe[89ab]/.test(h) || h.startsWith("ff")) {
+    return true; // unique-local + link-local (fe80::/10) + multicast (ff00::/8) IPv6
   }
   if (isPrivateIpv4(h)) {
     return true;

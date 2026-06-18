@@ -88,7 +88,15 @@ export const CONVERT_TOOLS: readonly ToolSpec[] = [
       const path = reqString(args, "path");
       const from = (typeof args.from === "string" ? args.from : "json") as Format;
       const value = decode(input, from);
-      const matches = JSONPath({ path, json: value as object, wrap: true }) as unknown[];
+      // eval: false disables script/filter expressions (`[?(...)]`) — they run
+      // arbitrary JS via the engine. `path` is model-supplied, so this keeps the
+      // tool deterministic (no sandbox escape). Standard path queries still work.
+      const matches = JSONPath({
+        path,
+        json: value as object,
+        wrap: true,
+        eval: false
+      }) as unknown[];
       return json(
         { path, count: matches.length, matches },
         matches.length === 0 ? "(no matches)" : JSON.stringify(matches, null, 2)
