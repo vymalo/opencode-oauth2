@@ -12,7 +12,9 @@ describe("toJsonSchema", () => {
       obj: {
         type: "object",
         properties: { inner: { type: "number" }, opt: { type: "string", optional: true } }
-      }
+      },
+      headers: { type: "record", valueType: "string", optional: true },
+      vars: { type: "record", valueType: "any", optional: true }
     };
     const schema = toJsonSchema(input);
     expect(schema.type).toBe("object");
@@ -24,5 +26,11 @@ describe("toJsonSchema", () => {
     const obj = schema.properties.obj as { required: string[]; additionalProperties: boolean };
     expect(obj.required).toEqual(["inner"]);
     expect(obj.additionalProperties).toBe(false);
+    // record → open object: arbitrary keys allowed (NOT additionalProperties:false)
+    expect(schema.properties.headers).toMatchObject({
+      type: "object",
+      additionalProperties: { type: "string" }
+    });
+    expect(schema.properties.vars).toMatchObject({ type: "object", additionalProperties: true });
   });
 });

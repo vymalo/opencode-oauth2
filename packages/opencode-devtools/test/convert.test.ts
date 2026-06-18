@@ -36,12 +36,22 @@ describe("convert group", () => {
       to: "json"
     });
     const rows = JSON.parse(toJson.text);
+    // Fields stay strings — no dynamicTyping (faithful conversion).
     expect(rows).toEqual([
-      { name: "Alice", age: 30 },
-      { name: "Bob", age: 25 }
+      { name: "Alice", age: "30" },
+      { name: "Bob", age: "25" }
     ]);
     const toCsv = await run("convert_data", { input: toJson.text, from: "json", to: "csv" });
     expect(toCsv.text.split(/\r?\n/)[0]).toBe("name,age");
+  });
+
+  it("preserves leading zeros and large ids in CSV (no type coercion)", async () => {
+    const r = await run("convert_data", {
+      input: "id,code\n9007199254740993,00123",
+      from: "csv",
+      to: "json"
+    });
+    expect(JSON.parse(r.text)).toEqual([{ id: "9007199254740993", code: "00123" }]);
   });
 
   it("reports CSV parse errors", async () => {

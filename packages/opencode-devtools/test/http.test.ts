@@ -26,14 +26,25 @@ describe("http group — SSRF guard", () => {
       "fe80::1",
       "fe81::1", // fe80::/10 spans fe80–febf, not just fe80
       "febf::1",
-      "ff02::1" // multicast
+      "ff02::1", // multicast
+      "::ffff:127.0.0.1", // IPv4-mapped (dotted)
+      "::ffff:7f00:1" // IPv4-mapped (hex form `new URL()` normalizes to)
     ]) {
       expect(isBlockedHost(h)).toBe(true);
     }
   });
 
-  it("allows public hosts", () => {
-    for (const h of ["example.com", "8.8.8.8", "172.15.0.1", "192.169.0.1"]) {
+  it("allows public hosts, incl. DNS names starting with fc/fd/fe", () => {
+    // These are DNS names, not IPv6 literals — must NOT be blocked.
+    for (const h of [
+      "example.com",
+      "8.8.8.8",
+      "172.15.0.1",
+      "192.169.0.1",
+      "fdroid.org",
+      "fc-service.com",
+      "fe-news.io"
+    ]) {
       expect(isBlockedHost(h)).toBe(false);
     }
   });
@@ -99,6 +110,46 @@ describe("http group — requests", () => {
     const fetchImpl = vi.fn(async () => new Response("ok"));
     await run("http_request", { url: "https://x.com", body: "ignored" }, ctx({ fetchImpl }));
     expect((fetchImpl.mock.calls[0][1] as RequestInit).body).toBeUndefined();
+  });
+
+  it("re-validates redirects against the SSRF guard", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(null, { status: 302, headers: { location: "http://169.254.169.254/" } })
+    );
+    await expect(
+      run("http_request", { url: "https://example.com/start" }, ctx({ fetchImpl }))
+    ).rejects.toThrow(/private\/loopback/);
+    expect(fetchImpl).toHaveBeenCalledOnce(); // the redirect target is never fetched
+  });
+
+  it("follows an allowed redirect, GET-ifying a 301 from POST", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(null, { status: 301, headers: { location: "https://example.com/final" } })
+      )
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+    const r = await run(
+      "http_request",
+      { url: "https://example.com/start", method: "POST", body: "x" },
+      ctx({ fetchImpl })
+    );
+    expect((r as { data: { status: number } }).data.status).toBe(200);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const second = fetchImpl.mock.calls[1][1] as RequestInit;
+    expect(second.method).toBe("GET");
+    expect(second.body).toBeUndefined();
+  });
+
+  it("rejects an endless redirect loop", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(null, { status: 302, headers: { location: "https://example.com/again" } })
+    );
+    await expect(
+      run("http_request", { url: "https://example.com/start" }, ctx({ fetchImpl }))
+    ).rejects.toThrow(/too many redirects/);
   });
 
   it("executes a GraphQL query", async () => {

@@ -40,7 +40,25 @@ export interface ObjectField {
   optional?: boolean;
   properties: Record<string, Field>;
 }
-export type Field = StringField | NumberField | BooleanField | ArrayField | ObjectField;
+/**
+ * An open key→value map with arbitrary keys (e.g. HTTP headers, GraphQL
+ * variables). Unlike `object`, it does NOT set `additionalProperties: false`,
+ * so real keys aren't stripped/rejected by a validating client. `valueType`
+ * picks the value schema (`string` for headers, `any` for variables).
+ */
+export interface RecordField {
+  type: "record";
+  description?: string;
+  optional?: boolean;
+  valueType?: "string" | "any";
+}
+export type Field =
+  | StringField
+  | NumberField
+  | BooleanField
+  | ArrayField
+  | ObjectField
+  | RecordField;
 
 /** Top-level argument map for a tool. */
 export type JsonInput = Record<string, Field>;
@@ -62,6 +80,10 @@ function fieldToJsonSchema(field: Field): Record<string, unknown> {
   }
   if (field.type === "array") {
     out.items = fieldToJsonSchema(field.items);
+  }
+  if (field.type === "record") {
+    out.type = "object";
+    out.additionalProperties = field.valueType === "any" ? true : { type: "string" };
   }
   if (field.type === "object") {
     const properties: Record<string, unknown> = {};

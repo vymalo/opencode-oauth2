@@ -129,6 +129,7 @@ export const DATETIME_TOOLS: readonly ToolSpec[] = [
       const zone = optString(args, "zone");
       if (zone) {
         dt = dt.setZone(zone);
+        ensureValid(dt, `zone "${zone}"`);
       }
       let out: string | null;
       switch (format) {

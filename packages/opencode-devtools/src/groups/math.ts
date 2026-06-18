@@ -28,11 +28,18 @@ const RADIX_PREFIX: Record<number, string> = { 2: "0b", 8: "0o", 16: "0x" };
 
 function parseInRadix(value: string, radix: number): number {
   const trimmed = value.trim().replace(/^0[box]/i, "");
-  const n = Number.parseInt(trimmed, radix);
-  if (Number.isNaN(n)) {
+  // Number.parseInt stops at the first illegal digit (so "1012" in base 2 would
+  // silently parse as 5). Require EVERY digit to be legal for the radix.
+  const allLegal =
+    trimmed.length > 0 &&
+    [...trimmed.toLowerCase()].every((ch) => {
+      const d = Number.parseInt(ch, radix);
+      return !Number.isNaN(d) && d < radix;
+    });
+  if (!allLegal) {
     throw new Error(`"${value}" is not a valid base-${radix} integer`);
   }
-  return n;
+  return Number.parseInt(trimmed, radix);
 }
 
 export const MATH_TOOLS: readonly ToolSpec[] = [

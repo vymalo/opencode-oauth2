@@ -1,6 +1,8 @@
 import { json, reqString, type ToolContext, type ToolSpec } from "../tool-spec.js";
 
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] as const;
+const MAX_REDIRECTS = 5;
+const MAX_RESPONSE_BYTES = 10_000_000; // 10 MB — cap buffered response bodies.
 
 function isPrivateIpv4(host: string): boolean {
   const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
@@ -28,26 +30,57 @@ function isPrivateIpv4(host: string): boolean {
 }
 
 /**
- * Reject obvious loopback / private / link-local destinations. This is a
- * literal-host guard: it does not resolve DNS, so a public name that resolves
- * to a private IP (DNS rebinding) is not caught. Documented in docs/devtools.md.
+ * Extract a dotted IPv4 from an IPv4-mapped IPv6 literal — both the dotted
+ * (`::ffff:127.0.0.1`) and the hex (`::ffff:7f00:1`, what `new URL()` normalizes
+ * to) forms. Returns null if not a mapped address.
+ */
+function mappedIpv4(h: string): string | null {
+  const dotted = h.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  if (dotted) {
+    return dotted[1];
+  }
+  const hex = h.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (hex) {
+    const hi = Number.parseInt(hex[1], 16);
+    const lo = Number.parseInt(hex[2], 16);
+    return `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+  }
+  return null;
+}
+
+/**
+ * Reject loopback / private / link-local destinations. IPv6-prefix and IPv4
+ * range checks only run on actual IP *literals* — a DNS name like `fdroid.org`
+ * (which starts with `fd`) is NOT an IPv6 ULA and must not be blocked. This is
+ * still a literal-host guard: it does not resolve DNS, so a public name that
+ * resolves to a private IP (DNS rebinding) is not caught — see docs/devtools.md.
  */
 export function isBlockedHost(hostname: string): boolean {
   const h = hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (h === "localhost" || h.endsWith(".localhost")) {
+  const isIpv6 = h.includes(":");
+  const isIpv4 = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h);
+  if (!isIpv6 && !isIpv4) {
+    // Plain DNS name — only the localhost family is private.
+    return h === "localhost" || h.endsWith(".localhost");
+  }
+  if (isIpv4) {
+    return isPrivateIpv4(h);
+  }
+  // IPv6 literal.
+  if (h === "::1" || h === "::") {
     return true;
   }
-  if (h === "::1" || h === "::" || h === "0.0.0.0") {
-    return true;
+  const mapped = mappedIpv4(h);
+  if (mapped) {
+    return isPrivateIpv4(mapped);
   }
-  if (h.startsWith("fc") || h.startsWith("fd") || /^fe[89ab]/.test(h) || h.startsWith("ff")) {
-    return true; // unique-local + link-local (fe80::/10) + multicast (ff00::/8) IPv6
+  if (h.startsWith("fc") || h.startsWith("fd")) {
+    return true; // unique-local fc00::/7
   }
-  if (isPrivateIpv4(h)) {
-    return true;
+  if (/^fe[89ab]/.test(h)) {
+    return true; // link-local fe80::/10
   }
-  const mapped = h.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  return mapped ? isPrivateIpv4(mapped[1]) : false;
+  return h.startsWith("ff"); // multicast ff00::/8
 }
 
 function assertAllowed(rawUrl: string, ctx: ToolContext): URL {
@@ -82,17 +115,88 @@ function asHeaders(value: unknown): Record<string, string> {
   return out;
 }
 
-async function readBody(res: Response): Promise<{ body: unknown; bodyText: string }> {
-  const bodyText = await res.text();
+/**
+ * Fetch with **manual** redirect handling so every hop is re-validated by the
+ * SSRF guard — the default follow-redirects behaviour would let a public URL
+ * 30x to `http://127.0.0.1/…` and bypass `allowPrivateNetwork: false`.
+ */
+async function fetchGuarded(
+  start: URL,
+  init: { method: string; headers: Record<string, string>; body?: string },
+  ctx: ToolContext
+): Promise<Response> {
+  let url = start;
+  let method = init.method;
+  let body = init.body;
+  for (let hop = 0; ; hop++) {
+    const res = await ctx.fetchImpl(url, {
+      method,
+      headers: init.headers,
+      body,
+      redirect: "manual",
+      signal: AbortSignal.timeout(ctx.options.http.timeoutMs)
+    });
+    const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+    if (!location) {
+      return res;
+    }
+    if (hop >= MAX_REDIRECTS) {
+      throw new Error(`too many redirects (> ${MAX_REDIRECTS})`);
+    }
+    const next = new URL(location, url);
+    assertAllowed(next.href, ctx); // re-check the redirect target
+    // 303 (and 301/302 from a non-idempotent method) → GET with no body.
+    if (
+      res.status === 303 ||
+      ((res.status === 301 || res.status === 302) && method !== "GET" && method !== "HEAD")
+    ) {
+      method = "GET";
+      body = undefined;
+    }
+    url = next;
+    await res.body?.cancel().catch(() => {});
+  }
+}
+
+/** Read a response body, capped at MAX_RESPONSE_BYTES, parsing JSON when applicable. */
+async function readBody(
+  res: Response
+): Promise<{ body: unknown; bodyText: string; truncated: boolean }> {
+  let text = "";
+  let truncated = false;
+  const reader = res.body?.getReader();
+  if (reader) {
+    const chunks: Uint8Array[] = [];
+    let received = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      received += value.byteLength;
+      if (received > MAX_RESPONSE_BYTES) {
+        const keep = value.byteLength - (received - MAX_RESPONSE_BYTES);
+        chunks.push(value.subarray(0, Math.max(0, keep)));
+        truncated = true;
+        await reader.cancel();
+        break;
+      }
+      chunks.push(value);
+    }
+    text = Buffer.concat(chunks.map((c) => Buffer.from(c))).toString("utf8");
+  } else {
+    text = await res.text();
+  }
   const contentType = res.headers.get("content-type") ?? "";
-  if (contentType.includes("application/json") && bodyText.length > 0) {
+  let body: unknown = text;
+  if (contentType.includes("application/json") && text.length > 0 && !truncated) {
     try {
-      return { body: JSON.parse(bodyText), bodyText };
+      body = JSON.parse(text);
     } catch {
-      /* fall through to text */
+      /* keep as text */
     }
   }
-  return { body: bodyText, bodyText };
+  return { body, bodyText: text, truncated };
 }
 
 export const HTTP_TOOLS: readonly ToolSpec[] = [
@@ -100,7 +204,7 @@ export const HTTP_TOOLS: readonly ToolSpec[] = [
     name: "http_request",
     group: "http",
     description:
-      "Make an HTTP request (GET/POST/PUT/PATCH/DELETE/…) and return the status, response headers, and parsed body. JSON responses are parsed automatically.",
+      "Make an HTTP request (GET/POST/PUT/PATCH/DELETE/…) and return the status, response headers, and parsed body. JSON responses are parsed automatically. Redirects are followed but re-checked against the SSRF guard; response bodies are capped at 10 MB.",
     input: {
       url: { type: "string", description: "Absolute http(s) URL." },
       method: {
@@ -109,7 +213,12 @@ export const HTTP_TOOLS: readonly ToolSpec[] = [
         enum: METHODS,
         description: "HTTP method (default GET)."
       },
-      headers: { type: "object", optional: true, properties: {}, description: "Request headers." },
+      headers: {
+        type: "record",
+        optional: true,
+        valueType: "string",
+        description: "Request headers (e.g. Authorization, Content-Type)."
+      },
       body: {
         type: "string",
         optional: true,
@@ -120,24 +229,21 @@ export const HTTP_TOOLS: readonly ToolSpec[] = [
       const url = assertAllowed(reqString(args, "url"), ctx);
       const method = typeof args.method === "string" ? args.method.toUpperCase() : "GET";
       const headers = asHeaders(args.headers);
-      const body = typeof args.body === "string" ? args.body : undefined;
-      const res = await ctx.fetchImpl(url, {
-        method,
-        headers,
-        body: method === "GET" || method === "HEAD" ? undefined : body,
-        signal: AbortSignal.timeout(ctx.options.http.timeoutMs)
-      });
+      const rawBody = typeof args.body === "string" ? args.body : undefined;
+      const body = method === "GET" || method === "HEAD" ? undefined : rawBody;
+      const res = await fetchGuarded(url, { method, headers, body }, ctx);
       const responseHeaders = Object.fromEntries(res.headers.entries());
-      const { body: parsed, bodyText } = await readBody(res);
+      const { body: parsed, bodyText, truncated } = await readBody(res);
       return json(
         {
           status: res.status,
           statusText: res.statusText,
           ok: res.ok,
           headers: responseHeaders,
-          body: parsed
+          body: parsed,
+          truncated
         },
-        `${method} ${url.href} → ${res.status} ${res.statusText}\n\n${bodyText.slice(0, 4000)}`
+        `${method} ${url.href} → ${res.status} ${res.statusText}${truncated ? " (body truncated at 10 MB)" : ""}\n\n${bodyText.slice(0, 4000)}`
       );
     }
   },
@@ -150,16 +256,16 @@ export const HTTP_TOOLS: readonly ToolSpec[] = [
       url: { type: "string", description: "GraphQL endpoint URL." },
       query: { type: "string", description: "The GraphQL query or mutation document." },
       variables: {
-        type: "object",
+        type: "record",
         optional: true,
-        properties: {},
+        valueType: "any",
         description: "Query variables."
       },
       headers: {
-        type: "object",
+        type: "record",
         optional: true,
-        properties: {},
-        description: "Extra request headers."
+        valueType: "string",
+        description: "Extra request headers (e.g. Authorization)."
       }
     },
     handler: async (args, ctx) => {
@@ -167,16 +273,19 @@ export const HTTP_TOOLS: readonly ToolSpec[] = [
       const query = reqString(args, "query");
       const variables =
         typeof args.variables === "object" && args.variables !== null ? args.variables : {};
-      const res = await ctx.fetchImpl(url, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          accept: "application/json",
-          ...asHeaders(args.headers)
+      const res = await fetchGuarded(
+        url,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json",
+            ...asHeaders(args.headers)
+          },
+          body: JSON.stringify({ query, variables })
         },
-        body: JSON.stringify({ query, variables }),
-        signal: AbortSignal.timeout(ctx.options.http.timeoutMs)
-      });
+        ctx
+      );
       const { body, bodyText } = await readBody(res);
       const payload = (typeof body === "object" && body !== null ? body : {}) as {
         data?: unknown;

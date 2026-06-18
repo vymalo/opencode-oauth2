@@ -17,10 +17,13 @@ function decode(input: string, format: Format): unknown {
     case "toml":
       return TOML.parse(input);
     case "csv": {
+      // dynamicTyping is intentionally OFF: it would coerce "00123" → 123 (losing
+      // leading zeros) and round 64-bit IDs, silently corrupting the data. Keep
+      // every field as a string for a faithful conversion.
       const parsed = Papa.parse(input.trim(), {
         header: true,
         skipEmptyLines: true,
-        dynamicTyping: true
+        dynamicTyping: false
       });
       if (parsed.errors.length > 0) {
         throw new Error(`CSV parse error: ${parsed.errors[0].message}`);

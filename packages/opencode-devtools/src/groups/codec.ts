@@ -2,6 +2,9 @@ import { deflateRawSync, gunzipSync, gzipSync, inflateRawSync } from "node:zlib"
 
 import { json, reqString, text, type ToolSpec } from "../tool-spec.js";
 
+// Cap decompressed output so a small gzip/deflate "bomb" can't exhaust memory.
+const MAX_DECOMPRESSED_BYTES = 50_000_000; // 50 MB
+
 export const CODEC_TOOLS: readonly ToolSpec[] = [
   {
     name: "codec_base64",
@@ -42,7 +45,13 @@ export const CODEC_TOOLS: readonly ToolSpec[] = [
       if (mode === "encode") {
         return text(Buffer.from(input, "utf8").toString("hex"));
       }
-      return text(Buffer.from(input.replace(/\s+/g, ""), "hex").toString("utf8"));
+      // Buffer.from(…, "hex") silently truncates at the first bad nibble — reject
+      // odd-length or non-hex input instead of returning a corrupted result.
+      const cleaned = input.replace(/\s+/g, "");
+      if (cleaned.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(cleaned)) {
+        throw new Error("invalid hex: expected an even number of [0-9a-f] digits");
+      }
+      return text(Buffer.from(cleaned, "hex").toString("utf8"));
     }
   },
   {
@@ -136,7 +145,9 @@ export const CODEC_TOOLS: readonly ToolSpec[] = [
         );
       }
       const compressed = Buffer.from(input, "base64");
-      const out = algorithm === "gzip" ? gunzipSync(compressed) : inflateRawSync(compressed);
+      const opts = { maxOutputLength: MAX_DECOMPRESSED_BYTES };
+      const out =
+        algorithm === "gzip" ? gunzipSync(compressed, opts) : inflateRawSync(compressed, opts);
       return text(out.toString("utf8"));
     }
   }

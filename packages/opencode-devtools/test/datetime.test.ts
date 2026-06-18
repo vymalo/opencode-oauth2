@@ -54,6 +54,12 @@ describe("datetime group", () => {
     expect(rel.text).toContain("hour");
   });
 
+  it("rejects an invalid output timezone in format", async () => {
+    await expect(
+      run("datetime_format", { input: "2026-06-18T00:00:00Z", format: "iso", zone: "Not/AZone" })
+    ).rejects.toThrow(/not a valid/);
+  });
+
   it("computes a duration diff", async () => {
     const r = await run("datetime_diff", {
       from: "2026-01-01T00:00:00Z",

@@ -59,6 +59,12 @@ function fieldToZod(field: Field): ZodBuilder {
         buildShape(field.properties) as unknown as Parameters<typeof z.object>[0]
       ) as unknown as ZodBuilder;
       break;
+    case "record":
+      schema = z.record(
+        z.string(),
+        field.valueType === "any" ? z.any() : z.string()
+      ) as unknown as ZodBuilder;
+      break;
   }
   if (field.description) {
     schema = schema.describe(field.description);

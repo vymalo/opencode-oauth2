@@ -67,4 +67,14 @@ describe("math group", () => {
       /not a valid/
     );
   });
+
+  it("rejects a value with any illegal digit for the radix (no silent truncation)", async () => {
+    // "1012" in base 2 must error, not silently parse the "101" prefix as 5.
+    await expect(run("math_base", { value: "1012", fromBase: 2, toBase: 10 })).rejects.toThrow(
+      /not a valid/
+    );
+    await expect(run("math_base", { value: "12g8", fromBase: 16, toBase: 10 })).rejects.toThrow(
+      /not a valid/
+    );
+  });
 });

@@ -23,6 +23,13 @@ describe("codec group", () => {
     expect(dec.text).toBe("hi");
   });
 
+  it("rejects malformed hex instead of truncating", async () => {
+    await expect(run("codec_hex", { mode: "decode", input: "686z" })).rejects.toThrow(
+      /invalid hex/
+    );
+    await expect(run("codec_hex", { mode: "decode", input: "abc" })).rejects.toThrow(/invalid hex/);
+  });
+
   it("url-encodes components and whole urls", async () => {
     const comp = await run("codec_url", { mode: "encode", input: "a b&c" });
     expect(comp.text).toBe("a%20b%26c");

@@ -30,6 +30,16 @@ function uuidV7(ctx: ToolContext): string {
 }
 
 // ─── ULID (Crockford base32, 48-bit time + 80-bit randomness) ────────────────
+const MAX_COUNT = 1000;
+
+/** Clamp a requested identifier count to [1, MAX_COUNT] so a caller can't ask for millions. */
+function clampCount(raw: unknown): number {
+  if (typeof raw !== "number" || Number.isNaN(raw)) {
+    return 1;
+  }
+  return Math.min(MAX_COUNT, Math.max(1, Math.floor(raw)));
+}
+
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 function ulid(ctx: ToolContext): string {
@@ -126,7 +136,7 @@ export const CRYPTO_TOOLS: readonly ToolSpec[] = [
     },
     handler: (args, ctx) => {
       const version = args.version === "7" ? "7" : "4";
-      const count = typeof args.count === "number" ? Math.max(1, Math.floor(args.count)) : 1;
+      const count = clampCount(args.count);
       const gen = version === "7" ? () => uuidV7(ctx) : () => uuidV4(ctx);
       const ids = Array.from({ length: count }, gen);
       return count === 1 ? text(ids[0]) : json({ version, ids }, ids.join("\n"));
@@ -141,7 +151,7 @@ export const CRYPTO_TOOLS: readonly ToolSpec[] = [
       count: { type: "number", optional: true, description: "How many to generate (default 1)." }
     },
     handler: (args, ctx) => {
-      const count = typeof args.count === "number" ? Math.max(1, Math.floor(args.count)) : 1;
+      const count = clampCount(args.count);
       const ids = Array.from({ length: count }, () => ulid(ctx));
       return count === 1 ? text(ids[0]) : json({ ids }, ids.join("\n"));
     }

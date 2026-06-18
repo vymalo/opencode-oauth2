@@ -47,6 +47,13 @@ describe("crypto group", () => {
     }
   });
 
+  it("caps the requested id count (DoS guard)", async () => {
+    const r = await run("crypto_uuid", { count: 50000 });
+    expect((r as { data: { ids: string[] } }).data.ids).toHaveLength(1000);
+    const u = await run("crypto_ulid", { count: 999999 });
+    expect((u as { data: { ids: string[] } }).data.ids).toHaveLength(1000);
+  });
+
   it("generates ULIDs", async () => {
     const r = await run("crypto_ulid", {});
     expect(r.text).toMatch(ULID);
