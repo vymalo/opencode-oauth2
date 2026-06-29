@@ -15,6 +15,7 @@ All eleven workspace packages move on **one version line** and are released toge
 ### Documentation
 
 - **devtools:** New [`docs/devtools.md`](docs/devtools.md) (tool reference, groups, security model, config) and [`docs/recommended-mcps.md`](docs/recommended-mcps.md) — a guide to the mature third-party MCP servers we deliberately **adopt rather than rebuild** (memory, android/iOS, database), per the suite's "don't duplicate a good existing MCP" principle.
+- **browser / all plugins:** Four new ADRs capturing the load-bearing decisions behind the 0.8.1 bridge/logging fixes — [ADR-0005](docs/adr/0005-atomic-file-writes-per-writer-temp.md) (atomic on-disk writes: per-writer temp + rename), [ADR-0006](docs/adr/0006-bridge-token-source-of-truth.md) (`bridge.json` as token source-of-truth: host-only write + reload-on-mismatch), [ADR-0007](docs/adr/0007-bridge-handshake-rejection.md) (handshake rejection: explicit reject frame, slow-retry not dormant, fingerprint logging — incl. the dormant→slow-retry reversal), and [ADR-0008](docs/adr/0008-trace-log-tier.md) (`trace` log tier gated by OpenCode `DEBUG`). Cross-linked from `browser.md`, `architecture.md`, `troubleshooting.md`, and the ADR index.
 
 ## [0.8.1] — 2026-06-17
 

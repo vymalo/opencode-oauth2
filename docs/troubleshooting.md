@@ -314,7 +314,7 @@ The model-sync cache writes atomically: write a temp file, then `rename` it onto
 - An `ERROR sync_failed` whose `error` is an `ENOENT` on a `*.json.tmp -> *.json` rename.
 - Multiple `creating instance` / `ratelimit_plugin_initialized` lines clustered within the same second just before it (the tell-tale parallel boot).
 
-**Fix.** Upgrade to a build that includes the per-writer temp-name fix (temp files are now suffixed with `pid` + a uuid and unlinked on failure, so concurrent writers can't collide). No config change needed. If you're pinned to an older version and can't upgrade, launching projects one at a time avoids the race.
+**Fix.** Upgrade to a build that includes the per-writer temp-name fix (temp files are now suffixed with `pid` + a uuid and unlinked on failure, so concurrent writers can't collide — see [ADR-0005](adr/0005-atomic-file-writes-per-writer-temp.md)). No config change needed. If you're pinned to an older version and can't upgrade, launching projects one at a time avoids the race.
 
 ## Provenance badge missing on npm
 

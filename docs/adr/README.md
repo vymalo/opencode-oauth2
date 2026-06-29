@@ -29,3 +29,7 @@ Each record is `NNNN-kebab-title.md`, numbered in order, and follows a light
 | [0002](0002-code-index-embedded-duckdb-not-graph-db-server.md) | Code index store: embedded DuckDB, not a graph-DB server | Accepted (experimental) |
 | [0003](0003-code-index-content-addressed-blob-per-branch-manifest.md) | Code index: content-addressed by git blob, scoped per branch | Accepted (experimental) |
 | [0004](0004-code-index-tree-sitter-sound-but-partial-resolution.md) | Code index call graph: tree-sitter only, "sound but partial" | Accepted (experimental) |
+| [0005](0005-atomic-file-writes-per-writer-temp.md) | Atomic on-disk state: per-writer temp file + rename | Accepted |
+| [0006](0006-bridge-token-source-of-truth.md) | Bridge token: `bridge.json` as single source of truth (host-only write, reload-on-mismatch) | Accepted |
+| [0007](0007-bridge-handshake-rejection.md) | Bridge handshake rejection: explicit reject frame, slow-retry, fingerprint logging | Accepted |
+| [0008](0008-trace-log-tier.md) | A `trace` log tier, unlocked by OpenCode's `DEBUG` | Accepted |
